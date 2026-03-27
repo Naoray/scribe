@@ -14,7 +14,20 @@ Scribe fixes this with a shared `scribe.toml` in a GitHub repo. Point your teamm
 
 ## How it works
 
-You maintain a loadout — a list of skills and versions in a GitHub repo:
+A shared `scribe.toml` in a GitHub repo defines the team's skill stack. Anyone can contribute a skill — each person's skills live in their own folder, so it's clear who owns what:
+
+```
+ArtistfyHQ/team-skills/
+  scribe.toml
+  krishan/
+    deploy/
+      SKILL.md
+    code-review/
+      SKILL.md
+  markus/
+    frontend-prs/
+      SKILL.md
+```
 
 ```toml
 # ArtistfyHQ/team-skills/scribe.toml
@@ -22,10 +35,14 @@ You maintain a loadout — a list of skills and versions in a GitHub repo:
 name = "artistfy"
 
 [skills]
+# External packages
 "gstack"       = { source = "github:garrytan/gstack@v0.12.9.0" }
 "laravel-init" = { source = "github:Naoray/scribe-skills@v1.0.0", path = "skills/laravel-init" }
-"code-review"  = { source = "github:Naoray/scribe-skills@v1.0.0", path = "skills/code-review" }
-"deploy"       = { source = "github:ArtistfyHQ/team-skills@main", path = "skills/deploy" }
+
+# Team-authored skills — path implies maintainer
+"deploy"        = { source = "github:ArtistfyHQ/team-skills@main", path = "krishan/deploy" }
+"code-review"   = { source = "github:ArtistfyHQ/team-skills@main", path = "krishan/code-review" }
+"frontend-prs"  = { source = "github:ArtistfyHQ/team-skills@main", path = "markus/frontend-prs" }
 ```
 
 Your teammates connect once:
@@ -47,21 +64,26 @@ scribe add gstack                                   # Add an installed skill to 
 scribe add github:garrytan/gstack@v0.12.9.0         # Add by source directly
 ```
 
-`scribe list` shows the full picture:
+`scribe add` puts your skill in your `/{github-username}/` folder automatically and registers it in `scribe.toml`. If two people add a skill with the same name, the first registration wins in `scribe list`.
+
+`scribe list` shows the full picture including who maintains each skill:
 
 ```
 Team: artistfy (ArtistfyHQ/team-skills) · Last sync: 2 hours ago
 
-SKILL                  VERSION         STATUS      TARGETS
-gstack                 v0.12.9.0       ✓ current   claude
-laravel-init           v1.0.0          ⬆ outdated  claude, cursor
-code-review            v1.0.0          ✓ current   claude, cursor
-deploy                 main@a3f2c1b    ● missing   claude
-my-custom-skill        —               ◇ extra     claude
+SKILL                  VERSION         STATUS      TARGETS         MAINTAINER
+gstack                 v0.12.9.0       ✓ current   claude          garrytan
+laravel-init           v1.0.0          ⬆ outdated  claude, cursor  Naoray
+deploy                 main@a3f2c1b    ✓ current   claude          krishan
+code-review            v1.0.0          ✓ current   claude          krishan
+frontend-prs           main@c9f1d2e    ● missing   claude          markus
+my-custom-skill        —               ◇ extra     claude          —
 
-Summary: 2 current · 1 outdated · 1 missing · 1 extra
+Summary: 3 current · 1 outdated · 1 missing · 1 extra
 Run `scribe sync` to install missing and update outdated skills.
 ```
+
+The maintainer is inferred from the folder path — no extra config needed. For external packages it comes from the GitHub repo owner. A good team-skills repo pairs this with a [CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners) file so PRs touching someone's folder go to them for review.
 
 ## Agent-friendly
 
