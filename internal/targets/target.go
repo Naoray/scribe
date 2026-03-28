@@ -1,0 +1,10 @@
+package targets
+
+// Target links a skill from the canonical store into a specific AI tool's directory.
+type Target interface {
+	// Name returns the tool identifier (e.g. "claude", "cursor").
+	Name() string
+	// Install creates a link from the agent's expected directory into canonicalDir
+	// (~/.scribe/skills/<name>). Returns the paths of the links created.
+	Install(skillName, canonicalDir string) (paths []string, err error)
+}
