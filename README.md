@@ -154,7 +154,7 @@ scribe list --json
 Output:
 ```json
 {
-  "team_repo": "ArtistfyHQ/team-skills",
+  "team_repos": ["ArtistfyHQ/team-skills"],
   "skills": [
     { "name": "gstack", "action": "skipped", "status": "current", "version": "v0.12.9.0" },
     { "name": "laravel-init", "action": "updated", "version": "v1.1.0" }
@@ -191,8 +191,7 @@ Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specificati
 - Private repo support via `gh auth token`
 - `--json` flag for CI/agent use
 
-**In progress:**
-- `scribe connect` — connect to a team repo with interactive setup ([#8](https://github.com/Naoray/scribe/issues/8) — see issues for open work)
+- `scribe connect` — connect to a team repo with interactive setup
 
 **Coming later:**
 - `scribe add` — add a skill to the team loadout

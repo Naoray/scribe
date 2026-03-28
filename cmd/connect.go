@@ -108,13 +108,13 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nsyncing skills...\n\n")
+	isTTY := isatty.IsTerminal(os.Stdout.Fd())
 	for _, teamRepo := range cfg.TeamRepos {
 		if err := syncer.Run(ctx, teamRepo, st); err != nil {
-			isTTY := isatty.IsTerminal(os.Stdout.Fd())
 			fmt.Fprintf(os.Stderr, "warning: sync failed for %s: %v\n", teamRepo, err)
 			fmt.Fprintf(os.Stderr, "run `scribe sync` to retry\n")
 			if !isTTY {
-				os.Exit(1)
+				return fmt.Errorf("sync failed: %w", err)
 			}
 			return nil
 		}
