@@ -37,7 +37,12 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	return connectToRepo(repo)
+}
 
+// connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.
+// Shared by the connect command and create registry command.
+func connectToRepo(repo string) error {
 	owner, name, err := parseOwnerRepo(repo)
 	if err != nil {
 		return err
