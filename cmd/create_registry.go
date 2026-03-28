@@ -81,13 +81,12 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	}
 	client := gh.NewClient(cfg.Token)
 
-	description := fmt.Sprintf("%s dev team skill stack", titleCase(team))
-	_, err = client.CreateRepo(ctx, owner, repo, description, private)
+	desc := teamDescription(team)
+	_, err = client.CreateRepo(ctx, owner, repo, desc, private)
 	if err != nil {
 		if !errors.Is(err, gh.ErrRepoExists) {
 			return err
 		}
-		// Repo already exists.
 		if !isTTY {
 			return fmt.Errorf("repository %s/%s already exists", owner, repo)
 		}
@@ -100,11 +99,10 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check if scribe.toml already exists in the repo.
 	repoSlug := owner + "/" + repo
 	hasManifest, err := client.FileExists(ctx, owner, repo, "scribe.toml", "HEAD")
 	if err != nil {
-		// If the repo is empty (no commits), FileExists will 404 on HEAD — treat as no manifest.
+		// Empty repos (no commits) 404 on HEAD — treat as no manifest.
 		hasManifest = false
 	}
 
@@ -120,7 +118,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nRegistry created: %s\n\n", repoSlug)
-	return connectToRepo(repoSlug)
+	return connectToRepo(repoSlug, cfg, client)
 }
 
 // notEmpty returns a huh validation function that rejects empty strings.
@@ -133,18 +131,22 @@ func notEmpty(field string) func(string) error {
 	}
 }
 
+func teamDescription(team string) string {
+	return fmt.Sprintf("%s dev team skill stack", titleCase(team))
+}
+
 // scaffoldTOML generates the initial scribe.toml content for a new registry.
 func scaffoldTOML(team string) string {
 	return fmt.Sprintf(`[team]
 name = %q
-description = "%s dev team skill stack"
+description = %q
 
 # Add skills here. Format:
 # "skill-name" = { source = "github:owner/repo@version" }
 # "my-skill"   = { source = "github:Owner/repo@main", path = "username/my-skill" }
 
 [skills]
-`, team, titleCase(team))
+`, team, teamDescription(team))
 }
 
 // scaffoldREADME generates the initial README.md content for a new registry.

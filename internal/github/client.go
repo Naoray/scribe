@@ -132,7 +132,6 @@ func (c *Client) CreateRepo(ctx context.Context, owner, name, description string
 		Name:        github.Ptr(name),
 		Description: github.Ptr(description),
 		Private:     github.Ptr(private),
-		AutoInit:    github.Ptr(false),
 	}
 
 	created, _, err := c.gh.Repositories.Create(ctx, org, repo)
@@ -152,7 +151,6 @@ func (c *Client) CreateRepo(ctx context.Context, owner, name, description string
 }
 
 // CreateInitialCommit pushes an atomic multi-file initial commit via the Git Trees API.
-// files maps file paths (e.g. "scribe.toml") to their content.
 func (c *Client) CreateInitialCommit(ctx context.Context, owner, repo string, files map[string]string, message string) error {
 	// Create blobs for each file.
 	var entries []*github.TreeEntry
