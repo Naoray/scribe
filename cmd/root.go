@@ -6,10 +6,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Version is set at build time via ldflags.
+var Version = "dev"
+
 var rootCmd = &cobra.Command{
-	Use:   "scribe",
-	Short: "Team skill sync for AI coding agents",
-	Long:  "Scribe syncs AI coding agent skills across your team via a shared GitHub loadout.",
+	Use:     "scribe",
+	Short:   "Team skill sync for AI coding agents",
+	Long:    "Scribe syncs AI coding agent skills across your team via a shared GitHub loadout.",
+	Version: Version,
 }
 
 func Execute() {

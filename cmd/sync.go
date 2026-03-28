@@ -138,7 +138,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	fmt.Fprintf(os.Stderr, "syncing %s...\n\n", teamRepo)
+	if !useJSON {
+		fmt.Fprintf(os.Stderr, "syncing %s...\n\n", teamRepo)
+	}
 
 	if err := syncer.Run(context.Background(), teamRepo, st); err != nil {
 		return err
