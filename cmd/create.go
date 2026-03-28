@@ -7,3 +7,7 @@ var createCmd = &cobra.Command{
 	Short: "Create team resources",
 	Long:  "Create team resources like skill registries.",
 }
+
+func init() {
+	createCmd.AddCommand(createRegistryCmd)
+}
