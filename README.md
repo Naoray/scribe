@@ -60,6 +60,16 @@ scribe list        # see what's installed and what's outdated
 
 ### For the team lead setting up the shared repo
 
+**Option A — Let Scribe scaffold it (recommended):**
+
+```bash
+scribe create registry
+# Interactive prompts for team name, GitHub org, repo name, visibility
+# Creates the repo, pushes scribe.toml + README, and connects automatically
+```
+
+**Option B — Manual setup:**
+
 1. Create a GitHub repo (e.g., `ArtistfyHQ/team-skills`) — can be private
 2. Create `scribe.toml` at the root:
 
@@ -97,7 +107,7 @@ ArtistfyHQ/team-skills/
 | `scribe sync` | Install missing skills, update outdated ones |
 | `scribe list` | Show all skills: what's installed, what's outdated, what's missing |
 | `scribe add <source>` | Add a skill to the team's scribe.toml *(coming soon)* |
-| `scribe create registry` | Create a new team skills registry on GitHub and connect to it |
+| `scribe create registry` | Scaffold a new team skills registry on GitHub and connect to it |
 
 ### scribe list output
 
