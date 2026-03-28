@@ -15,7 +15,6 @@ type State struct {
 }
 
 type TeamState struct {
-	Repo     string    `json:"repo"`
 	LastSync time.Time `json:"last_sync,omitempty"`
 }
 
@@ -95,11 +94,6 @@ func (s *State) Save() error {
 		return fmt.Errorf("save state: %w", err)
 	}
 	return nil
-}
-
-// SetTeam records which team repo this machine is connected to.
-func (s *State) SetTeam(repo string) {
-	s.Team.Repo = repo
 }
 
 // RecordSync updates the last sync timestamp.

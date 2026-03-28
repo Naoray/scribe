@@ -1,0 +1,160 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/charmbracelet/huh"
+	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
+
+	"github.com/Naoray/scribe/internal/config"
+	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/targets"
+)
+
+var connectCmd = &cobra.Command{
+	Use:   "connect [owner/repo]",
+	Short: "Connect to a team skills repo",
+	Long: `Connect to a team skills repo so Scribe can sync your local skills.
+
+The repo must contain a scribe.toml with a [team] section.
+
+Examples:
+  scribe connect ArtistfyHQ/team-skills
+  scribe connect                          # interactive prompt`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runConnect,
+}
+
+func runConnect(cmd *cobra.Command, args []string) error {
+	repo, err := resolveRepo(args)
+	if err != nil {
+		return err
+	}
+
+	// 1. Validate format.
+	owner, name, err := parseOwnerRepo(repo)
+	if err != nil {
+		return err
+	}
+
+	// 2. Validate repo exists and has a [team] scribe.toml.
+	ctx := context.Background()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	client := gh.NewClient(cfg.Token)
+	raw, err := client.FetchFile(ctx, owner, name, "scribe.toml", "HEAD")
+	if err != nil {
+		return fmt.Errorf("could not access %s: %w", repo, err)
+	}
+
+	m, err := manifest.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid scribe.toml in %s: %w", repo, err)
+	}
+	if !m.IsLoadout() {
+		return fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
+	}
+
+	// 3. Dedup check.
+	for _, existing := range cfg.TeamRepos {
+		if existing == repo {
+			fmt.Printf("Already connected to %s\n", repo)
+			return nil
+		}
+	}
+
+	// 4. Append and save.
+	cfg.TeamRepos = append(cfg.TeamRepos, repo)
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	fmt.Printf("Connected to %s\n", repo)
+
+	// 5. Auto-sync all registries.
+	st, err := state.Load()
+	if err != nil {
+		return err
+	}
+
+	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
+	syncer := &sync.Syncer{
+		Client:  client,
+		Targets: tgts,
+		Emit: func(msg any) {
+			switch m := msg.(type) {
+			case sync.SkillInstalledMsg:
+				verb := "installed"
+				if m.Updated {
+					verb = "updated"
+				}
+				fmt.Printf("  %-20s %s %s\n", m.Name, verb, m.Version)
+			case sync.SkillErrorMsg:
+				fmt.Fprintf(os.Stderr, "  %-20s error: %v\n", m.Name, m.Err)
+			case sync.SyncCompleteMsg:
+				fmt.Printf("\ndone: %d installed, %d updated, %d current, %d failed\n",
+					m.Installed, m.Updated, m.Skipped, m.Failed)
+			}
+		},
+	}
+
+	fmt.Printf("\nsyncing skills...\n\n")
+	for _, teamRepo := range cfg.TeamRepos {
+		if err := syncer.Run(ctx, teamRepo, st); err != nil {
+			isTTY := isatty.IsTerminal(os.Stdout.Fd())
+			fmt.Fprintf(os.Stderr, "warning: sync failed for %s: %v\n", teamRepo, err)
+			fmt.Fprintf(os.Stderr, "run `scribe sync` to retry\n")
+			if !isTTY {
+				os.Exit(1)
+			}
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// resolveRepo returns the owner/repo string from args or an interactive prompt.
+func resolveRepo(args []string) (string, error) {
+	if len(args) > 0 {
+		return args[0], nil
+	}
+
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
+		return "", fmt.Errorf("no repo specified — usage: scribe connect <owner/repo>")
+	}
+
+	var repo string
+	err := huh.NewInput().
+		Title("Team skills repo").
+		Placeholder("owner/repo").
+		Validate(func(s string) error {
+			_, _, err := parseOwnerRepo(s)
+			return err
+		}).
+		Value(&repo).
+		Run()
+	if err != nil {
+		return "", err
+	}
+	return repo, nil
+}
+
+// parseOwnerRepo validates and splits an "owner/repo" string.
+func parseOwnerRepo(s string) (owner, repo string, err error) {
+	s = strings.TrimSpace(s)
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo (e.g. ArtistfyHQ/team-skills)", s)
+	}
+	return parts[0], parts[1], nil
+}

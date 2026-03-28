@@ -39,12 +39,8 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	teamRepo := cfg.TeamRepo
-	if teamRepo == "" {
-		teamRepo = st.Team.Repo
-	}
-	if teamRepo == "" {
-		return fmt.Errorf("not initialized — run `scribe init <owner/repo>` first")
+	if len(cfg.TeamRepos) == 0 {
+		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
 
 	client := gh.NewClient(cfg.Token)
@@ -66,7 +62,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		Error   string `json:"error,omitempty"`
 	}
 	var jsonResults []skillResult
-	var jsonSummary sync.SyncCompleteMsg
+	totalSummary := sync.SyncCompleteMsg{}
 
 	syncer := &sync.Syncer{
 		Client:  client,
@@ -129,34 +125,39 @@ func runSync(cmd *cobra.Command, args []string) error {
 				}
 
 			case sync.SyncCompleteMsg:
-				jsonSummary = m
-				if !useJSON {
-					fmt.Printf("\ndone: %d installed, %d updated, %d current, %d failed\n",
-						m.Installed, m.Updated, m.Skipped, m.Failed)
-				}
+				totalSummary.Installed += m.Installed
+				totalSummary.Updated += m.Updated
+				totalSummary.Skipped += m.Skipped
+				totalSummary.Failed += m.Failed
 			}
 		},
 	}
 
-	if !useJSON {
-		fmt.Fprintf(os.Stderr, "syncing %s...\n\n", teamRepo)
-	}
+	for _, teamRepo := range cfg.TeamRepos {
+		if !useJSON {
+			fmt.Fprintf(os.Stderr, "syncing %s...\n\n", teamRepo)
+		}
 
-	if err := syncer.Run(context.Background(), teamRepo, st); err != nil {
-		return err
+		if err := syncer.Run(context.Background(), teamRepo, st); err != nil {
+			return err
+		}
 	}
 
 	if useJSON {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"team_repo": teamRepo,
-			"skills":    jsonResults,
+			"team_repos": cfg.TeamRepos,
+			"skills":     jsonResults,
 			"summary": map[string]int{
-				"installed": jsonSummary.Installed,
-				"updated":   jsonSummary.Updated,
-				"skipped":   jsonSummary.Skipped,
-				"failed":    jsonSummary.Failed,
+				"installed": totalSummary.Installed,
+				"updated":   totalSummary.Updated,
+				"skipped":   totalSummary.Skipped,
+				"failed":    totalSummary.Failed,
 			},
 		})
 	}
+
+	fmt.Printf("\ndone: %d installed, %d updated, %d current, %d failed\n",
+		totalSummary.Installed, totalSummary.Updated, totalSummary.Skipped, totalSummary.Failed)
+
 	return nil
 }

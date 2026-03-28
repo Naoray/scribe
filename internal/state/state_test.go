@@ -27,7 +27,6 @@ func TestSaveAndLoad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	s, _ := state.Load()
-	s.SetTeam("ArtistfyHQ/team-skills")
 	s.RecordSync()
 	s.RecordInstall("gstack", state.InstalledSkill{
 		Version: "v0.12.9.0",
@@ -45,9 +44,6 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatalf("Load after save: %v", err)
 	}
 
-	if loaded.Team.Repo != "ArtistfyHQ/team-skills" {
-		t.Errorf("team repo: got %q", loaded.Team.Repo)
-	}
 	if loaded.Team.LastSync.IsZero() {
 		t.Error("expected LastSync to be set")
 	}
@@ -65,12 +61,11 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestAtomicWrite(t *testing.T) {
-	// Verify that the .tmp file is cleaned up after a successful save.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	s, _ := state.Load()
-	s.SetTeam("ArtistfyHQ/team-skills")
+	s.RecordSync()
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}

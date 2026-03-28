@@ -41,13 +41,12 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	teamRepo := cfg.TeamRepo
-	if teamRepo == "" {
-		teamRepo = st.Team.Repo
+	if len(cfg.TeamRepos) == 0 {
+		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
-	if teamRepo == "" {
-		return fmt.Errorf("not initialized — run `scribe init <owner/repo>` first")
-	}
+
+	// For now: show first registry's skills (multi-registry list is a TODO).
+	teamRepo := cfg.TeamRepos[0]
 
 	client := gh.NewClient(cfg.Token)
 	syncer := &sync.Syncer{Client: client, Targets: []targets.Target{}}
@@ -60,7 +59,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	useJSON := listJSON || !isatty.IsTerminal(os.Stdout.Fd())
 
 	if useJSON {
-		return printListJSON(teamRepo, statuses)
+		return printListJSON(cfg.TeamRepos, statuses)
 	}
 	return printListTable(teamRepo, st, statuses)
 }
@@ -98,7 +97,7 @@ func printListTable(teamRepo string, st *state.State, statuses []sync.SkillStatu
 	return nil
 }
 
-func printListJSON(teamRepo string, statuses []sync.SkillStatus) error {
+func printListJSON(teamRepos []string, statuses []sync.SkillStatus) error {
 	type skillJSON struct {
 		Name       string   `json:"name"`
 		Status     string   `json:"status"`
@@ -128,8 +127,8 @@ func printListJSON(teamRepo string, statuses []sync.SkillStatus) error {
 
 	counts := countStatuses(statuses)
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"team_repo": teamRepo,
-		"skills":    skills,
+		"team_repos": teamRepos,
+		"skills":     skills,
 		"summary": map[string]int{
 			"current":  counts[sync.StatusCurrent],
 			"outdated": counts[sync.StatusOutdated],
