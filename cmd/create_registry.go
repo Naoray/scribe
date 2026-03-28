@@ -112,7 +112,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 			"scribe.toml": scaffoldTOML(team),
 			"README.md":   scaffoldREADME(team, repoSlug),
 		}
-		if err := client.CreateInitialCommit(ctx, owner, repo, files, "Initialize skill registry"); err != nil {
+		if err := client.PushFiles(ctx, owner, repo, files, "Initialize skill registry"); err != nil {
 			return fmt.Errorf("push initial commit: %w", err)
 		}
 	}

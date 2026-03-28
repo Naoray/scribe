@@ -150,8 +150,22 @@ func (c *Client) CreateRepo(ctx context.Context, owner, name, description string
 	return created, nil
 }
 
-// CreateInitialCommit pushes an atomic multi-file initial commit via the Git Trees API.
-func (c *Client) CreateInitialCommit(ctx context.Context, owner, repo string, files map[string]string, message string) error {
+// PushFiles pushes files to a GitHub repo via the Git Trees API.
+// Handles both empty repos (initial commit) and repos with existing content.
+func (c *Client) PushFiles(ctx context.Context, owner, repo string, files map[string]string, message string) error {
+	// Check for existing HEAD to determine if this is an initial commit.
+	var parentSHA, baseTreeSHA string
+	ref, _, err := c.gh.Git.GetRef(ctx, owner, repo, "refs/heads/main")
+	if err == nil {
+		parentSHA = ref.GetObject().GetSHA()
+		// Fetch the tree SHA from the parent commit so new files merge with existing ones.
+		parentCommit, _, err := c.gh.Git.GetCommit(ctx, owner, repo, parentSHA)
+		if err != nil {
+			return wrapErr(err, fmt.Sprintf("get commit %s/%s@%s", owner, repo, parentSHA))
+		}
+		baseTreeSHA = parentCommit.GetTree().GetSHA()
+	}
+
 	// Create blobs for each file.
 	var entries []*github.TreeEntry
 	for path, content := range files {
@@ -170,28 +184,39 @@ func (c *Client) CreateInitialCommit(ctx context.Context, owner, repo string, fi
 		})
 	}
 
-	// Create tree (no base tree — initial commit).
-	tree, _, err := c.gh.Git.CreateTree(ctx, owner, repo, "", entries)
+	tree, _, err := c.gh.Git.CreateTree(ctx, owner, repo, baseTreeSHA, entries)
 	if err != nil {
 		return wrapErr(err, fmt.Sprintf("create tree %s/%s", owner, repo))
 	}
 
-	// Create commit (no parents — initial commit).
-	commit, _, err := c.gh.Git.CreateCommit(ctx, owner, repo, &github.Commit{
+	newCommit := &github.Commit{
 		Message: github.Ptr(message),
 		Tree:    tree,
-	}, nil)
+	}
+	if parentSHA != "" {
+		newCommit.Parents = []*github.Commit{{SHA: github.Ptr(parentSHA)}}
+	}
+
+	commit, _, err := c.gh.Git.CreateCommit(ctx, owner, repo, newCommit, nil)
 	if err != nil {
 		return wrapErr(err, fmt.Sprintf("create commit %s/%s", owner, repo))
 	}
 
-	// Point refs/heads/main at the new commit.
-	_, _, err = c.gh.Git.CreateRef(ctx, owner, repo, &github.Reference{
-		Ref:    github.Ptr("refs/heads/main"),
-		Object: &github.GitObject{SHA: commit.SHA},
-	})
+	if parentSHA == "" {
+		// Empty repo — create the ref.
+		_, _, err = c.gh.Git.CreateRef(ctx, owner, repo, &github.Reference{
+			Ref:    github.Ptr("refs/heads/main"),
+			Object: &github.GitObject{SHA: commit.SHA},
+		})
+	} else {
+		// Existing repo — update the ref.
+		_, _, err = c.gh.Git.UpdateRef(ctx, owner, repo, &github.Reference{
+			Ref:    github.Ptr("refs/heads/main"),
+			Object: &github.GitObject{SHA: commit.SHA},
+		}, false)
+	}
 	if err != nil {
-		return wrapErr(err, fmt.Sprintf("create ref %s/%s", owner, repo))
+		return wrapErr(err, fmt.Sprintf("set ref %s/%s", owner, repo))
 	}
 
 	return nil
