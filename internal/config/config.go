@@ -12,10 +12,6 @@ import (
 type Config struct {
 	TeamRepos []string `toml:"team_repos"`
 	Token     string   `toml:"token"`
-
-	// legacyTeamRepo is populated when the old team_repo key is present.
-	// Load() migrates it into TeamRepos automatically.
-	legacyTeamRepo string
 }
 
 // rawConfig is used to detect legacy team_repo during Load.
@@ -48,7 +44,6 @@ func Load() (*Config, error) {
 	// Legacy migration: team_repo (singular) → team_repos (plural).
 	if raw.TeamRepo != "" && len(cfg.TeamRepos) == 0 {
 		cfg.TeamRepos = []string{raw.TeamRepo}
-		cfg.legacyTeamRepo = raw.TeamRepo
 	}
 
 	return cfg, nil

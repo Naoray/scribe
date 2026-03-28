@@ -65,10 +65,10 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
 	}
 
-	// 3. Dedup check.
+	// 3. Dedup check (case-insensitive — GitHub repos are case-insensitive).
 	for _, existing := range cfg.TeamRepos {
-		if existing == repo {
-			fmt.Printf("Already connected to %s\n", repo)
+		if strings.EqualFold(existing, repo) {
+			fmt.Printf("Already connected to %s\n", existing)
 			return nil
 		}
 	}
