@@ -11,7 +11,7 @@ Team skill sync CLI for AI coding agents. Go + Cobra + Charm (Bubble Tea).
 ## Architecture
 
 ```
-cmd/                    # Cobra commands (init, sync, list, add)
+cmd/                    # Cobra commands (connect, sync, list, add, create)
 internal/
   manifest/             # scribe.toml parsing (BurntSushi/toml)
   github/               # GitHub API client (go-github + oauth2)

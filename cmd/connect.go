@@ -38,12 +38,17 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	owner, name, err := parseOwnerRepo(repo)
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	cfg, err := config.Load()
+	return connectToRepo(repo, cfg, gh.NewClient(cfg.Token))
+}
+
+// connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.
+func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
+	owner, name, err := parseOwnerRepo(repo)
 	if err != nil {
 		return err
 	}
@@ -57,7 +62,6 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	client := gh.NewClient(cfg.Token)
 	raw, err := client.FetchFile(ctx, owner, name, "scribe.toml", "HEAD")
 	if err != nil {
 		return fmt.Errorf("could not access %s: %w", repo, err)

@@ -60,6 +60,16 @@ scribe list        # see what's installed and what's outdated
 
 ### For the team lead setting up the shared repo
 
+**Option A — Let Scribe scaffold it (recommended):**
+
+```bash
+scribe create registry
+# Interactive prompts for team name, GitHub org, repo name, visibility
+# Creates the repo, pushes scribe.toml + README, and connects automatically
+```
+
+**Option B — Manual setup:**
+
 1. Create a GitHub repo (e.g., `ArtistfyHQ/team-skills`) — can be private
 2. Create `scribe.toml` at the root:
 
@@ -97,6 +107,7 @@ ArtistfyHQ/team-skills/
 | `scribe sync` | Install missing skills, update outdated ones |
 | `scribe list` | Show all skills: what's installed, what's outdated, what's missing |
 | `scribe add <source>` | Add a skill to the team's scribe.toml *(coming soon)* |
+| `scribe create registry` | Scaffold a new team skills registry on GitHub and connect to it |
 
 ### scribe list output
 
@@ -192,10 +203,10 @@ Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specificati
 - `--json` flag for CI/agent use
 
 - `scribe connect` — connect to a team repo with interactive setup
+- `scribe create registry` — scaffold a new team skills registry on GitHub
 
 **Coming later:**
 - `scribe add` — add a skill to the team loadout
-- `scribe create-team` — scaffold a new team skills repo
 - Lockfile (`scribe.lock`) — pin exact versions across the team
 - `scribe publish` — publish skill packages
 
