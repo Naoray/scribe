@@ -3,120 +3,214 @@
 Keep your team's AI coding agent skills in sync. One command, no copy-paste.
 
 ```bash
+scribe connect ArtistfyHQ/team-skills
 scribe sync
 ```
 
-## The problem
+## What is this?
 
-If you run a curated set of Claude Code skills, sharing them with teammates means Slack links and manual file copying. Nobody knows if they're on the latest version. The person who just joined has no idea what they're missing.
+AI coding agents like Claude Code and Cursor work better with "skills" — markdown instruction files that teach the agent how to do specific tasks (code reviews, deployments, Laravel patterns, etc.). If you've built a good set of skills, sharing them with teammates currently means Slack links and manual file copying. Nobody knows if they're on the latest version. The person who just joined has no idea what they're missing.
 
-Scribe fixes this with a shared `scribe.toml` in a GitHub repo. Point your teammates at it once, and they stay in sync.
+Scribe fixes this. You put your team's skills in a GitHub repo with a `scribe.toml` manifest, teammates run `scribe connect`, and `scribe sync` keeps everyone up to date automatically. Works with Claude Code and Cursor from the same manifest.
 
-## How it works
+## Install
 
-A shared `scribe.toml` in a GitHub repo defines the team's skill stack. Anyone can contribute a skill — each person's skills live in their own folder, so it's clear who owns what:
+**macOS / Linux — download the binary:**
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_arm64.tar.gz | tar xz
+sudo mv scribe /usr/local/bin/
+
+# macOS (Intel)
+curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_amd64.tar.gz | tar xz
+sudo mv scribe /usr/local/bin/
+
+# Linux (amd64)
+curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_amd64.tar.gz | tar xz
+sudo mv scribe /usr/local/bin/
+```
+
+**Homebrew (macOS):**
+
+```bash
+brew install Naoray/tap/scribe
+```
+
+**Go users:**
+
+```bash
+go install github.com/Naoray/scribe@latest
+```
+
+Verify: `scribe --version`
+
+## Quickstart
+
+### For a teammate joining your team
+
+```bash
+# 1. Connect to your team's skills repo (one time)
+scribe connect ArtistfyHQ/team-skills
+
+# 2. That's it — skills are now installed and you stay in sync
+scribe sync        # run again anytime to pick up new skills
+scribe list        # see what's installed and what's outdated
+```
+
+### For the team lead setting up the shared repo
+
+1. Create a GitHub repo (e.g., `ArtistfyHQ/team-skills`) — can be private
+2. Create `scribe.toml` at the root:
+
+```toml
+[team]
+name = "artistfy"
+description = "Artistfy dev team skill stack"
+
+[skills]
+# External skills from other GitHub repos
+"gstack" = { source = "github:garrytan/gstack@v0.12.9.0" }
+
+# Skills you maintain directly in this repo
+# Path format: github-username/skill-name
+"deploy" = { source = "github:ArtistfyHQ/team-skills@main", path = "krishan/deploy" }
+```
+
+3. Add your skill files at the matching paths:
 
 ```
 ArtistfyHQ/team-skills/
   scribe.toml
   krishan/
     deploy/
-      SKILL.md
-    code-review/
-      SKILL.md
-  markus/
-    frontend-prs/
-      SKILL.md
+      SKILL.md       ← your skill file
 ```
 
-```toml
-# ArtistfyHQ/team-skills/scribe.toml
-[team]
-name = "artistfy"
-
-[skills]
-# External packages
-"gstack"       = { source = "github:garrytan/gstack@v0.12.9.0" }
-"laravel-init" = { source = "github:Naoray/scribe-skills@v1.0.0", path = "skills/laravel-init" }
-
-# Team-authored skills — path implies maintainer
-"deploy"        = { source = "github:ArtistfyHQ/team-skills@main", path = "krishan/deploy" }
-"code-review"   = { source = "github:ArtistfyHQ/team-skills@main", path = "krishan/code-review" }
-"frontend-prs"  = { source = "github:ArtistfyHQ/team-skills@main", path = "markus/frontend-prs" }
-```
-
-Your teammates connect once:
-
-```bash
-scribe init
-# Enter your team's skills repo: ArtistfyHQ/team-skills
-```
-
-From then on, `scribe sync` diffs their local setup against the loadout and installs what's missing or outdated. Works with Claude Code and Cursor from the same manifest.
+4. Tell your teammate to run `scribe connect ArtistfyHQ/team-skills`
 
 ## Commands
 
-```bash
-scribe init                                         # Connect to your team repo (or scaffold a package)
-scribe sync                                         # Install missing, update outdated
-scribe list                                         # See what's installed vs what the team has
-scribe add gstack                                   # Add an installed skill to the team loadout
-scribe add github:garrytan/gstack@v0.12.9.0         # Add by source directly
-```
+| Command | What it does |
+|---|---|
+| `scribe connect <owner/repo>` | Connect to a team skills repo and run an initial sync |
+| `scribe sync` | Install missing skills, update outdated ones |
+| `scribe list` | Show all skills: what's installed, what's outdated, what's missing |
+| `scribe add <source>` | Add a skill to the team's scribe.toml *(coming soon)* |
 
-`scribe add` puts your skill in your `/{github-username}/` folder automatically and registers it in `scribe.toml`. If two people add a skill with the same name, the first registration wins in `scribe list`.
-
-`scribe list` shows the full picture including who maintains each skill:
+### scribe list output
 
 ```
 Team: artistfy (ArtistfyHQ/team-skills) · Last sync: 2 hours ago
 
-SKILL                  VERSION         STATUS      TARGETS         MAINTAINER
-gstack                 v0.12.9.0       ✓ current   claude          garrytan
-laravel-init           v1.0.0          ⬆ outdated  claude, cursor  Naoray
-deploy                 main@a3f2c1b    ✓ current   claude          krishan
-code-review            v1.0.0          ✓ current   claude          krishan
-frontend-prs           main@c9f1d2e    ● missing   claude          markus
-my-custom-skill        —               ◇ extra     claude          —
+SKILL              VERSION         STATUS       TARGETS
+gstack             v0.12.9.0       ✓ current    claude
+laravel-init       v1.0.0          ⬆ outdated   claude, cursor
+deploy             main@a3f2c1b    ✓ current    claude
+frontend-prs       main@c9f1d2e    ● missing    claude
+my-old-skill       —               ◇ extra      claude
 
-Summary: 3 current · 1 outdated · 1 missing · 1 extra
-Run `scribe sync` to install missing and update outdated skills.
+3 current · 1 outdated · 1 missing · 1 extra
 ```
 
-The maintainer is inferred from the folder path — no extra config needed. For external packages it comes from the GitHub repo owner. A good team-skills repo pairs this with a [CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners) file so PRs touching someone's folder go to them for review.
+Status meanings:
+- `✓ current` — installed, matches team version
+- `⬆ outdated` — installed, but team has a newer version
+- `● missing` — in team loadout, not yet installed locally
+- `◇ extra` — installed locally but not in the team loadout (informational, never auto-removed)
 
-## Agent-friendly
+### scribe sync output
 
-Scribe auto-detects non-TTY environments — so it works fine when Claude itself runs it. The `--json` flag gives structured output for scripting and CI.
+```
+syncing ArtistfyHQ/team-skills...
 
-There's a `/scribe-sync` Claude Code skill for hands-free syncing from within a session. (Coming soon.)
+  gstack               ok (v0.12.9.0)
+  laravel-init         updated to v1.1.0
+  deploy               ok (main@a3f2c1b)
+  frontend-prs         installed main@c9f1d2e
+
+done: 1 installed, 1 updated, 2 current, 0 failed
+```
 
 ## Private skills
 
-Private GitHub repos work out of the box if you're already authenticated with the `gh` CLI. Scribe piggybacks on `gh auth token` so there's nothing extra to configure.
-
-Auth chain: `gh auth token` → `GITHUB_TOKEN` env var → `~/.scribe/config.toml` → unauthenticated (public repos only).
-
-## Install
+Private GitHub repos work if you're authenticated with the `gh` CLI — Scribe piggybacks on `gh auth token`. Nothing extra to configure.
 
 ```bash
-go install github.com/Naoray/scribe@latest
+gh auth login   # if not already done
 ```
 
-Pre-built binaries in [Releases](https://github.com/Naoray/scribe/releases) for macOS (arm64, amd64) and Linux (amd64).
+Auth fallback chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/config.toml` → unauthenticated (public repos only).
 
-## Status
+## Agent-friendly
 
-Early. The core sync loop is being built now. What works today: project scaffolded, CLI skeleton with all four commands, Bubbletea TUI wired up. What's next: manifest parsing, GitHub fetcher, install targets (Claude Code + Cursor), state tracking.
+Scribe auto-detects non-TTY environments (CI, agent invocations). `--json` flag gives structured output:
 
-Lockfile, `scribe add`, publish workflow, and search come after the sync loop is solid.
+```bash
+scribe sync --json
+scribe list --json
+```
+
+Output:
+```json
+{
+  "team_repos": ["ArtistfyHQ/team-skills"],
+  "skills": [
+    { "name": "gstack", "action": "skipped", "status": "current", "version": "v0.12.9.0" },
+    { "name": "laravel-init", "action": "updated", "version": "v1.1.0" }
+  ],
+  "summary": { "installed": 0, "updated": 1, "skipped": 1, "failed": 0 }
+}
+```
 
 ## Skill format
 
-Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specification. Any skill that works with `skills.sh` or Paks will work with Scribe.
+Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specification. Any skill that works with `skills.sh` or Paks will work with Scribe. A skill is a directory with a `SKILL.md` at the root — the frontmatter tells Scribe the name, description, and compatible tools.
+
+## Data stored locally
+
+```
+~/.scribe/
+  config.toml    # which team repos you're connected to
+  state.json     # what's installed, last sync time
+  cache/         # cached GitHub downloads
+```
 
 ## Requirements
 
-- Go 1.22+
+- macOS or Linux (Windows not yet supported)
 - GitHub account with access to your team skills repo
-- `gh` CLI recommended (for auth), not required
+- `gh` CLI recommended for auth (not required for public repos)
+
+## Status
+
+**What works today:**
+- `scribe sync` — full sync loop (diff, download, install, update)
+- `scribe list` — shows installed skills and their status vs team loadout
+- Claude Code and Cursor install targets
+- Private repo support via `gh auth token`
+- `--json` flag for CI/agent use
+
+- `scribe connect` — connect to a team repo with interactive setup
+
+**Coming later:**
+- `scribe add` — add a skill to the team loadout
+- `scribe create-team` — scaffold a new team skills repo
+- Lockfile (`scribe.lock`) — pin exact versions across the team
+- `scribe publish` — publish skill packages
+
+## Contributing
+
+The project is early. See the [open issues](https://github.com/Naoray/scribe/issues) for what's planned — each one has enough context to pick up and run with.
+
+```bash
+git clone https://github.com/Naoray/scribe
+cd scribe
+go build ./...
+go run ./cmd/scribe --help
+```
+
+Tests:
+```bash
+go test ./...
+```
