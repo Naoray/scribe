@@ -81,7 +81,7 @@ func printListTable(teamRepo string, st *state.State, statuses []sync.SkillStatu
 			tgts = strings.Join(sk.Installed.Targets, ", ")
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", sk.Name, ver, statusLabel(sk.Status), tgts)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", sk.Name, ver, sk.Status.String(), tgts)
 	}
 
 	w.Flush()
@@ -136,21 +136,6 @@ func printListJSON(teamRepos []string, statuses []sync.SkillStatus) error {
 			"extra":    counts[sync.StatusExtra],
 		},
 	})
-}
-
-func statusLabel(s sync.Status) string {
-	switch s {
-	case sync.StatusCurrent:
-		return "current"
-	case sync.StatusOutdated:
-		return "outdated"
-	case sync.StatusMissing:
-		return "missing"
-	case sync.StatusExtra:
-		return "extra"
-	default:
-		return "unknown"
-	}
 }
 
 func countStatuses(statuses []sync.SkillStatus) map[sync.Status]int {

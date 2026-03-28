@@ -38,19 +38,25 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 1. Validate format.
 	owner, name, err := parseOwnerRepo(repo)
 	if err != nil {
 		return err
 	}
 
-	// 2. Validate repo exists and has a [team] scribe.toml.
-	ctx := context.Background()
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
+	// Dedup check before any network calls (case-insensitive — GitHub repos are case-insensitive).
+	for _, existing := range cfg.TeamRepos {
+		if strings.EqualFold(existing, repo) {
+			fmt.Printf("Already connected to %s\n", existing)
+			return nil
+		}
+	}
+
+	ctx := context.Background()
 	client := gh.NewClient(cfg.Token)
 	raw, err := client.FetchFile(ctx, owner, name, "scribe.toml", "HEAD")
 	if err != nil {
@@ -65,22 +71,13 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
 	}
 
-	// 3. Dedup check (case-insensitive — GitHub repos are case-insensitive).
-	for _, existing := range cfg.TeamRepos {
-		if strings.EqualFold(existing, repo) {
-			fmt.Printf("Already connected to %s\n", existing)
-			return nil
-		}
-	}
-
-	// 4. Append and save.
 	cfg.TeamRepos = append(cfg.TeamRepos, repo)
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 	fmt.Printf("Connected to %s\n", repo)
 
-	// 5. Auto-sync all registries.
+	// Auto-sync the newly connected repo only.
 	st, err := state.Load()
 	if err != nil {
 		return err
@@ -95,7 +92,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 			case sync.SkillInstalledMsg:
 				verb := "installed"
 				if m.Updated {
-					verb = "updated"
+					verb = "updated to"
 				}
 				fmt.Printf("  %-20s %s %s\n", m.Name, verb, m.Version)
 			case sync.SkillErrorMsg:
@@ -108,15 +105,11 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nsyncing skills...\n\n")
-	isTTY := isatty.IsTerminal(os.Stdout.Fd())
-	for _, teamRepo := range cfg.TeamRepos {
-		if err := syncer.Run(ctx, teamRepo, st); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: sync failed for %s: %v\n", teamRepo, err)
-			fmt.Fprintf(os.Stderr, "run `scribe sync` to retry\n")
-			if !isTTY {
-				return fmt.Errorf("sync failed: %w", err)
-			}
-			return nil
+	if err := syncer.Run(ctx, repo, st); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: sync failed for %s: %v\n", repo, err)
+		fmt.Fprintf(os.Stderr, "run `scribe sync` to retry\n")
+		if !isatty.IsTerminal(os.Stdout.Fd()) {
+			return fmt.Errorf("sync failed: %w", err)
 		}
 	}
 

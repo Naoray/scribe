@@ -48,8 +48,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	useJSON := syncJSON || !isatty.IsTerminal(os.Stdout.Fd())
 
-	// resolved holds the initial diff result per skill so we can look up
-	// version info when a SkillSkippedMsg arrives (which only carries the name).
+	// resolved holds the diff result per skill so we can look up version info
+	// when a SkillSkippedMsg arrives (which only carries the name).
+	// Reset each iteration to prevent key collisions across registries.
 	resolved := map[string]sync.SkillStatus{}
 
 	// For JSON output we collect a result per skill as events arrive,
@@ -134,6 +135,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, teamRepo := range cfg.TeamRepos {
+		clear(resolved)
 		if !useJSON {
 			fmt.Fprintf(os.Stderr, "syncing %s...\n\n", teamRepo)
 		}
