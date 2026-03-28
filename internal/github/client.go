@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,8 +20,12 @@ var ErrRepoExists = errors.New("repository already exists")
 
 // Client wraps the go-github client with Scribe-specific helpers.
 type Client struct {
-	gh *github.Client
+	gh            *github.Client
+	authenticated bool
 }
+
+// IsAuthenticated returns true if the client has a GitHub token.
+func (c *Client) IsAuthenticated() bool { return c.authenticated }
 
 // NewClient creates a GitHub client using the auth chain:
 //  1. gh auth token  (piggyback on gh CLI if installed)
@@ -36,7 +41,7 @@ func NewClient(configToken string) *Client {
 		httpClient = oauth2.NewClient(context.Background(), ts)
 	}
 
-	return &Client{gh: github.NewClient(httpClient)}
+	return &Client{gh: github.NewClient(httpClient), authenticated: token != ""}
 }
 
 func resolveToken(configToken string) string {
@@ -166,9 +171,16 @@ func (c *Client) PushFiles(ctx context.Context, owner, repo string, files map[st
 		baseTreeSHA = parentCommit.GetTree().GetSHA()
 	}
 
-	// Create blobs for each file.
+	// Create blobs for each file (sorted for deterministic ordering).
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
 	var entries []*github.TreeEntry
-	for path, content := range files {
+	for _, path := range paths {
+		content := files[path]
 		blob, _, err := c.gh.Git.CreateBlob(ctx, owner, repo, &github.Blob{
 			Content:  github.Ptr(content),
 			Encoding: github.Ptr("utf-8"),

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/charmbracelet/huh"
@@ -41,7 +43,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	repo, _ := cmd.Flags().GetString("repo")
 	private, _ := cmd.Flags().GetBool("private")
 
-	isTTY := isatty.IsTerminal(os.Stdout.Fd())
+	isTTY := isatty.IsTerminal(os.Stdin.Fd())
 
 	// Prompt for missing values if TTY; error if non-TTY.
 	if team == "" {
@@ -74,15 +76,33 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ctx := context.Background()
+	// Validate inputs (#1, #2).
+	if err := validateGitHubName(team, "team name"); err != nil {
+		return err
+	}
+	if err := validateGitHubName(owner, "owner"); err != nil {
+		return err
+	}
+	if err := validateGitHubName(repo, "repo name"); err != nil {
+		return err
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 	client := gh.NewClient(cfg.Token)
 
+	// Auth check (#3) — creating repos requires authentication.
+	if !client.IsAuthenticated() {
+		return fmt.Errorf("authentication required to create repositories — run `gh auth login` or set GITHUB_TOKEN")
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
+	defer cancel()
+
 	desc := teamDescription(team)
-	_, err = client.CreateRepo(ctx, owner, repo, desc, private)
+	created, err := client.CreateRepo(ctx, owner, repo, desc, private)
 	if err != nil {
 		if !errors.Is(err, gh.ErrRepoExists) {
 			return err
@@ -99,15 +119,22 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Use canonical owner/repo from GitHub when available (#11).
+	if created != nil {
+		owner = created.GetOwner().GetLogin()
+		repo = created.GetName()
+	}
 	repoSlug := owner + "/" + repo
+
 	hasManifest, err := client.FileExists(ctx, owner, repo, "scribe.toml", "HEAD")
 	if err != nil {
-		// Empty repos (no commits) 404 on HEAD — treat as no manifest.
+		// Surface real errors; FileExists already converts 404 → (false, nil).
+		fmt.Fprintf(os.Stderr, "warning: could not check for scribe.toml: %v\n", err)
 		hasManifest = false
 	}
 
 	if !hasManifest {
-		fmt.Printf("Pushing initial scribe.toml and README.md...\n")
+		fmt.Fprintf(os.Stderr, "Pushing initial scribe.toml and README.md...\n")
 		files := map[string]string{
 			"scribe.toml": scaffoldTOML(team),
 			"README.md":   scaffoldREADME(team, repoSlug),
@@ -117,8 +144,19 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("\nRegistry created: %s\n\n", repoSlug)
+	fmt.Fprintf(os.Stderr, "\nRegistry created: %s\n\n", repoSlug)
 	return connectToRepo(repoSlug, cfg, client)
+}
+
+// ghNameRe matches valid GitHub owner and repo names (alphanumeric, hyphens, dots, underscores).
+var ghNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+// validateGitHubName checks that s is a valid GitHub owner/repo/team name.
+func validateGitHubName(s, label string) error {
+	if !ghNameRe.MatchString(s) {
+		return fmt.Errorf("%s %q is invalid: use only letters, numbers, hyphens, dots, or underscores", label, s)
+	}
+	return nil
 }
 
 // notEmpty returns a huh validation function that rejects empty strings.

@@ -58,6 +58,21 @@ func TestScaffoldREADME(t *testing.T) {
 	}
 }
 
+func TestValidateGitHubName(t *testing.T) {
+	valid := []string{"artistfy", "my-team", "DevOps", "user.name", "a123", "my_org"}
+	for _, name := range valid {
+		if err := validateGitHubName(name, "test"); err != nil {
+			t.Errorf("validateGitHubName(%q) = %v, want nil", name, err)
+		}
+	}
+	invalid := []string{"", "-start", ".start", "has space", "foo/bar", "new\nline", "tab\there"}
+	for _, name := range invalid {
+		if err := validateGitHubName(name, "test"); err == nil {
+			t.Errorf("validateGitHubName(%q) = nil, want error", name)
+		}
+	}
+}
+
 func TestTitleCase(t *testing.T) {
 	cases := []struct {
 		input string
