@@ -3,9 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -17,19 +20,29 @@ import (
 	"github.com/Naoray/scribe/internal/targets"
 )
 
-var listJSON bool
+var (
+	listJSON  bool
+	listLocal bool
+)
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "Show installed skills and their status vs team loadout",
-	RunE:  runList,
+	Short: "Show installed skills and their sync status",
+	Long: `Show installed skills and their status.
+
+Without flags, compares local skills against team registries.
+With --local, shows only locally installed skills (offline, no registry needed).
+When no registries are connected, automatically shows local skills.`,
+	RunE: runList,
 }
 
 func init() {
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output machine-readable JSON")
+	listCmd.Flags().BoolVar(&listLocal, "local", false, "Show locally installed skills (offline, no registry needed)")
 	listCmd.Flags().StringVar(&registryFlag, "registry", "", "Show only this registry (owner/repo or repo name)")
 	listCmd.Flags().Bool("all", false, "List all registries (default behavior)")
 	listCmd.Flags().MarkHidden("all")
+	listCmd.MarkFlagsMutuallyExclusive("local", "registry")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -43,11 +56,32 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if len(cfg.TeamRepos) == 0 {
-		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
+	w := cmd.OutOrStdout()
+	useJSON := listJSON
+	if !useJSON {
+		if f, ok := w.(*os.File); ok {
+			useJSON = !isatty.IsTerminal(f.Fd())
+		}
 	}
 
-	// Migrate legacy state (no Registries field) for users who haven't synced yet.
+	// Local view: --local flag or no registries connected.
+	if listLocal || len(cfg.TeamRepos) == 0 {
+		if useJSON {
+			return printLocalJSON(w, st)
+		}
+		err := printLocalTable(w, st)
+		if err != nil {
+			return err
+		}
+		// Show hint when falling back due to no registries (not when --local is explicit).
+		if !listLocal && len(cfg.TeamRepos) == 0 && len(st.Installed) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Tip: connect a registry with \"scribe connect\" to see team skill status")
+		}
+		return nil
+	}
+
+	// Remote diff view (existing behavior).
 	st.MigrateRegistries(cfg.TeamRepos[0])
 
 	repos, err := filterRegistries(registryFlag, cfg.TeamRepos)
@@ -58,7 +92,6 @@ func runList(cmd *cobra.Command, args []string) error {
 	client := gh.NewClient(cfg.Token)
 	syncer := &sync.Syncer{Client: client, Targets: []targets.Target{}}
 
-	useJSON := listJSON || !isatty.IsTerminal(os.Stdout.Fd())
 	multiRegistry := len(repos) > 1
 
 	if useJSON {
@@ -203,4 +236,69 @@ func countStatuses(statuses []sync.SkillStatus) map[sync.Status]int {
 		m[sk.Status]++
 	}
 	return m
+}
+
+func printLocalTable(w io.Writer, st *state.State) error {
+	if len(st.Installed) == 0 {
+		fmt.Fprintln(w, "No skills installed.")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  Install skills from a registry:  scribe connect <owner/repo>")
+		return nil
+	}
+
+	names := make([]string, 0, len(st.Installed))
+	for name := range st.Installed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "SKILL\tVERSION\tTARGETS\tSOURCE")
+
+	for _, name := range names {
+		skill := st.Installed[name]
+		source, _, _ := strings.Cut(skill.Source, "@")
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			name,
+			skill.DisplayVersion(),
+			strings.Join(skill.Targets, ", "),
+			source,
+		)
+	}
+
+	return tw.Flush()
+}
+
+type localSkillJSON struct {
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	Source      string    `json:"source"`
+	Targets     []string  `json:"targets"`
+	InstalledAt time.Time `json:"installed_at"`
+	Registries  []string  `json:"registries,omitempty"`
+}
+
+func printLocalJSON(w io.Writer, st *state.State) error {
+	names := make([]string, 0, len(st.Installed))
+	for name := range st.Installed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	skills := make([]localSkillJSON, 0, len(names))
+	for _, name := range names {
+		sk := st.Installed[name]
+		skills = append(skills, localSkillJSON{
+			Name:        name,
+			Version:     sk.DisplayVersion(),
+			Source:      sk.Source,
+			Targets:     sk.Targets,
+			InstalledAt: sk.InstalledAt,
+			Registries:  sk.Registries,
+		})
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(skills)
 }
