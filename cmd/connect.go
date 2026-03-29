@@ -45,37 +45,50 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	return connectToRepo(cmd.Context(), repo, cfg, gh.NewClient(cmd.Context(), cfg.Token))
 }
 
-// connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.
-func connectToRepo(ctx context.Context, repo string, cfg *config.Config, client *gh.Client) error {
+// validateAndConnect validates the repo, checks for duplicates, verifies it has a
+// scribe.toml with a [team] section, and appends it to config. Does NOT sync.
+// Returns true if the repo was already connected (no-op), and the parsed manifest.
+func validateAndConnect(ctx context.Context, repo string, cfg *config.Config, client *gh.Client) (alreadyConnected bool, m *manifest.Manifest, err error) {
 	owner, name, err := manifest.ParseOwnerRepo(repo)
 	if err != nil {
-		return err
+		return false, nil, err
 	}
 
-	// Dedup check before any network calls (case-insensitive — GitHub repos are case-insensitive).
 	for _, existing := range cfg.TeamRepos {
 		if strings.EqualFold(existing, repo) {
-			fmt.Printf("Already connected to %s\n", existing)
-			return nil
+			return true, nil, nil
 		}
 	}
 
 	raw, err := client.FetchFile(ctx, owner, name, "scribe.toml", "HEAD")
 	if err != nil {
-		return fmt.Errorf("could not access %s: %w", repo, err)
+		return false, nil, fmt.Errorf("could not access %s: %w", repo, err)
 	}
 
-	m, err := manifest.Parse(raw)
+	m, err = manifest.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid scribe.toml in %s: %w", repo, err)
+		return false, nil, fmt.Errorf("invalid scribe.toml in %s: %w", repo, err)
 	}
 	if !m.IsLoadout() {
-		return fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
+		return false, nil, fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
 	}
 
 	cfg.TeamRepos = append(cfg.TeamRepos, repo)
 	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("save config: %w", err)
+		return false, nil, fmt.Errorf("save config: %w", err)
+	}
+	return false, m, nil
+}
+
+// connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.
+func connectToRepo(ctx context.Context, repo string, cfg *config.Config, client *gh.Client) error {
+	already, m, err := validateAndConnect(ctx, repo, cfg, client)
+	if err != nil {
+		return err
+	}
+	if already {
+		fmt.Printf("Already connected to %s\n", repo)
+		return nil
 	}
 	fmt.Printf("Connected to %s\n", repo)
 
@@ -143,4 +156,3 @@ func resolveRepo(args []string) (string, error) {
 	}
 	return repo, nil
 }
-

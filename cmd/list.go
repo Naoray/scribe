@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -194,7 +193,7 @@ func printMultiListJSON(ctx context.Context, repos []string, syncer *sync.Syncer
 		})
 	}
 
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{
+	return writeJSON(os.Stdout, map[string]any{
 		"registries": registries,
 	})
 }

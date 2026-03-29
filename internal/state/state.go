@@ -185,6 +185,15 @@ func statePath() (string, error) {
 	return filepath.Join(home, ".scribe", "state.json"), nil
 }
 
+// Dir returns the path to the ~/.scribe directory.
+func Dir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home dir: %w", err)
+	}
+	return filepath.Join(home, ".scribe"), nil
+}
+
 // lockFile acquires an advisory flock on the given path.
 // Use exclusive=true for writes, exclusive=false (shared) for reads.
 func lockFile(path string, exclusive bool) (*os.File, error) {
