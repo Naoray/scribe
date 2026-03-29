@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -100,6 +101,46 @@ func Parse(data []byte) (*Manifest, error) {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 	return &m, nil
+}
+
+// Encode serializes the manifest to TOML bytes.
+func (m *Manifest) Encode() ([]byte, error) {
+	// Build an encodable shadow struct. The Skill type has custom UnmarshalTOML
+	// which toml.Marshal doesn't invert — use a map[string]any for skills.
+	type encodable struct {
+		Team    *Team          `toml:"team,omitempty"`
+		Package *Package       `toml:"package,omitempty"`
+		Skills  map[string]any `toml:"skills"`
+		Targets *Targets       `toml:"targets,omitempty"`
+	}
+
+	skills := make(map[string]any, len(m.Skills))
+	for name, skill := range m.Skills {
+		if m.IsLoadout() {
+			entry := map[string]any{"source": skill.Source}
+			if skill.Path != "" {
+				entry["path"] = skill.Path
+			}
+			if skill.Private {
+				entry["private"] = skill.Private
+			}
+			skills[name] = entry
+		} else {
+			// Package manifest: plain string path.
+			skills[name] = skill.Path
+		}
+	}
+
+	buf := new(bytes.Buffer)
+	if err := toml.NewEncoder(buf).Encode(encodable{
+		Team:    m.Team,
+		Package: m.Package,
+		Skills:  skills,
+		Targets: m.Targets,
+	}); err != nil {
+		return nil, fmt.Errorf("encode manifest: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 func (m *Manifest) IsLoadout() bool  { return m.Team != nil }
