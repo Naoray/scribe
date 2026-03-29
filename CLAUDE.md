@@ -30,7 +30,7 @@ internal/
 - Core packages (`sync/`, `add/`, `state/`, `github/`) are **UI-agnostic** — they emit events, never print
 - TUI models live in `cmd/` (e.g. `add_tui.go`) as pure presentation consuming those events
 - Non-TTY auto-detected: when stdout is not a terminal, fall back to plain line output
-- `--json` flag available on `sync` and `list` for CI/agent use
+- `--json` flag available on `sync`, `list`, and `add` for CI/agent use
 - GitHub auth chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/config.toml` → unauthenticated
 
 ## Build
