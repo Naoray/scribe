@@ -8,23 +8,24 @@ builds:
   - id: scribe
     main: ./cmd/scribe
     binary: scribe
-    goos:
-      - darwin
-      - linux
-    goarch:
-      - amd64
-      - arm64
     env:
       - CGO_ENABLED=0
     ldflags:
       - -s -w -X github.com/Naoray/scribe/cmd.Version={{.Version}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
 
 archives:
-  - format: tar.gz
+  - id: scribe
+    formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
-  name_template: checksums.txt
+  name_template: "checksums.txt"
 
 changelog:
   sort: asc
@@ -40,10 +41,11 @@ brews:
       owner: Naoray
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: https://github.com/Naoray/scribe
+    directory: Formula
+    homepage: "https://github.com/Naoray/scribe"
     description: "Team skill sync CLI for AI coding agents"
-    license: MIT
+    license: "MIT"
     install: |
       bin.install "scribe"
     test: |
-      system "#{bin}/scribe", "--help"
+      system "#{bin}/scribe", "--version"
