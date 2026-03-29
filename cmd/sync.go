@@ -26,6 +26,7 @@ var syncCmd = &cobra.Command{
 
 func init() {
 	syncCmd.Flags().BoolVar(&syncJSON, "json", false, "Output machine-readable JSON (for CI/agents)")
+	syncCmd.Flags().StringVar(&registryFlag, "registry", "", "Sync only this registry (owner/repo or repo name)")
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
@@ -43,32 +44,50 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
 
+	// Migrate legacy state (no Registries field) on first multi-registry run.
+	if len(cfg.TeamRepos) > 0 {
+		st.MigrateRegistries(cfg.TeamRepos[0])
+	}
+
+	repos, err := filterRegistries(registryFlag, cfg.TeamRepos)
+	if err != nil {
+		return err
+	}
+
 	client := gh.NewClient(cfg.Token)
 	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
 
 	useJSON := syncJSON || !isatty.IsTerminal(os.Stdout.Fd())
+	multiRegistry := len(cfg.TeamRepos) > 1
 
-	// resolved holds the diff result per skill so we can look up version info
-	// when a SkillSkippedMsg arrives (which only carries the name).
-	// Reset each iteration to prevent key collisions across registries.
 	resolved := map[string]sync.SkillStatus{}
 
-	// For JSON output we collect a result per skill as events arrive,
-	// then emit one document at the end.
 	type skillResult struct {
 		Name    string `json:"name"`
-		Action  string `json:"action"` // skipped | installed | updated | error
+		Action  string `json:"action"`
 		Status  string `json:"status,omitempty"`
 		Version string `json:"version,omitempty"`
 		Error   string `json:"error,omitempty"`
 	}
-	var jsonResults []skillResult
+
+	// For JSON: collect per-registry results.
+	type registryResult struct {
+		Registry string        `json:"registry"`
+		Skills   []skillResult `json:"skills"`
+	}
+	var jsonRegistries []registryResult
 	totalSummary := sync.SyncCompleteMsg{}
 
 	syncer := &sync.Syncer{
 		Client:  client,
 		Targets: tgts,
-		Emit: func(msg any) {
+	}
+
+	for _, teamRepo := range repos {
+		clear(resolved)
+		var jsonResults []skillResult
+
+		syncer.Emit = func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:
 				resolved[m.Name] = m.SkillStatus
@@ -131,24 +150,39 @@ func runSync(cmd *cobra.Command, args []string) error {
 				totalSummary.Skipped += m.Skipped
 				totalSummary.Failed += m.Failed
 			}
-		},
-	}
+		}
 
-	for _, teamRepo := range cfg.TeamRepos {
-		clear(resolved)
-		if !useJSON {
+		if !useJSON && multiRegistry {
+			fmt.Fprintf(os.Stderr, "── %s ──\n", teamRepo)
+		} else if !useJSON {
 			fmt.Fprintf(os.Stderr, "syncing %s...\n\n", teamRepo)
 		}
 
 		if err := syncer.Run(context.Background(), teamRepo, st); err != nil {
 			return err
 		}
+
+		// Track which registry each synced skill belongs to.
+		for name := range resolved {
+			st.AddRegistry(name, teamRepo)
+		}
+		_ = st.Save()
+
+		if useJSON {
+			jsonRegistries = append(jsonRegistries, registryResult{
+				Registry: teamRepo,
+				Skills:   jsonResults,
+			})
+		}
+
+		if !useJSON && multiRegistry {
+			fmt.Println()
+		}
 	}
 
 	if useJSON {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"team_repos": cfg.TeamRepos,
-			"skills":     jsonResults,
+			"registries": jsonRegistries,
 			"summary": map[string]int{
 				"installed": totalSummary.Installed,
 				"updated":   totalSummary.Updated,
