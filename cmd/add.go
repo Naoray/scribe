@@ -27,6 +27,14 @@ var (
 	addRegistry string
 )
 
+type addResult struct {
+	Name     string `json:"name"`
+	Registry string `json:"registry"`
+	Source   string `json:"source,omitempty"`
+	Uploaded bool   `json:"uploaded"`
+	Error    string `json:"error,omitempty"`
+}
+
 var addCmd = &cobra.Command{
 	Use:   "add [name]",
 	Short: "Add a skill to a team registry",
@@ -54,7 +62,7 @@ func init() {
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
-	isTTY := isatty.IsTerminal(os.Stdin.Fd())
+	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 	useJSON := addJSON || !isatty.IsTerminal(os.Stdout.Fd())
 
 	cfg, err := config.Load()
@@ -186,14 +194,7 @@ func runAddByName(
 	}
 
 	// Wire events.
-	type addResult struct {
-		Name     string `json:"name"`
-		Registry string `json:"registry"`
-		Source   string `json:"source"`
-		Uploaded bool   `json:"uploaded"`
-	}
 	var results []addResult
-	var failed int
 
 	adder.Emit = func(msg any) {
 		switch m := msg.(type) {
@@ -217,9 +218,8 @@ func runAddByName(
 				fmt.Printf("  ✓ %s added to %s\n", m.Name, m.Registry)
 			}
 		case add.SkillAddErrorMsg:
-			failed++
 			if useJSON {
-				results = append(results, addResult{Name: m.Name, Registry: targetRepo})
+				results = append(results, addResult{Name: m.Name, Registry: targetRepo, Error: m.Err.Error()})
 			} else {
 				fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", m.Name, m.Err)
 			}
@@ -301,12 +301,6 @@ func runAddInteractive(
 	}
 
 	// Wire events and add.
-	type addResult struct {
-		Name     string `json:"name"`
-		Registry string `json:"registry"`
-		Source   string `json:"source"`
-		Uploaded bool   `json:"uploaded"`
-	}
 	var results []addResult
 
 	adder.Emit = func(msg any) {
@@ -328,7 +322,9 @@ func runAddInteractive(
 				fmt.Printf("  ✓ %s added to %s\n", m.Name, m.Registry)
 			}
 		case add.SkillAddErrorMsg:
-			if !useJSON {
+			if useJSON {
+				results = append(results, addResult{Name: m.Name, Registry: targetRepo, Error: m.Err.Error()})
+			} else {
 				fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", m.Name, m.Err)
 			}
 		}
