@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -18,7 +21,10 @@ import (
 	"github.com/Naoray/scribe/internal/targets"
 )
 
-var listJSON bool
+var (
+	listJSON  bool
+	listLocal bool
+)
 
 var listCmd = &cobra.Command{
 	Use:   "list",
@@ -28,9 +34,11 @@ var listCmd = &cobra.Command{
 
 func init() {
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output machine-readable JSON")
+	listCmd.Flags().BoolVar(&listLocal, "local", false, "Show locally installed skills (offline, no registry needed)")
 	listCmd.Flags().StringVar(&registryFlag, "registry", "", "Show only this registry (owner/repo or repo name)")
 	listCmd.Flags().Bool("all", false, "List all registries (default behavior)")
 	listCmd.Flags().MarkHidden("all")
+	listCmd.MarkFlagsMutuallyExclusive("local", "registry")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -204,4 +212,69 @@ func countStatuses(statuses []sync.SkillStatus) map[sync.Status]int {
 		m[sk.Status]++
 	}
 	return m
+}
+
+func printLocalTable(w io.Writer, st *state.State) error {
+	if len(st.Installed) == 0 {
+		fmt.Fprintln(w, "No skills installed.")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  Install skills from a registry:  scribe connect <owner/repo>")
+		return nil
+	}
+
+	names := make([]string, 0, len(st.Installed))
+	for name := range st.Installed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "SKILL\tVERSION\tTARGETS\tSOURCE")
+
+	for _, name := range names {
+		skill := st.Installed[name]
+		source, _, _ := strings.Cut(skill.Source, "@")
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			name,
+			skill.DisplayVersion(),
+			strings.Join(skill.Targets, ", "),
+			source,
+		)
+	}
+
+	return tw.Flush()
+}
+
+type localSkillJSON struct {
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	Source      string    `json:"source"`
+	Targets     []string  `json:"targets"`
+	InstalledAt time.Time `json:"installed_at"`
+	Registries  []string  `json:"registries,omitempty"`
+}
+
+func printLocalJSON(w io.Writer, st *state.State) error {
+	names := make([]string, 0, len(st.Installed))
+	for name := range st.Installed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	skills := make([]localSkillJSON, 0, len(names))
+	for _, name := range names {
+		sk := st.Installed[name]
+		skills = append(skills, localSkillJSON{
+			Name:        name,
+			Version:     sk.DisplayVersion(),
+			Source:      sk.Source,
+			Targets:     sk.Targets,
+			InstalledAt: sk.InstalledAt,
+			Registries:  sk.Registries,
+		})
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(skills)
 }
