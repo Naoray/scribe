@@ -48,6 +48,9 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
 
+	// Migrate legacy state (no Registries field) for users who haven't synced yet.
+	st.MigrateRegistries(cfg.TeamRepos[0])
+
 	repos, err := filterRegistries(registryFlag, cfg.TeamRepos)
 	if err != nil {
 		return err

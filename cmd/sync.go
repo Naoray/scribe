@@ -47,9 +47,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	// Migrate legacy state (no Registries field) on first multi-registry run.
-	if len(cfg.TeamRepos) > 0 {
-		st.MigrateRegistries(cfg.TeamRepos[0])
-	}
+	st.MigrateRegistries(cfg.TeamRepos[0])
 
 	repos, err := filterRegistries(registryFlag, cfg.TeamRepos)
 	if err != nil {
@@ -168,7 +166,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 		for name := range resolved {
 			st.AddRegistry(name, teamRepo)
 		}
-		_ = st.Save()
+		if err := st.Save(); err != nil {
+			return fmt.Errorf("save state: %w", err)
+		}
 
 		if useJSON {
 			jsonRegistries = append(jsonRegistries, registryResult{
