@@ -89,7 +89,7 @@ func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
 
 	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
 	syncer := &sync.Syncer{
-		Client:  client,
+		Client:  sync.WrapGitHubClient(client),
 		Targets: tgts,
 		Emit: func(msg any) {
 			switch m := msg.(type) {

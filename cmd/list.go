@@ -57,7 +57,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	client := gh.NewClient(cmd.Context(), cfg.Token)
-	syncer := &sync.Syncer{Client: client, Targets: []targets.Target{}}
+	syncer := &sync.Syncer{Client: sync.WrapGitHubClient(client), Targets: []targets.Target{}}
 
 	useJSON := listJSON || !isatty.IsTerminal(os.Stdout.Fd())
 	multiRegistry := len(repos) > 1
@@ -72,7 +72,7 @@ func printMultiListTable(repos []string, syncer *sync.Syncer, st *state.State, g
 	var footerParts []string
 
 	for i, teamRepo := range repos {
-		statuses, err := syncer.Diff(context.Background(), teamRepo, st)
+		statuses, _, err := syncer.Diff(context.Background(), teamRepo, st)
 		if err != nil {
 			return err
 		}
@@ -164,7 +164,7 @@ func printMultiListJSON(repos []string, syncer *sync.Syncer, st *state.State) er
 	var registries []registryJSON
 
 	for _, teamRepo := range repos {
-		statuses, err := syncer.Diff(context.Background(), teamRepo, st)
+		statuses, _, err := syncer.Diff(context.Background(), teamRepo, st)
 		if err != nil {
 			return err
 		}

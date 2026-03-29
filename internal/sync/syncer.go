@@ -3,49 +3,70 @@ package sync
 import (
 	"context"
 	"fmt"
-	"strings"
+	"sort"
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
-
-	gh "github.com/Naoray/scribe/internal/github"
 )
+
+// SkillFile is a single file within a downloaded skill directory.
+// Mirrors github.SkillFile so the sync package does not import github directly.
+type SkillFile struct {
+	Path    string
+	Content []byte
+}
+
+// GitHubFetcher abstracts GitHub API operations needed by the sync engine.
+type GitHubFetcher interface {
+	FetchFile(ctx context.Context, owner, repo, path, ref string) ([]byte, error)
+	FetchDirectory(ctx context.Context, owner, repo, dirPath, ref string) ([]SkillFile, error)
+	LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error)
+}
 
 // Syncer wires manifest, github, targets, and state together.
 // It emits events via the Emit callback — the caller decides whether
 // to forward them to a Bubbletea program or log them to stdout.
 type Syncer struct {
-	Client  *gh.Client
+	Client  GitHubFetcher
 	Targets []targets.Target
 	Emit    func(any) // receives events defined in events.go
 }
 
 // Diff fetches the team loadout and computes status for every skill
 // without making any changes. Used by `scribe list`.
-func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]SkillStatus, error) {
-	owner, repo, err := splitRepo(teamRepo)
+// Returns the parsed manifest alongside statuses so callers can reuse it.
+func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]SkillStatus, *manifest.Manifest, error) {
+	owner, repo, err := manifest.ParseOwnerRepo(teamRepo)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	raw, err := s.Client.FetchFile(ctx, owner, repo, "scribe.toml", "HEAD")
 	if err != nil {
-		return nil, fmt.Errorf("fetch loadout: %w", err)
+		return nil, nil, fmt.Errorf("fetch loadout: %w", err)
 	}
 
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("parse loadout: %w", err)
+		return nil, nil, fmt.Errorf("parse loadout: %w", err)
 	}
 	if !m.IsLoadout() {
-		return nil, fmt.Errorf("%s/scribe.toml has no [team] section", teamRepo)
+		return nil, nil, fmt.Errorf("%s/scribe.toml has no [team] section", teamRepo)
 	}
 
 	var statuses []SkillStatus
 
+	// Sort skill names for deterministic output.
+	names := make([]string, 0, len(m.Skills))
+	for name := range m.Skills {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	// Skills in the loadout.
-	for name, skill := range m.Skills {
+	for _, name := range names {
+		skill := m.Skills[name]
 		installed := st.Installed[name]
 		installedPtr := &installed
 		if _, ok := st.Installed[name]; !ok {
@@ -83,14 +104,14 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		}
 	}
 
-	return statuses, nil
+	return statuses, m, nil
 }
 
 // Run executes the full sync: diff, then install/update as needed.
 // Emits events throughout. Updates state incrementally — a failed skill
 // does not prevent successful skills from being recorded.
 func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) error {
-	statuses, err := s.Diff(ctx, teamRepo, st)
+	statuses, m, err := s.Diff(ctx, teamRepo, st)
 	if err != nil {
 		return err
 	}
@@ -101,10 +122,6 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	}
 
 	summary := SyncCompleteMsg{}
-
-	owner, repo, _ := splitRepo(teamRepo)
-	raw, _ := s.Client.FetchFile(ctx, owner, repo, "scribe.toml", "HEAD")
-	m, _ := manifest.Parse(raw)
 
 	for _, sk := range statuses {
 		switch sk.Status {
@@ -135,7 +152,7 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 				continue
 			}
 
-			// Convert github.SkillFile → targets.SkillFile for the store writer.
+			// Convert sync.SkillFile → targets.SkillFile for the store writer.
 			tFiles := make([]targets.SkillFile, len(files))
 			for i, f := range files {
 				tFiles[i] = targets.SkillFile{Path: f.Path, Content: f.Content}
@@ -164,7 +181,13 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 
 			latestSHA := ""
 			if src.IsBranch() {
-				latestSHA, _ = s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
+				sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
+				if err != nil {
+					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("latest SHA for %s: %w", sk.Name, err)})
+					// Non-fatal: continue with empty SHA.
+				} else {
+					latestSHA = sha
+				}
 			}
 
 			st.RecordInstall(sk.Name, state.InstalledSkill{
@@ -175,7 +198,9 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 				Paths:     paths,
 			})
 			// Save after each successful install — partial sync is safe.
-			_ = st.Save()
+			if err := st.Save(); err != nil {
+				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
+			}
 
 			s.emit(SkillInstalledMsg{
 				Name:    sk.Name,
@@ -191,7 +216,10 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	}
 
 	st.RecordSync()
-	_ = st.Save()
+	if err := st.Save(); err != nil {
+		s.emit(summary)
+		return fmt.Errorf("save final state: %w", err)
+	}
 
 	s.emit(summary)
 	return nil
@@ -201,14 +229,6 @@ func (s *Syncer) emit(msg any) {
 	if s.Emit != nil {
 		s.Emit(msg)
 	}
-}
-
-func splitRepo(teamRepo string) (owner, repo string, err error) {
-	parts := strings.SplitN(teamRepo, "/", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo", teamRepo)
-	}
-	return parts[0], parts[1], nil
 }
 
 // loadoutRef extracts the human-readable version ref from a skill entry.

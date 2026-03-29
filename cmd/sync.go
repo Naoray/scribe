@@ -79,7 +79,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	totalSummary := sync.SyncCompleteMsg{}
 
 	syncer := &sync.Syncer{
-		Client:  client,
+		Client:  sync.WrapGitHubClient(client),
 		Targets: tgts,
 	}
 
