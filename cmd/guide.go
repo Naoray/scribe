@@ -153,7 +153,6 @@ func waitForAuth() error {
 	}
 }
 
-
 // runSyncWithProgress runs sync with a Bubble Tea progress display.
 func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (syncsvc.SyncCompleteMsg, error) {
 	st, err := state.Load()

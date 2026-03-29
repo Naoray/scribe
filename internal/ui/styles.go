@@ -1,4 +1,3 @@
-// internal/ui/styles.go
 package ui
 
 import "charm.land/lipgloss/v2"
