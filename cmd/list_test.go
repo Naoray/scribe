@@ -135,3 +135,76 @@ func TestPrintLocalJSON_EmptyState(t *testing.T) {
 		t.Errorf("expected empty JSON array, got: %s", out)
 	}
 }
+
+func TestRunList_LocalFlag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{
+			"gstack": {
+				Version: "v0.12.9.0",
+				Source:  "github:garrytan/gstack@v0.12.9.0",
+				Targets: []string{"claude"},
+			},
+		},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	listLocal = true
+	listJSON = false
+	defer func() { listLocal = false }()
+
+	var buf bytes.Buffer
+	listCmd.SetOut(&buf)
+	listCmd.SetErr(&buf)
+
+	err := runList(listCmd, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "gstack") {
+		t.Errorf("expected skill in output, got:\n%s", out)
+	}
+}
+
+func TestRunList_NoRegistries_FallsBackToLocal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{
+			"deploy": {
+				Version: "v1.0.0",
+				Source:  "github:ArtistfyHQ/team-skills@v1.0.0",
+				Targets: []string{"claude"},
+			},
+		},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	listLocal = false
+	listJSON = false
+	registryFlag = ""
+
+	var buf bytes.Buffer
+	listCmd.SetOut(&buf)
+	listCmd.SetErr(&buf)
+
+	err := runList(listCmd, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "deploy") {
+		t.Errorf("expected local skill in fallback output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "scribe connect") {
+		t.Errorf("expected connect hint in fallback output, got:\n%s", out)
+	}
+}

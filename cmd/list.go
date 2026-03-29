@@ -52,11 +52,32 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if len(cfg.TeamRepos) == 0 {
-		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
+	w := cmd.OutOrStdout()
+	useJSON := listJSON
+	if !useJSON {
+		if f, ok := w.(*os.File); ok {
+			useJSON = !isatty.IsTerminal(f.Fd())
+		}
 	}
 
-	// Migrate legacy state (no Registries field) for users who haven't synced yet.
+	// Local view: --local flag or no registries connected.
+	if listLocal || len(cfg.TeamRepos) == 0 {
+		if useJSON {
+			return printLocalJSON(w, st)
+		}
+		err := printLocalTable(w, st)
+		if err != nil {
+			return err
+		}
+		// Show hint when falling back due to no registries (not when --local is explicit).
+		if !listLocal && len(cfg.TeamRepos) == 0 && len(st.Installed) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Tip: connect a registry with \"scribe connect\" to see team skill status")
+		}
+		return nil
+	}
+
+	// Remote diff view (existing behavior).
 	st.MigrateRegistries(cfg.TeamRepos[0])
 
 	repos, err := filterRegistries(registryFlag, cfg.TeamRepos)
@@ -67,7 +88,6 @@ func runList(cmd *cobra.Command, args []string) error {
 	client := gh.NewClient(cfg.Token)
 	syncer := &sync.Syncer{Client: client, Targets: []targets.Target{}}
 
-	useJSON := listJSON || !isatty.IsTerminal(os.Stdout.Fd())
 	multiRegistry := len(repos) > 1
 
 	if useJSON {
