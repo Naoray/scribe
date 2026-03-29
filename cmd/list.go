@@ -28,6 +28,9 @@ var listCmd = &cobra.Command{
 
 func init() {
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output machine-readable JSON")
+	listCmd.Flags().StringVar(&registryFlag, "registry", "", "Show only this registry (owner/repo or repo name)")
+	listCmd.Flags().Bool("all", false, "List all registries (default behavior)")
+	listCmd.Flags().MarkHidden("all")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -45,51 +48,79 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
 
-	// For now: show first registry's skills (multi-registry list is a TODO).
-	teamRepo := cfg.TeamRepos[0]
+	// Migrate legacy state (no Registries field) for users who haven't synced yet.
+	st.MigrateRegistries(cfg.TeamRepos[0])
 
-	client := gh.NewClient(cfg.Token)
-	syncer := &sync.Syncer{Client: client, Targets: []targets.Target{}}
-
-	statuses, err := syncer.Diff(context.Background(), teamRepo, st)
+	repos, err := filterRegistries(registryFlag, cfg.TeamRepos)
 	if err != nil {
 		return err
 	}
 
+	client := gh.NewClient(cfg.Token)
+	syncer := &sync.Syncer{Client: client, Targets: []targets.Target{}}
+
 	useJSON := listJSON || !isatty.IsTerminal(os.Stdout.Fd())
+	multiRegistry := len(repos) > 1
 
 	if useJSON {
-		return printListJSON(cfg.TeamRepos, statuses)
+		return printMultiListJSON(repos, syncer, st)
 	}
-	return printListTable(teamRepo, st, statuses)
+	return printMultiListTable(repos, syncer, st, multiRegistry)
 }
 
-func printListTable(teamRepo string, st *state.State, statuses []sync.SkillStatus) error {
-	fmt.Printf("team: %s\n\n", teamRepo)
+func printMultiListTable(repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
+	var footerParts []string
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SKILL\tVERSION\tSTATUS\tTARGETS")
-
-	for _, sk := range statuses {
-		ver := sk.LoadoutRef
-		if ver == "" && sk.Installed != nil {
-			ver = sk.Installed.DisplayVersion()
+	for i, teamRepo := range repos {
+		statuses, err := syncer.Diff(context.Background(), teamRepo, st)
+		if err != nil {
+			return err
 		}
 
-		tgts := ""
-		if sk.Installed != nil {
-			tgts = strings.Join(sk.Installed.Targets, ", ")
+		if grouped {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("── %s ──\n", teamRepo)
+		} else {
+			fmt.Printf("team: %s\n\n", teamRepo)
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", sk.Name, ver, sk.Status.String(), tgts)
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "SKILL\tVERSION\tSTATUS\tAGENTS")
+
+		for _, sk := range statuses {
+			ver := sk.LoadoutRef
+			if ver == "" && sk.Installed != nil {
+				ver = sk.Installed.DisplayVersion()
+			}
+
+			agents := ""
+			if sk.Installed != nil {
+				agents = strings.Join(sk.Installed.Targets, ", ")
+			}
+
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", sk.Name, ver, sk.Status.String(), agents)
+		}
+
+		w.Flush()
+
+		counts := countStatuses(statuses)
+		if grouped {
+			parts := formatCounts(counts)
+			if parts != "" {
+				footerParts = append(footerParts, fmt.Sprintf("%s: %s", teamRepo, parts))
+			}
+		} else {
+			fmt.Printf("\n%d current · %d outdated · %d missing · %d extra\n",
+				counts[sync.StatusCurrent], counts[sync.StatusOutdated],
+				counts[sync.StatusMissing], counts[sync.StatusExtra])
+		}
 	}
 
-	w.Flush()
-
-	counts := countStatuses(statuses)
-	fmt.Printf("\n%d current · %d outdated · %d missing · %d extra\n",
-		counts[sync.StatusCurrent], counts[sync.StatusOutdated],
-		counts[sync.StatusMissing], counts[sync.StatusExtra])
+	if grouped && len(footerParts) > 0 {
+		fmt.Printf("\n%s\n", strings.Join(footerParts, "  ·  "))
+	}
 
 	if !st.Team.LastSync.IsZero() {
 		fmt.Printf("Last sync: %s\n", st.Team.LastSync.Local().Format("2006-01-02 15:04"))
@@ -97,44 +128,73 @@ func printListTable(teamRepo string, st *state.State, statuses []sync.SkillStatu
 	return nil
 }
 
-func printListJSON(teamRepos []string, statuses []sync.SkillStatus) error {
+// formatCounts builds a compact count string like "2 current · 1 outdated".
+func formatCounts(counts map[sync.Status]int) string {
+	var parts []string
+	if n := counts[sync.StatusCurrent]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d current", n))
+	}
+	if n := counts[sync.StatusOutdated]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d outdated", n))
+	}
+	if n := counts[sync.StatusMissing]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d missing", n))
+	}
+	if n := counts[sync.StatusExtra]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d extra", n))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func printMultiListJSON(repos []string, syncer *sync.Syncer, st *state.State) error {
 	type skillJSON struct {
 		Name       string   `json:"name"`
 		Status     string   `json:"status"`
 		Version    string   `json:"version,omitempty"`
 		LoadoutRef string   `json:"loadout_ref,omitempty"`
 		Maintainer string   `json:"maintainer,omitempty"`
-		Targets    []string `json:"targets,omitempty"`
+		Agents     []string `json:"agents,omitempty"`
 	}
 
-	skills := make([]skillJSON, 0, len(statuses))
-	for _, sk := range statuses {
-		ver := ""
-		var tgts []string
-		if sk.Installed != nil {
-			ver = sk.Installed.DisplayVersion()
-			tgts = sk.Installed.Targets
+	type registryJSON struct {
+		Registry string      `json:"registry"`
+		Skills   []skillJSON `json:"skills"`
+	}
+
+	var registries []registryJSON
+
+	for _, teamRepo := range repos {
+		statuses, err := syncer.Diff(context.Background(), teamRepo, st)
+		if err != nil {
+			return err
 		}
-		skills = append(skills, skillJSON{
-			Name:       sk.Name,
-			Status:     sk.Status.String(),
-			Version:    ver,
-			LoadoutRef: sk.LoadoutRef,
-			Maintainer: sk.Maintainer,
-			Targets:    tgts,
+
+		skills := make([]skillJSON, 0, len(statuses))
+		for _, sk := range statuses {
+			ver := ""
+			var agents []string
+			if sk.Installed != nil {
+				ver = sk.Installed.DisplayVersion()
+				agents = sk.Installed.Targets
+			}
+			skills = append(skills, skillJSON{
+				Name:       sk.Name,
+				Status:     sk.Status.String(),
+				Version:    ver,
+				LoadoutRef: sk.LoadoutRef,
+				Maintainer: sk.Maintainer,
+				Agents:     agents,
+			})
+		}
+
+		registries = append(registries, registryJSON{
+			Registry: teamRepo,
+			Skills:   skills,
 		})
 	}
 
-	counts := countStatuses(statuses)
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"team_repos": teamRepos,
-		"skills":     skills,
-		"summary": map[string]int{
-			"current":  counts[sync.StatusCurrent],
-			"outdated": counts[sync.StatusOutdated],
-			"missing":  counts[sync.StatusMissing],
-			"extra":    counts[sync.StatusExtra],
-		},
+		"registries": registries,
 	})
 }
 

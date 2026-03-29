@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -25,7 +26,8 @@ type InstalledSkill struct {
 	Source      string    `json:"source"`
 	InstalledAt time.Time `json:"installed_at"`
 	Targets     []string  `json:"targets"`
-	Paths       []string  `json:"paths"` // absolute paths written on disk
+	Paths       []string  `json:"paths"`                 // absolute paths written on disk
+	Registries  []string  `json:"registries,omitempty"`
 }
 
 // ShortSHA returns the first 7 chars of CommitSHA, or "" if not set.
@@ -111,6 +113,48 @@ func (s *State) RecordInstall(name string, skill InstalledSkill) {
 // Remove deletes a skill from state (does not touch disk files).
 func (s *State) Remove(name string) {
 	delete(s.Installed, name)
+}
+
+// AddRegistry appends a registry to a skill's Registries list (dedup, case-insensitive).
+func (s *State) AddRegistry(name, registry string) {
+	skill, ok := s.Installed[name]
+	if !ok {
+		return
+	}
+	for _, r := range skill.Registries {
+		if strings.EqualFold(r, registry) {
+			return
+		}
+	}
+	skill.Registries = append(skill.Registries, registry)
+	s.Installed[name] = skill
+}
+
+// RemoveRegistry removes a registry from a skill's Registries list.
+func (s *State) RemoveRegistry(name, registry string) {
+	skill, ok := s.Installed[name]
+	if !ok {
+		return
+	}
+	filtered := skill.Registries[:0]
+	for _, r := range skill.Registries {
+		if !strings.EqualFold(r, registry) {
+			filtered = append(filtered, r)
+		}
+	}
+	skill.Registries = filtered
+	s.Installed[name] = skill
+}
+
+// MigrateRegistries backfills the Registries field for skills that predate
+// multi-registry support. Called from the cmd layer with config.TeamRepos[0].
+func (s *State) MigrateRegistries(defaultRegistry string) {
+	for name, skill := range s.Installed {
+		if len(skill.Registries) == 0 {
+			skill.Registries = []string{defaultRegistry}
+			s.Installed[name] = skill
+		}
+	}
 }
 
 func statePath() (string, error) {
