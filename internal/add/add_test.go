@@ -179,6 +179,86 @@ func TestDiscoverLocalDeduplicates(t *testing.T) {
 	}
 }
 
+func TestAddBuildsPushFilesForReference(t *testing.T) {
+	// Test that Add correctly modifies scribe.toml for a source-reference candidate.
+	// We can't easily test the full GitHub flow without a mock, so we test the
+	// manifest modification logic instead.
+
+	original := `[team]
+name = "my-team"
+
+[skills]
+deploy = {source = "github:owner/repo@v1.0.0"}
+`
+	m, err := manifest.Parse([]byte(original))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate adding a new source-reference skill.
+	m.Skills["gstack"] = manifest.Skill{Source: "github:garrytan/gstack@v0.12.9.0"}
+
+	encoded, err := m.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	// Verify round-trip.
+	m2, err := manifest.Parse(encoded)
+	if err != nil {
+		t.Fatalf("re-Parse: %v", err)
+	}
+	if len(m2.Skills) != 2 {
+		t.Errorf("expected 2 skills, got %d", len(m2.Skills))
+	}
+	gstack, ok := m2.Skills["gstack"]
+	if !ok {
+		t.Fatal("gstack not found after round-trip")
+	}
+	if gstack.Source != "github:garrytan/gstack@v0.12.9.0" {
+		t.Errorf("gstack source: got %q", gstack.Source)
+	}
+}
+
+func TestAddBuildsPushFilesForUpload(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create a local skill with files.
+	skillDir := filepath.Join(home, ".claude", "skills", "cleanup")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Cleanup\nDo cleanup."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "helper.md"), []byte("# Helper"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate := add.Candidate{
+		Name:      "cleanup",
+		Origin:    "local",
+		LocalPath: skillDir,
+	}
+
+	files, err := add.ReadLocalSkillFiles(candidate)
+	if err != nil {
+		t.Fatalf("ReadLocalSkillFiles: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+
+	// Files should be keyed as skills/<name>/<filename>.
+	for path := range files {
+		if !strings.HasPrefix(path, "skills/cleanup/") {
+			t.Errorf("unexpected file path: %q", path)
+		}
+	}
+}
+
 func TestDiscoverRemoteSkills(t *testing.T) {
 	// DiscoverRemote takes parsed manifests rather than calling GitHub directly.
 	// The cmd layer fetches manifests; the core just filters and converts.

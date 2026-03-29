@@ -1,10 +1,13 @@
 package add
 
 import (
+	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
@@ -127,6 +130,125 @@ func (a *Adder) DiscoverRemote(targetManifest *manifest.Manifest, otherManifests
 	})
 
 	return candidates
+}
+
+// ReadLocalSkillFiles reads all files from a local skill directory and returns
+// them as a map of "skills/<name>/<relative-path>" → content string.
+// Used when uploading a local-only skill to a registry.
+func ReadLocalSkillFiles(c Candidate) (map[string]string, error) {
+	files := map[string]string{}
+	root := c.LocalPath
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", rel, err)
+		}
+		key := "skills/" + c.Name + "/" + filepath.ToSlash(rel)
+		files[key] = string(content)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk %s: %w", root, err)
+	}
+	return files, nil
+}
+
+// Add pushes one or more skills to the target registry's scribe.toml on GitHub.
+// For each candidate: adds a source reference or uploads files + self-reference.
+// Emits events throughout. Per-skill errors do not abort the loop.
+func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candidate) error {
+	owner, repo, err := splitRepo(targetRepo)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range candidates {
+		a.emit(SkillAddingMsg{Name: c.Name, Upload: c.NeedsUpload()})
+
+		if err := a.addOne(ctx, owner, repo, targetRepo, c); err != nil {
+			a.emit(SkillAddErrorMsg{Name: c.Name, Err: err})
+			continue
+		}
+
+		source := c.Source
+		if c.NeedsUpload() {
+			source = fmt.Sprintf("github:%s/%s@main", owner, repo)
+		}
+		a.emit(SkillAddedMsg{
+			Name:     c.Name,
+			Registry: targetRepo,
+			Source:   source,
+			Upload:   c.NeedsUpload(),
+		})
+	}
+
+	return nil
+}
+
+func (a *Adder) addOne(ctx context.Context, owner, repo, targetRepo string, c Candidate) error {
+	// Fetch current manifest.
+	raw, err := a.Client.FetchFile(ctx, owner, repo, "scribe.toml", "HEAD")
+	if err != nil {
+		return fmt.Errorf("fetch scribe.toml: %w", err)
+	}
+	m, err := manifest.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse scribe.toml: %w", err)
+	}
+
+	if m.Skills == nil {
+		m.Skills = make(map[string]manifest.Skill)
+	}
+
+	// Build the files to push.
+	pushFiles := map[string]string{}
+
+	if c.NeedsUpload() {
+		// Upload local files to registry.
+		localFiles, err := ReadLocalSkillFiles(c)
+		if err != nil {
+			return err
+		}
+		for k, v := range localFiles {
+			pushFiles[k] = v
+		}
+		// Self-referencing entry.
+		m.Skills[c.Name] = manifest.Skill{
+			Source: fmt.Sprintf("github:%s/%s@main", owner, repo),
+			Path:   "skills/" + c.Name,
+		}
+	} else {
+		// Source reference only.
+		m.Skills[c.Name] = manifest.Skill{Source: c.Source}
+	}
+
+	encoded, err := m.Encode()
+	if err != nil {
+		return err
+	}
+	pushFiles["scribe.toml"] = string(encoded)
+
+	msg := fmt.Sprintf("add skill: %s", c.Name)
+	return a.Client.PushFiles(ctx, owner, repo, pushFiles, msg)
+}
+
+func splitRepo(teamRepo string) (owner, repo string, err error) {
+	parts := strings.SplitN(teamRepo, "/", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo", teamRepo)
+	}
+	return parts[0], parts[1], nil
 }
 
 // isDirEmpty reports whether a directory has no files (ignoring subdirectories).
