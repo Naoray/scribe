@@ -177,15 +177,20 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, m *manifest.
 
 			var paths []string
 			var targetNames []string
+			targetFailed := false
 			for _, t := range s.Targets {
 				links, err := t.Install(sk.Name, canonicalDir)
 				if err != nil {
 					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
 					summary.Failed++
+					targetFailed = true
 					break
 				}
 				paths = append(paths, links...)
 				targetNames = append(targetNames, t.Name())
+			}
+			if targetFailed {
+				continue
 			}
 
 			latestSHA := ""

@@ -56,7 +56,7 @@ func validateAndConnect(ctx context.Context, repo string, cfg *config.Config, cl
 
 	for _, existing := range cfg.TeamRepos {
 		if strings.EqualFold(existing, repo) {
-			return true, nil, nil
+			return true, &manifest.Manifest{}, nil
 		}
 	}
 
