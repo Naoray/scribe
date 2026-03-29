@@ -29,6 +29,8 @@ var listCmd = &cobra.Command{
 func init() {
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output machine-readable JSON")
 	listCmd.Flags().StringVar(&registryFlag, "registry", "", "Show only this registry (owner/repo or repo name)")
+	listCmd.Flags().Bool("all", false, "List all registries (default behavior)")
+	listCmd.Flags().MarkHidden("all")
 }
 
 func runList(cmd *cobra.Command, args []string) error {

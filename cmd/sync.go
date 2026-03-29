@@ -27,6 +27,8 @@ var syncCmd = &cobra.Command{
 func init() {
 	syncCmd.Flags().BoolVar(&syncJSON, "json", false, "Output machine-readable JSON (for CI/agents)")
 	syncCmd.Flags().StringVar(&registryFlag, "registry", "", "Sync only this registry (owner/repo or repo name)")
+	syncCmd.Flags().Bool("all", false, "Sync all registries (default behavior)")
+	syncCmd.Flags().MarkHidden("all")
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
