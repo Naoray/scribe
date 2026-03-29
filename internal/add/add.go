@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -14,6 +15,9 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
 )
+
+// validSkillName matches safe skill names that work as TOML keys and filesystem paths.
+var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // Candidate represents a skill that can be added to a registry.
 type Candidate struct {
@@ -73,7 +77,7 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 				continue
 			}
 			name := entry.Name()
-			if seen[name] {
+			if seen[name] || !validSkillName.MatchString(name) {
 				continue
 			}
 
@@ -132,9 +136,13 @@ func (a *Adder) DiscoverRemote(targetManifest *manifest.Manifest, otherManifests
 	return candidates
 }
 
+// maxFileSize is the per-file size limit when uploading local skills (1 MB).
+const maxFileSize = 1 << 20
+
 // ReadLocalSkillFiles reads all files from a local skill directory and returns
 // them as a map of "skills/<name>/<relative-path>" → content string.
 // Used when uploading a local-only skill to a registry.
+// Rejects symlinks and files larger than maxFileSize.
 func ReadLocalSkillFiles(c Candidate) (map[string]string, error) {
 	files := map[string]string{}
 	root := c.LocalPath
@@ -143,12 +151,23 @@ func ReadLocalSkillFiles(c Candidate) (map[string]string, error) {
 		if err != nil {
 			return err
 		}
+		// Reject symlinks to prevent traversal outside the skill directory.
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
 		if d.IsDir() {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", rel, err)
+		}
+		if info.Size() > maxFileSize {
+			return fmt.Errorf("%s exceeds %d byte limit (%d bytes)", rel, maxFileSize, info.Size())
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -189,6 +208,7 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	// Accumulate all files to push in one commit.
 	pushFiles := map[string]string{}
 	var added []string
+	var failed int
 
 	for _, c := range candidates {
 		a.emit(SkillAddingMsg{Name: c.Name, Upload: c.NeedsUpload()})
@@ -197,6 +217,7 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 			localFiles, err := ReadLocalSkillFiles(c)
 			if err != nil {
 				a.emit(SkillAddErrorMsg{Name: c.Name, Err: err})
+				failed++
 				continue
 			}
 			for k, v := range localFiles {
@@ -224,7 +245,7 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	}
 
 	if len(added) == 0 {
-		return nil
+		return fmt.Errorf("all %d skills failed to add", failed)
 	}
 
 	encoded, err := m.Encode()
