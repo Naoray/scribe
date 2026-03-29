@@ -28,8 +28,13 @@ var (
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "Show installed skills and their status vs team loadout",
-	RunE:  runList,
+	Short: "Show installed skills and their sync status",
+	Long: `Show installed skills and their status.
+
+Without flags, compares local skills against team registries.
+With --local, shows only locally installed skills (offline, no registry needed).
+When no registries are connected, automatically shows local skills.`,
+	RunE: runList,
 }
 
 func init() {
