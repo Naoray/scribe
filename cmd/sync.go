@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -55,7 +54,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	client := gh.NewClient(cfg.Token)
-	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
+	tgts := targets.DefaultTargets()
 
 	useJSON := syncJSON || !isatty.IsTerminal(os.Stdout.Fd())
 	multiRegistry := len(cfg.TeamRepos) > 1
@@ -183,7 +182,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	if useJSON {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+		return writeJSON(os.Stdout, map[string]any{
 			"registries": jsonRegistries,
 			"summary": map[string]int{
 				"installed": totalSummary.Installed,
