@@ -29,7 +29,7 @@ type InstalledSkill struct {
     CommitSHA   string    `json:"commit_sha,omitempty"`
     Source      string    `json:"source"`
     InstalledAt time.Time `json:"installed_at"`
-    Targets     []string  `json:"targets"`
+    Targets     []string  `json:"agents"`
     Paths       []string  `json:"paths"`
     Registries  []string  `json:"registries"` // NEW: which registries reference this skill
 }
@@ -92,12 +92,12 @@ If skill `X` is declared by two registries at different versions, install the **
 
 ```
 ── ArtistfyHQ/team-skills ──
-  SKILL       VERSION   STATUS    TARGETS
+  SKILL       VERSION   STATUS    AGENTS
   deploy      v1.2.0    current   claude, cursor
   lint-rules  v0.8.1    outdated  claude
 
 ── vercel/skills ──
-  SKILL       VERSION   STATUS    TARGETS
+  SKILL       VERSION   STATUS    AGENTS
   nextjs      v2.0.0    missing   claude
 ```
 
@@ -135,7 +135,7 @@ ambiguous registry "skills" — did you mean:
           "name": "deploy",
           "version": "v1.2.0",
           "status": "current",
-          "targets": ["claude", "cursor"]
+          "agents": ["claude", "cursor"]
         }
       ]
     }
