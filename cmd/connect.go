@@ -100,7 +100,7 @@ func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
 		return err
 	}
 
-	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
+	tgts := targets.DefaultTargets()
 	syncer := &sync.Syncer{
 		Client:  client,
 		Targets: tgts,

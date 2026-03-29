@@ -51,6 +51,16 @@ func (m SyncProgress) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
+// findSkill returns a pointer to the SkillRow with the given name, or nil.
+func (m *SyncProgress) findSkill(name string) *SkillRow {
+	for i := range m.Skills {
+		if m.Skills[i].Name == name {
+			return &m.Skills[i]
+		}
+	}
+	return nil
+}
+
 func (m SyncProgress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -68,41 +78,26 @@ func (m SyncProgress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 	case sync.SkillDownloadingMsg:
-		for i := range m.Skills {
-			if m.Skills[i].Name == msg.Name {
-				m.Skills[i].State = SkillDownloading
-				break
-			}
+		if sk := m.findSkill(msg.Name); sk != nil {
+			sk.State = SkillDownloading
 		}
 
 	case sync.SkillInstalledMsg:
-		for i := range m.Skills {
-			if m.Skills[i].Name == msg.Name {
-				m.Skills[i].State = SkillInstalled
-				m.Skills[i].Version = msg.Version
-				break
-			}
+		if sk := m.findSkill(msg.Name); sk != nil {
+			sk.State = SkillInstalled
+			sk.Version = msg.Version
 		}
 
 	case sync.SkillSkippedMsg:
-		for i := range m.Skills {
-			if m.Skills[i].Name == msg.Name {
-				m.Skills[i].State = SkillSkipped
-				break
-			}
+		if sk := m.findSkill(msg.Name); sk != nil {
+			sk.State = SkillSkipped
 		}
 
 	case sync.SkillErrorMsg:
-		found := false
-		for i := range m.Skills {
-			if m.Skills[i].Name == msg.Name {
-				m.Skills[i].State = SkillFailed
-				m.Skills[i].Error = msg.Err.Error()
-				found = true
-				break
-			}
-		}
-		if !found {
+		if sk := m.findSkill(msg.Name); sk != nil {
+			sk.State = SkillFailed
+			sk.Error = msg.Err.Error()
+		} else {
 			m.Skills = append(m.Skills, SkillRow{
 				Name:  msg.Name,
 				State: SkillFailed,

@@ -153,19 +153,6 @@ func waitForAuth() error {
 	}
 }
 
-// connectOnly connects to a repo without syncing (sync is handled separately by the Bubble Tea model).
-func connectOnly(repo string, cfg *config.Config, client *gh.Client) error {
-	already, err := validateAndConnect(repo, cfg, client)
-	if err != nil {
-		return err
-	}
-	if already {
-		fmt.Printf("  Already connected to %s\n", repo)
-		return nil
-	}
-	fmt.Printf("  Connected to %s\n\n", repo)
-	return nil
-}
 
 // runSyncWithProgress runs sync with a Bubble Tea progress display.
 func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (syncsvc.SyncCompleteMsg, error) {
@@ -174,7 +161,7 @@ func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (sy
 		return syncsvc.SyncCompleteMsg{}, err
 	}
 
-	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
+	tgts := targets.DefaultTargets()
 
 	model := ui.NewSyncProgress(repo)
 	p := tea.NewProgram(model)
@@ -273,8 +260,14 @@ func runGuideInteractive() error {
 		if err != nil {
 			return err
 		}
-		if err := connectOnly(repo, cfg, client); err != nil {
+		already, err := validateAndConnect(repo, cfg, client)
+		if err != nil {
 			return err
+		}
+		if already {
+			fmt.Printf("  Already connected to %s\n", repo)
+		} else {
+			fmt.Printf("  Connected to %s\n\n", repo)
 		}
 		summary, err := runSyncWithProgress(repo, cfg, client)
 		if err != nil {

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 
@@ -15,7 +14,8 @@ func writeJSON(w io.Writer, v any) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(w, string(data))
+	data = append(data, '\n')
+	_, err = w.Write(data)
 	return err
 }
 
