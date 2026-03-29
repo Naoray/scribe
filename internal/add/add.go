@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
 )
@@ -99,6 +100,33 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 	})
 
 	return candidates, nil
+}
+
+// DiscoverRemote finds skills in other registries that are not in the target registry.
+// Takes pre-fetched manifests to keep GitHub calls in the cmd layer.
+func (a *Adder) DiscoverRemote(targetManifest *manifest.Manifest, otherManifests map[string]*manifest.Manifest) []Candidate {
+	var candidates []Candidate
+
+	for registry, m := range otherManifests {
+		for name, skill := range m.Skills {
+			// Skip if already in target registry.
+			if _, exists := targetManifest.Skills[name]; exists {
+				continue
+			}
+
+			candidates = append(candidates, Candidate{
+				Name:   name,
+				Origin: "registry:" + registry,
+				Source: skill.Source,
+			})
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Name < candidates[j].Name
+	})
+
+	return candidates
 }
 
 // isDirEmpty reports whether a directory has no files (ignoring subdirectories).

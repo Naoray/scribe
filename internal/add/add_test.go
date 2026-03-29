@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Naoray/scribe/internal/add"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -175,5 +176,46 @@ func TestDiscoverLocalDeduplicates(t *testing.T) {
 	// Should be the claude path (scanned first, wins).
 	if !strings.Contains(candidates[0].LocalPath, ".claude") {
 		t.Errorf("expected claude path, got %q", candidates[0].LocalPath)
+	}
+}
+
+func TestDiscoverRemoteSkills(t *testing.T) {
+	// DiscoverRemote takes parsed manifests rather than calling GitHub directly.
+	// The cmd layer fetches manifests; the core just filters and converts.
+
+	targetManifest := &manifest.Manifest{
+		Team:   &manifest.Team{Name: "my-team"},
+		Skills: map[string]manifest.Skill{
+			"deploy": {Source: "github:owner/repo@v1.0.0"},
+		},
+	}
+
+	otherManifests := map[string]*manifest.Manifest{
+		"vercel/skills": {
+			Team: &manifest.Team{Name: "vercel"},
+			Skills: map[string]manifest.Skill{
+				"nextjs":  {Source: "github:vercel/nextjs-skill@v2.0.0"},
+				"deploy":  {Source: "github:vercel/deploy@v1.0.0"}, // already in target — should be filtered
+			},
+		},
+	}
+
+	adder := &add.Adder{}
+	candidates := adder.DiscoverRemote(targetManifest, otherManifests)
+
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 remote candidate, got %d", len(candidates))
+	}
+	if candidates[0].Name != "nextjs" {
+		t.Errorf("expected nextjs, got %q", candidates[0].Name)
+	}
+	if candidates[0].Origin != "registry:vercel/skills" {
+		t.Errorf("origin: got %q", candidates[0].Origin)
+	}
+	if candidates[0].Source != "github:vercel/nextjs-skill@v2.0.0" {
+		t.Errorf("source: got %q", candidates[0].Source)
+	}
+	if candidates[0].NeedsUpload() {
+		t.Error("remote candidate should not need upload")
 	}
 }
