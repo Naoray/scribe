@@ -105,7 +105,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	// Fetch target registry manifest to filter already-added skills.
 	ctx := context.Background()
-	targetOwner, targetRepoName, _ := parseOwnerRepo(targetRepo)
+	targetOwner, targetRepoName, err := parseOwnerRepo(targetRepo)
+	if err != nil {
+		return fmt.Errorf("invalid target registry: %w", err)
+	}
 	targetRaw, err := client.FetchFile(ctx, targetOwner, targetRepoName, "scribe.toml", "HEAD")
 	if err != nil {
 		return fmt.Errorf("fetch target registry: %w", err)
@@ -121,7 +124,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if repo == targetRepo {
 			continue
 		}
-		o, r, _ := parseOwnerRepo(repo)
+		o, r, err := parseOwnerRepo(repo)
+		if err != nil {
+			continue // skip malformed registry entries
+		}
 		raw, err := client.FetchFile(ctx, o, r, "scribe.toml", "HEAD")
 		if err != nil {
 			continue // skip unreachable registries
@@ -193,54 +199,13 @@ func runAddByName(
 		}
 	}
 
-	// Wire events.
-	var results []addResult
-
-	adder.Emit = func(msg any) {
-		switch m := msg.(type) {
-		case add.SkillAddingMsg:
-			if !useJSON {
-				verb := "adding reference"
-				if m.Upload {
-					verb = "uploading"
-				}
-				fmt.Printf("  %s %s...\n", verb, m.Name)
-			}
-		case add.SkillAddedMsg:
-			if useJSON {
-				results = append(results, addResult{
-					Name:     m.Name,
-					Registry: m.Registry,
-					Source:   m.Source,
-					Uploaded: m.Upload,
-				})
-			} else {
-				fmt.Printf("  ✓ %s added to %s\n", m.Name, m.Registry)
-			}
-		case add.SkillAddErrorMsg:
-			if useJSON {
-				results = append(results, addResult{Name: m.Name, Registry: targetRepo, Error: m.Err.Error()})
-			} else {
-				fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", m.Name, m.Err)
-			}
-		}
-	}
+	results := wireAddEmit(adder, targetRepo, useJSON)
 
 	if err := adder.Add(ctx, targetRepo, []add.Candidate{*found}); err != nil {
 		return err
 	}
 
-	// Auto-sync.
-	synced := autoSync(ctx, targetRepo, st, client, tgts, useJSON)
-
-	if useJSON {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"added":  results,
-			"synced": synced,
-		})
-	}
-
-	return nil
+	return finishAdd(ctx, *results, targetRepo, st, client, tgts, useJSON)
 }
 
 func runAddInteractive(
@@ -300,50 +265,13 @@ func runAddInteractive(
 		}
 	}
 
-	// Wire events and add.
-	var results []addResult
-
-	adder.Emit = func(msg any) {
-		switch m := msg.(type) {
-		case add.SkillAddingMsg:
-			if !useJSON {
-				verb := "adding reference"
-				if m.Upload {
-					verb = "uploading"
-				}
-				fmt.Printf("  %s %s...\n", verb, m.Name)
-			}
-		case add.SkillAddedMsg:
-			if useJSON {
-				results = append(results, addResult{
-					Name: m.Name, Registry: m.Registry, Source: m.Source, Uploaded: m.Upload,
-				})
-			} else {
-				fmt.Printf("  ✓ %s added to %s\n", m.Name, m.Registry)
-			}
-		case add.SkillAddErrorMsg:
-			if useJSON {
-				results = append(results, addResult{Name: m.Name, Registry: targetRepo, Error: m.Err.Error()})
-			} else {
-				fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", m.Name, m.Err)
-			}
-		}
-	}
+	results := wireAddEmit(adder, targetRepo, useJSON)
 
 	if err := adder.Add(ctx, targetRepo, selected); err != nil {
 		return err
 	}
 
-	synced := autoSync(ctx, targetRepo, st, client, tgts, useJSON)
-
-	if useJSON {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"added":  results,
-			"synced": synced,
-		})
-	}
-
-	return nil
+	return finishAdd(ctx, *results, targetRepo, st, client, tgts, useJSON)
 }
 
 // sortCandidates sorts local-first, then remote, alphabetical within each.
@@ -403,6 +331,51 @@ func filterAlreadyInTarget(candidates []add.Candidate, targetManifest *manifest.
 		filtered = append(filtered, c)
 	}
 	return filtered
+}
+
+// wireAddEmit sets up the Adder's Emit callback to collect results. Returns
+// a pointer to the results slice so the caller can read it after Add completes.
+func wireAddEmit(adder *add.Adder, targetRepo string, useJSON bool) *[]addResult {
+	results := &[]addResult{}
+	adder.Emit = func(msg any) {
+		switch m := msg.(type) {
+		case add.SkillAddingMsg:
+			if !useJSON {
+				verb := "adding reference"
+				if m.Upload {
+					verb = "uploading"
+				}
+				fmt.Printf("  %s %s...\n", verb, m.Name)
+			}
+		case add.SkillAddedMsg:
+			if useJSON {
+				*results = append(*results, addResult{
+					Name: m.Name, Registry: m.Registry, Source: m.Source, Uploaded: m.Upload,
+				})
+			} else {
+				fmt.Printf("  ✓ %s added to %s\n", m.Name, m.Registry)
+			}
+		case add.SkillAddErrorMsg:
+			if useJSON {
+				*results = append(*results, addResult{Name: m.Name, Registry: targetRepo, Error: m.Err.Error()})
+			} else {
+				fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", m.Name, m.Err)
+			}
+		}
+	}
+	return results
+}
+
+// finishAdd runs auto-sync and optionally outputs JSON after add completes.
+func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *state.State, client *gh.Client, tgts []targets.Target, useJSON bool) error {
+	synced := autoSync(ctx, targetRepo, st, client, tgts, useJSON)
+	if useJSON {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"added":  results,
+			"synced": synced,
+		})
+	}
+	return nil
 }
 
 // autoSync runs a sync for the target registry after adding skills.

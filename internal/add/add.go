@@ -164,21 +164,50 @@ func ReadLocalSkillFiles(c Candidate) (map[string]string, error) {
 	return files, nil
 }
 
-// Add pushes one or more skills to the target registry's scribe.toml on GitHub.
-// For each candidate: adds a source reference or uploads files + self-reference.
-// Emits events throughout. Per-skill errors do not abort the loop.
+// Add pushes one or more skills to the target registry's scribe.toml on GitHub
+// in a single atomic commit. For each candidate: adds a source reference or
+// uploads files + self-reference. Emits events throughout.
 func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candidate) error {
 	owner, repo, err := splitRepo(targetRepo)
 	if err != nil {
 		return err
 	}
 
+	// Fetch the current manifest once.
+	raw, err := a.Client.FetchFile(ctx, owner, repo, "scribe.toml", "HEAD")
+	if err != nil {
+		return fmt.Errorf("fetch scribe.toml: %w", err)
+	}
+	m, err := manifest.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse scribe.toml: %w", err)
+	}
+	if m.Skills == nil {
+		m.Skills = make(map[string]manifest.Skill)
+	}
+
+	// Accumulate all files to push in one commit.
+	pushFiles := map[string]string{}
+	var added []string
+
 	for _, c := range candidates {
 		a.emit(SkillAddingMsg{Name: c.Name, Upload: c.NeedsUpload()})
 
-		if err := a.addOne(ctx, owner, repo, targetRepo, c); err != nil {
-			a.emit(SkillAddErrorMsg{Name: c.Name, Err: err})
-			continue
+		if c.NeedsUpload() {
+			localFiles, err := ReadLocalSkillFiles(c)
+			if err != nil {
+				a.emit(SkillAddErrorMsg{Name: c.Name, Err: err})
+				continue
+			}
+			for k, v := range localFiles {
+				pushFiles[k] = v
+			}
+			m.Skills[c.Name] = manifest.Skill{
+				Source: fmt.Sprintf("github:%s/%s@main", owner, repo),
+				Path:   "skills/" + c.Name,
+			}
+		} else {
+			m.Skills[c.Name] = manifest.Skill{Source: c.Source}
 		}
 
 		source := c.Source
@@ -191,46 +220,11 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 			Source:   source,
 			Upload:   c.NeedsUpload(),
 		})
+		added = append(added, c.Name)
 	}
 
-	return nil
-}
-
-func (a *Adder) addOne(ctx context.Context, owner, repo, targetRepo string, c Candidate) error {
-	// Fetch current manifest.
-	raw, err := a.Client.FetchFile(ctx, owner, repo, "scribe.toml", "HEAD")
-	if err != nil {
-		return fmt.Errorf("fetch scribe.toml: %w", err)
-	}
-	m, err := manifest.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("parse scribe.toml: %w", err)
-	}
-
-	if m.Skills == nil {
-		m.Skills = make(map[string]manifest.Skill)
-	}
-
-	// Build the files to push.
-	pushFiles := map[string]string{}
-
-	if c.NeedsUpload() {
-		// Upload local files to registry.
-		localFiles, err := ReadLocalSkillFiles(c)
-		if err != nil {
-			return err
-		}
-		for k, v := range localFiles {
-			pushFiles[k] = v
-		}
-		// Self-referencing entry.
-		m.Skills[c.Name] = manifest.Skill{
-			Source: fmt.Sprintf("github:%s/%s@main", owner, repo),
-			Path:   "skills/" + c.Name,
-		}
-	} else {
-		// Source reference only.
-		m.Skills[c.Name] = manifest.Skill{Source: c.Source}
+	if len(added) == 0 {
+		return nil
 	}
 
 	encoded, err := m.Encode()
@@ -239,7 +233,7 @@ func (a *Adder) addOne(ctx context.Context, owner, repo, targetRepo string, c Ca
 	}
 	pushFiles["scribe.toml"] = string(encoded)
 
-	msg := fmt.Sprintf("add skill: %s", c.Name)
+	msg := fmt.Sprintf("add skills: %s", strings.Join(added, ", "))
 	return a.Client.PushFiles(ctx, owner, repo, pushFiles, msg)
 }
 

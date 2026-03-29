@@ -2,19 +2,6 @@ package add
 
 // --- Events (tea.Msg-compatible) emitted during add ---
 
-// SkillDiscoveredMsg is sent once per candidate skill during discovery.
-type SkillDiscoveredMsg struct {
-	Name      string
-	Origin    string // "local" or "registry:owner/repo"
-	Source    string // "github:owner/repo@ref" or empty
-	LocalPath string
-}
-
-// RegistrySelectedMsg is sent when the target registry is chosen.
-type RegistrySelectedMsg struct {
-	Registry string
-}
-
 // SkillAddingMsg is sent when a skill push to GitHub begins.
 type SkillAddingMsg struct {
 	Name   string
@@ -35,9 +22,3 @@ type SkillAddErrorMsg struct {
 	Err  error
 }
 
-// AddCompleteMsg is sent when all skills have been processed.
-type AddCompleteMsg struct {
-	Added       int
-	Failed      int
-	SyncStarted bool
-}
