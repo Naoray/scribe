@@ -93,12 +93,21 @@ func (m SyncProgress) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sync.SkillErrorMsg:
+		found := false
 		for i := range m.Skills {
 			if m.Skills[i].Name == msg.Name {
 				m.Skills[i].State = SkillFailed
 				m.Skills[i].Error = msg.Err.Error()
+				found = true
 				break
 			}
+		}
+		if !found {
+			m.Skills = append(m.Skills, SkillRow{
+				Name:  msg.Name,
+				State: SkillFailed,
+				Error: msg.Err.Error(),
+			})
 		}
 
 	case sync.SyncCompleteMsg:

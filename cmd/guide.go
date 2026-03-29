@@ -15,7 +15,6 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
-	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/prereq"
 	"github.com/Naoray/scribe/internal/state"
 	syncsvc "github.com/Naoray/scribe/internal/sync"
@@ -157,35 +156,13 @@ func waitForAuth() error {
 
 // connectOnly connects to a repo without syncing (sync is handled separately by the Bubble Tea model).
 func connectOnly(repo string, cfg *config.Config, client *gh.Client) error {
-	owner, name, err := parseOwnerRepo(repo)
+	already, err := validateAndConnect(repo, cfg, client)
 	if err != nil {
 		return err
 	}
-
-	for _, existing := range cfg.TeamRepos {
-		if strings.EqualFold(existing, repo) {
-			fmt.Printf("  Already connected to %s\n", existing)
-			return nil
-		}
-	}
-
-	ctx := context.Background()
-	raw, err := client.FetchFile(ctx, owner, name, "scribe.toml", "HEAD")
-	if err != nil {
-		return fmt.Errorf("could not access %s: %w", repo, err)
-	}
-
-	m, err := manifest.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("invalid scribe.toml in %s: %w", repo, err)
-	}
-	if !m.IsLoadout() {
-		return fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
-	}
-
-	cfg.TeamRepos = append(cfg.TeamRepos, repo)
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("save config: %w", err)
+	if already {
+		fmt.Printf("  Already connected to %s\n", repo)
+		return nil
 	}
 	fmt.Printf("  Connected to %s\n\n", repo)
 	return nil
@@ -230,7 +207,6 @@ func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (sy
 
 // displaySummary renders the final summary box with next steps.
 func displaySummary(repo string, summary syncsvc.SyncCompleteMsg, path string) {
-	total := summary.Installed + summary.Updated + summary.Skipped
 	var content strings.Builder
 
 	content.WriteString(ui.Bold.Render("All set!"))
@@ -251,7 +227,6 @@ func displaySummary(repo string, summary syncsvc.SyncCompleteMsg, path string) {
 		content.WriteString("  • scribe list       See installed skills and status\n")
 	}
 
-	_ = total // suppress unused warning
 	content.WriteString("  • scribe guide      Run this guide again anytime\n")
 
 	fmt.Println(ui.Summary.Render(content.String()))

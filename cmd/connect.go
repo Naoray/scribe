@@ -46,38 +46,51 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	return connectToRepo(repo, cfg, gh.NewClient(cfg.Token))
 }
 
-// connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.
-func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
+// validateAndConnect validates the repo, checks for duplicates, verifies it has a
+// scribe.toml with a [team] section, and appends it to config. Does NOT sync.
+// Returns true if the repo was already connected (no-op).
+func validateAndConnect(repo string, cfg *config.Config, client *gh.Client) (alreadyConnected bool, err error) {
 	owner, name, err := parseOwnerRepo(repo)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	// Dedup check before any network calls (case-insensitive — GitHub repos are case-insensitive).
 	for _, existing := range cfg.TeamRepos {
 		if strings.EqualFold(existing, repo) {
-			fmt.Printf("Already connected to %s\n", existing)
-			return nil
+			return true, nil
 		}
 	}
 
 	ctx := context.Background()
 	raw, err := client.FetchFile(ctx, owner, name, "scribe.toml", "HEAD")
 	if err != nil {
-		return fmt.Errorf("could not access %s: %w", repo, err)
+		return false, fmt.Errorf("could not access %s: %w", repo, err)
 	}
 
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid scribe.toml in %s: %w", repo, err)
+		return false, fmt.Errorf("invalid scribe.toml in %s: %w", repo, err)
 	}
 	if !m.IsLoadout() {
-		return fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
+		return false, fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
 	}
 
 	cfg.TeamRepos = append(cfg.TeamRepos, repo)
 	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("save config: %w", err)
+		return false, fmt.Errorf("save config: %w", err)
+	}
+	return false, nil
+}
+
+// connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.
+func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
+	already, err := validateAndConnect(repo, cfg, client)
+	if err != nil {
+		return err
+	}
+	if already {
+		fmt.Printf("Already connected to %s\n", repo)
+		return nil
 	}
 	fmt.Printf("Connected to %s\n", repo)
 
@@ -108,6 +121,7 @@ func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
 		},
 	}
 
+	ctx := context.Background()
 	fmt.Printf("\nsyncing skills...\n\n")
 	if err := syncer.Run(ctx, repo, st); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: sync failed for %s: %v\n", repo, err)
