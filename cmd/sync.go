@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -146,7 +145,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	if useJSON {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+		return writeJSON(os.Stdout, map[string]any{
 			"team_repos": cfg.TeamRepos,
 			"skills":     jsonResults,
 			"summary": map[string]int{

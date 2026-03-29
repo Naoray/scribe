@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -95,7 +94,7 @@ func runGuideJSON(w io.Writer) error {
 		Description: "Verify installed skills",
 	})
 
-	return json.NewEncoder(w).Encode(map[string]any{
+	return writeJSON(w, map[string]any{
 		"status":        status,
 		"prerequisites": result,
 		"steps":         steps,

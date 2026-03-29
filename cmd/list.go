@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -126,7 +125,7 @@ func printListJSON(teamRepos []string, statuses []sync.SkillStatus) error {
 	}
 
 	counts := countStatuses(statuses)
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{
+	return writeJSON(os.Stdout, map[string]any{
 		"team_repos": teamRepos,
 		"skills":     skills,
 		"summary": map[string]int{
