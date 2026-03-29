@@ -125,7 +125,7 @@ func (m SyncProgress) View() tea.View {
 	b.WriteString(Title.Render(fmt.Sprintf("Syncing %s", m.Registry)))
 	b.WriteString("\n\n")
 
-	installed := 0
+	processed := 0
 	total := len(m.Skills)
 
 	for _, sk := range m.Skills {
@@ -140,21 +140,22 @@ func (m SyncProgress) View() tea.View {
 		case SkillInstalled:
 			icon = CheckOK.Render("✓")
 			detail = sk.Version
-			installed++
+			processed++
 		case SkillSkipped:
 			icon = Subtle.Render("–")
 			detail = Subtle.Render("current")
-			installed++
+			processed++
 		case SkillFailed:
 			icon = CheckFail.Render("✗")
 			detail = CheckFail.Render(sk.Error)
+			processed++
 		}
 
 		b.WriteString(fmt.Sprintf("  %s %-20s %s\n", icon, sk.Name, detail))
 	}
 
 	if total > 0 {
-		b.WriteString(fmt.Sprintf("\n  %d/%d skills processed\n", installed, total))
+		b.WriteString(fmt.Sprintf("\n  %d/%d skills processed\n", processed, total))
 	}
 
 	return tea.NewView(b.String())

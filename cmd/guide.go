@@ -165,6 +165,9 @@ func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (sy
 	model := ui.NewSyncProgress(repo)
 	p := tea.NewProgram(model)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	syncer := &syncsvc.Syncer{
 		Client:  client,
 		Targets: tgts,
@@ -173,7 +176,7 @@ func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (sy
 
 	// Run sync in background, sending events to the Bubble Tea program.
 	go func() {
-		if err := syncer.Run(context.Background(), repo, st); err != nil {
+		if err := syncer.Run(ctx, repo, st); err != nil {
 			p.Send(syncsvc.SkillErrorMsg{Name: "sync", Err: err})
 			p.Send(syncsvc.SyncCompleteMsg{Failed: 1})
 		}
@@ -197,8 +200,14 @@ func displaySummary(repo string, summary syncsvc.SyncCompleteMsg, path string) {
 	content.WriteString(ui.Bold.Render("All set!"))
 	content.WriteString("\n\n")
 	content.WriteString(fmt.Sprintf("  Registry    %s\n", repo))
-	content.WriteString(fmt.Sprintf("  Skills      %d installed, %d current, %d failed\n", summary.Installed+summary.Updated, summary.Skipped, summary.Failed))
-	content.WriteString(fmt.Sprintf("  Targets     claude, cursor\n"))
+	if path == "join" {
+		content.WriteString(fmt.Sprintf("  Skills      %d installed, %d current, %d failed\n", summary.Installed+summary.Updated, summary.Skipped, summary.Failed))
+		tgtNames := make([]string, len(targets.DefaultTargets()))
+		for i, t := range targets.DefaultTargets() {
+			tgtNames[i] = t.Name()
+		}
+		content.WriteString(fmt.Sprintf("  Targets     %s\n", strings.Join(tgtNames, ", ")))
+	}
 	content.WriteString("\n")
 	content.WriteString(ui.Bold.Render("  What's next:"))
 	content.WriteString("\n")

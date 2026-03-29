@@ -1,9 +1,11 @@
 package prereq
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/state"
@@ -31,21 +33,29 @@ type Result struct {
 	GitHubAuth  AuthResult        `json:"github_auth"`
 	ScribeDir   DirResult         `json:"scribe_dir"`
 	Connections ConnectionsResult `json:"connections"`
+	ConfigErr   string            `json:"config_error,omitempty"`
 }
 
 // Check runs all prerequisite checks and returns the result.
+// ConfigErr is non-nil if the config file exists but is malformed.
 func Check() Result {
-	cfg, _ := config.Load() // may be nil if no config exists
-	return Result{
+	cfg, err := config.Load()
+	r := Result{
 		GitHubAuth:  checkAuth(cfg),
 		ScribeDir:   checkDir(),
 		Connections: checkConnections(cfg),
 	}
+	if err != nil {
+		r.ConfigErr = err.Error()
+	}
+	return r
 }
 
 func checkAuth(cfg *config.Config) AuthResult {
-	// 1. gh auth token
-	if out, err := exec.Command("gh", "auth", "token").Output(); err == nil {
+	// 1. gh auth token (with timeout to avoid keychain hangs)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
 		if token := strings.TrimSpace(string(out)); token != "" {
 			return AuthResult{OK: true, Method: "gh_cli"}
 		}
