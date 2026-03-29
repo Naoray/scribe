@@ -91,6 +91,28 @@ func TestDisplayVersion(t *testing.T) {
 	}
 }
 
+func TestRegistriesRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	s, _ := state.Load()
+	s.RecordInstall("deploy", state.InstalledSkill{
+		Version:    "v1.0.0",
+		Source:     "github:org/deploy@v1.0.0",
+		Targets:    []string{"claude"},
+		Registries: []string{"ArtistfyHQ/team-skills"},
+	})
+
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, _ := state.Load()
+	skill := loaded.Installed["deploy"]
+	if len(skill.Registries) != 1 || skill.Registries[0] != "ArtistfyHQ/team-skills" {
+		t.Errorf("Registries: got %v", skill.Registries)
+	}
+}
+
 func TestRemove(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

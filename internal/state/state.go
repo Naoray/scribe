@@ -25,7 +25,8 @@ type InstalledSkill struct {
 	Source      string    `json:"source"`
 	InstalledAt time.Time `json:"installed_at"`
 	Targets     []string  `json:"targets"`
-	Paths       []string  `json:"paths"` // absolute paths written on disk
+	Paths       []string  `json:"paths"`                 // absolute paths written on disk
+	Registries  []string  `json:"registries,omitempty"`
 }
 
 // ShortSHA returns the first 7 chars of CommitSHA, or "" if not set.
