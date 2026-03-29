@@ -45,6 +45,6 @@ go run ./cmd/scribe --help
 ```
 ~/.scribe/
   state.json      # installed packages + team connection
-  cache/          # cached GitHub downloads
+  skills/         # canonical skill store (symlinked by targets)
   config.toml     # user preferences
 ```
