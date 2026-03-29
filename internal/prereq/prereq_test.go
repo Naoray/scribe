@@ -60,6 +60,9 @@ func TestCheck_WithConnections(t *testing.T) {
 
 	result := prereq.Check()
 
+	if !result.ScribeDir.OK {
+		t.Error("expected ScribeDir.OK to be true when ~/.scribe/ exists")
+	}
 	if len(result.Connections.Repos) != 1 {
 		t.Errorf("expected 1 connection, got %d", len(result.Connections.Repos))
 	}

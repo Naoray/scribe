@@ -35,14 +35,15 @@ type Result struct {
 
 // Check runs all prerequisite checks and returns the result.
 func Check() Result {
+	cfg, _ := config.Load() // may be nil if no config exists
 	return Result{
-		GitHubAuth:  checkAuth(),
+		GitHubAuth:  checkAuth(cfg),
 		ScribeDir:   checkDir(),
-		Connections: checkConnections(),
+		Connections: checkConnections(cfg),
 	}
 }
 
-func checkAuth() AuthResult {
+func checkAuth(cfg *config.Config) AuthResult {
 	// 1. gh auth token
 	if out, err := exec.Command("gh", "auth", "token").Output(); err == nil {
 		if token := strings.TrimSpace(string(out)); token != "" {
@@ -54,8 +55,7 @@ func checkAuth() AuthResult {
 		return AuthResult{OK: true, Method: "GITHUB_TOKEN"}
 	}
 	// 3. Config file token
-	cfg, err := config.Load()
-	if err == nil && cfg.Token != "" {
+	if cfg != nil && cfg.Token != "" {
 		return AuthResult{OK: true, Method: "config"}
 	}
 	return AuthResult{OK: false}
@@ -70,9 +70,8 @@ func checkDir() DirResult {
 	return DirResult{OK: err == nil, Path: dir}
 }
 
-func checkConnections() ConnectionsResult {
-	cfg, err := config.Load()
-	if err != nil {
+func checkConnections(cfg *config.Config) ConnectionsResult {
+	if cfg == nil {
 		return ConnectionsResult{}
 	}
 	return ConnectionsResult{Repos: cfg.TeamRepos}
