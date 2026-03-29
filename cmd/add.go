@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -241,7 +243,6 @@ func runAddByName(
 	return nil
 }
 
-// runAddInteractive is the Bubble Tea browse mode — implemented in Task 7.
 func runAddInteractive(
 	ctx context.Context,
 	candidates []add.Candidate,
@@ -253,7 +254,112 @@ func runAddInteractive(
 	tgts []targets.Target,
 	useJSON bool,
 ) error {
-	return fmt.Errorf("interactive mode not yet implemented — pass a skill name")
+	if len(candidates) == 0 {
+		fmt.Printf("All available skills are already in %s.\n", targetRepo)
+		return nil
+	}
+
+	// Sort: local first, then remote, alphabetical within each.
+	sortCandidates(candidates)
+
+	m := newAddModel(candidates, targetRepo)
+	p := tea.NewProgram(m)
+
+	finalModel, err := p.Run()
+	if err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	fm, ok := finalModel.(addModel)
+	if !ok || fm.quitting || !fm.confirmed {
+		return nil
+	}
+
+	selected := fm.selectedCandidates()
+	if len(selected) == 0 {
+		return nil
+	}
+
+	// Confirmation (unless --yes).
+	if !addYes {
+		fmt.Printf("\nAdding %d skill(s) to %s:\n", len(selected), targetRepo)
+		for _, c := range selected {
+			action := "reference"
+			if c.NeedsUpload() {
+				action = "upload"
+			}
+			fmt.Printf("  • %s (%s)\n", c.Name, action)
+		}
+
+		var confirm bool
+		if err := huh.NewConfirm().Title("Proceed?").Value(&confirm).Run(); err != nil {
+			return err
+		}
+		if !confirm {
+			return nil
+		}
+	}
+
+	// Wire events and add.
+	type addResult struct {
+		Name     string `json:"name"`
+		Registry string `json:"registry"`
+		Source   string `json:"source"`
+		Uploaded bool   `json:"uploaded"`
+	}
+	var results []addResult
+
+	adder.Emit = func(msg any) {
+		switch m := msg.(type) {
+		case add.SkillAddingMsg:
+			if !useJSON {
+				verb := "adding reference"
+				if m.Upload {
+					verb = "uploading"
+				}
+				fmt.Printf("  %s %s...\n", verb, m.Name)
+			}
+		case add.SkillAddedMsg:
+			if useJSON {
+				results = append(results, addResult{
+					Name: m.Name, Registry: m.Registry, Source: m.Source, Uploaded: m.Upload,
+				})
+			} else {
+				fmt.Printf("  ✓ %s added to %s\n", m.Name, m.Registry)
+			}
+		case add.SkillAddErrorMsg:
+			if !useJSON {
+				fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", m.Name, m.Err)
+			}
+		}
+	}
+
+	if err := adder.Add(ctx, targetRepo, selected); err != nil {
+		return err
+	}
+
+	synced := autoSync(ctx, targetRepo, st, client, tgts, useJSON)
+
+	if useJSON {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"added":  results,
+			"synced": synced,
+		})
+	}
+
+	return nil
+}
+
+// sortCandidates sorts local-first, then remote, alphabetical within each.
+func sortCandidates(candidates []add.Candidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		iLocal := candidates[i].Origin == "local"
+		jLocal := candidates[j].Origin == "local"
+		if iLocal != jLocal {
+			return iLocal
+		}
+		return candidates[i].Name < candidates[j].Name
+	})
 }
 
 // resolveTargetRegistry determines which registry to add skills to.
