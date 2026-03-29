@@ -1,6 +1,10 @@
 package cmd
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Naoray/scribe/internal/manifest"
+)
 
 func TestParseOwnerRepo(t *testing.T) {
 	cases := []struct {
@@ -24,7 +28,7 @@ func TestParseOwnerRepo(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			owner, repo, err := parseOwnerRepo(c.input)
+			owner, repo, err := manifest.ParseOwnerRepo(c.input)
 			if c.wantErr {
 				if err == nil {
 					t.Errorf("expected error for %q", c.input)

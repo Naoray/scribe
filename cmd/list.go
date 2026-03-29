@@ -18,8 +18,6 @@ import (
 	"github.com/Naoray/scribe/internal/targets"
 )
 
-var listJSON bool
-
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "Show installed skills and their status vs team loadout",
@@ -27,8 +25,8 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output machine-readable JSON")
-	listCmd.Flags().StringVar(&registryFlag, "registry", "", "Show only this registry (owner/repo or repo name)")
+	listCmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	listCmd.Flags().String("registry", "", "Show only this registry (owner/repo or repo name)")
 	listCmd.Flags().Bool("all", false, "List all registries (default behavior)")
 	listCmd.Flags().MarkHidden("all")
 }
@@ -51,28 +49,31 @@ func runList(cmd *cobra.Command, args []string) error {
 	// Migrate legacy state (no Registries field) for users who haven't synced yet.
 	st.MigrateRegistries(cfg.TeamRepos[0])
 
-	repos, err := filterRegistries(registryFlag, cfg.TeamRepos)
+	registry, _ := cmd.Flags().GetString("registry")
+	repos, err := filterRegistries(registry, cfg.TeamRepos)
 	if err != nil {
 		return err
 	}
 
-	client := gh.NewClient(cmd.Context(), cfg.Token)
+	ctx := cmd.Context()
+	client := gh.NewClient(ctx, cfg.Token)
 	syncer := &sync.Syncer{Client: sync.WrapGitHubClient(client), Targets: []targets.Target{}}
 
-	useJSON := listJSON || !isatty.IsTerminal(os.Stdout.Fd())
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	multiRegistry := len(repos) > 1
 
 	if useJSON {
-		return printMultiListJSON(repos, syncer, st)
+		return printMultiListJSON(ctx, repos, syncer, st)
 	}
-	return printMultiListTable(repos, syncer, st, multiRegistry)
+	return printMultiListTable(ctx, repos, syncer, st, multiRegistry)
 }
 
-func printMultiListTable(repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
+func printMultiListTable(ctx context.Context, repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
 	var footerParts []string
 
 	for i, teamRepo := range repos {
-		statuses, _, err := syncer.Diff(context.Background(), teamRepo, st)
+		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
 			return err
 		}
@@ -146,7 +147,7 @@ func formatCounts(counts map[sync.Status]int) string {
 	return strings.Join(parts, " · ")
 }
 
-func printMultiListJSON(repos []string, syncer *sync.Syncer, st *state.State) error {
+func printMultiListJSON(ctx context.Context, repos []string, syncer *sync.Syncer, st *state.State) error {
 	type skillJSON struct {
 		Name       string   `json:"name"`
 		Status     string   `json:"status"`
@@ -164,7 +165,7 @@ func printMultiListJSON(repos []string, syncer *sync.Syncer, st *state.State) er
 	var registries []registryJSON
 
 	for _, teamRepo := range repos {
-		statuses, _, err := syncer.Diff(context.Background(), teamRepo, st)
+		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
 			return err
 		}

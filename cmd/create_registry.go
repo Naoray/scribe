@@ -145,7 +145,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "\nRegistry created: %s\n\n", repoSlug)
-	return connectToRepo(repoSlug, cfg, client)
+	return connectToRepo(cmd.Context(), repoSlug, cfg, client)
 }
 
 // ghNameRe matches valid GitHub owner and repo names (alphanumeric, hyphens, dots, underscores).

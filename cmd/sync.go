@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,10 +12,7 @@ import (
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
-	"github.com/Naoray/scribe/internal/targets"
 )
-
-var syncJSON bool
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
@@ -25,8 +21,8 @@ var syncCmd = &cobra.Command{
 }
 
 func init() {
-	syncCmd.Flags().BoolVar(&syncJSON, "json", false, "Output machine-readable JSON (for CI/agents)")
-	syncCmd.Flags().StringVar(&registryFlag, "registry", "", "Sync only this registry (owner/repo or repo name)")
+	syncCmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
+	syncCmd.Flags().String("registry", "", "Sync only this registry (owner/repo or repo name)")
 	syncCmd.Flags().Bool("all", false, "Sync all registries (default behavior)")
 	syncCmd.Flags().MarkHidden("all")
 }
@@ -49,15 +45,17 @@ func runSync(cmd *cobra.Command, args []string) error {
 	// Migrate legacy state (no Registries field) on first multi-registry run.
 	st.MigrateRegistries(cfg.TeamRepos[0])
 
-	repos, err := filterRegistries(registryFlag, cfg.TeamRepos)
+	registry, _ := cmd.Flags().GetString("registry")
+	repos, err := filterRegistries(registry, cfg.TeamRepos)
 	if err != nil {
 		return err
 	}
 
-	client := gh.NewClient(cmd.Context(), cfg.Token)
-	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
+	ctx := cmd.Context()
+	client := gh.NewClient(ctx, cfg.Token)
 
-	useJSON := syncJSON || !isatty.IsTerminal(os.Stdout.Fd())
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	multiRegistry := len(cfg.TeamRepos) > 1
 
 	resolved := map[string]sync.SkillStatus{}
@@ -78,12 +76,20 @@ func runSync(cmd *cobra.Command, args []string) error {
 	var jsonRegistries []registryResult
 	totalSummary := sync.SyncCompleteMsg{}
 
+	ghClient := sync.WrapGitHubClient(client)
+
 	syncer := &sync.Syncer{
-		Client:  sync.WrapGitHubClient(client),
-		Targets: tgts,
+		Client: ghClient,
 	}
 
 	for _, teamRepo := range repos {
+		// Resolve targets from the manifest for this registry.
+		_, m, err := syncer.Diff(ctx, teamRepo, st)
+		if err != nil {
+			return err
+		}
+		syncer.Targets = resolveTargets(m.Targets)
+
 		clear(resolved)
 		var jsonResults []skillResult
 
@@ -158,7 +164,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "syncing %s...\n\n", teamRepo)
 		}
 
-		if err := syncer.Run(context.Background(), teamRepo, st); err != nil {
+		if err := syncer.Run(ctx, teamRepo, st); err != nil {
 			return err
 		}
 

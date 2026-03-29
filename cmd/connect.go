@@ -15,7 +15,6 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
-	"github.com/Naoray/scribe/internal/targets"
 )
 
 var connectCmd = &cobra.Command{
@@ -43,12 +42,12 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return connectToRepo(repo, cfg, gh.NewClient(cmd.Context(), cfg.Token))
+	return connectToRepo(cmd.Context(), repo, cfg, gh.NewClient(cmd.Context(), cfg.Token))
 }
 
 // connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.
-func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
-	owner, name, err := parseOwnerRepo(repo)
+func connectToRepo(ctx context.Context, repo string, cfg *config.Config, client *gh.Client) error {
+	owner, name, err := manifest.ParseOwnerRepo(repo)
 	if err != nil {
 		return err
 	}
@@ -61,7 +60,6 @@ func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
 		}
 	}
 
-	ctx := context.Background()
 	raw, err := client.FetchFile(ctx, owner, name, "scribe.toml", "HEAD")
 	if err != nil {
 		return fmt.Errorf("could not access %s: %w", repo, err)
@@ -87,7 +85,7 @@ func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
 		return err
 	}
 
-	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
+	tgts := resolveTargets(m.Targets)
 	syncer := &sync.Syncer{
 		Client:  sync.WrapGitHubClient(client),
 		Targets: tgts,
@@ -135,7 +133,7 @@ func resolveRepo(args []string) (string, error) {
 		Title("Team skills repo").
 		Placeholder("owner/repo").
 		Validate(func(s string) error {
-			_, _, err := parseOwnerRepo(s)
+			_, _, err := manifest.ParseOwnerRepo(s)
 			return err
 		}).
 		Value(&repo).
@@ -146,12 +144,3 @@ func resolveRepo(args []string) (string, error) {
 	return repo, nil
 }
 
-// parseOwnerRepo validates and splits an "owner/repo" string.
-func parseOwnerRepo(s string) (owner, repo string, err error) {
-	s = strings.TrimSpace(s)
-	parts := strings.SplitN(s, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo (e.g. ArtistfyHQ/team-skills)", s)
-	}
-	return parts[0], parts[1], nil
-}
