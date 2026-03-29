@@ -43,7 +43,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return connectToRepo(repo, cfg, gh.NewClient(cfg.Token))
+	return connectToRepo(repo, cfg, gh.NewClient(cmd.Context(), cfg.Token))
 }
 
 // connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.

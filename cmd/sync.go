@@ -54,7 +54,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := gh.NewClient(cfg.Token)
+	client := gh.NewClient(cmd.Context(), cfg.Token)
 	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
 
 	useJSON := syncJSON || !isatty.IsTerminal(os.Stdout.Fd())

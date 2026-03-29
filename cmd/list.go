@@ -56,7 +56,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := gh.NewClient(cfg.Token)
+	client := gh.NewClient(cmd.Context(), cfg.Token)
 	syncer := &sync.Syncer{Client: client, Targets: []targets.Target{}}
 
 	useJSON := listJSON || !isatty.IsTerminal(os.Stdout.Fd())

@@ -91,7 +91,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	client := gh.NewClient(cfg.Token)
+	client := gh.NewClient(cmd.Context(), cfg.Token)
 
 	// Auth check (#3) — creating repos requires authentication.
 	if !client.IsAuthenticated() {
