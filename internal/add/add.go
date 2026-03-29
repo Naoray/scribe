@@ -1,7 +1,13 @@
 package add
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
 )
 
@@ -31,4 +37,92 @@ func (a *Adder) emit(msg any) {
 	if a.Emit != nil {
 		a.Emit(msg)
 	}
+}
+
+// DiscoverLocal scans ~/.claude/skills/ and ~/.scribe/skills/ for skills on disk.
+// Cross-references state for source info. Deduplicates by name (first seen wins).
+func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("home dir: %w", err)
+	}
+
+	dirs := []string{
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".scribe", "skills"),
+	}
+
+	seen := map[string]bool{}
+	var candidates []Candidate
+
+	for _, base := range dirs {
+		entries, err := os.ReadDir(base)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", base, err)
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if seen[name] {
+				continue
+			}
+
+			skillDir := filepath.Join(base, name)
+			empty, err := isDirEmpty(skillDir)
+			if err != nil || empty {
+				continue
+			}
+
+			seen[name] = true
+
+			c := Candidate{
+				Name:      name,
+				Origin:    "local",
+				LocalPath: skillDir,
+			}
+			if installed, ok := st.Installed[name]; ok && installed.Source != "" {
+				c.Source = installed.Source
+			}
+
+			candidates = append(candidates, c)
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Name < candidates[j].Name
+	})
+
+	return candidates, nil
+}
+
+// isDirEmpty reports whether a directory has no files (ignoring subdirectories).
+func isDirEmpty(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			return false, nil
+		}
+	}
+	// Check subdirectories recursively.
+	for _, e := range entries {
+		if e.IsDir() {
+			empty, err := isDirEmpty(filepath.Join(dir, e.Name()))
+			if err != nil {
+				return false, err
+			}
+			if !empty {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
 }
