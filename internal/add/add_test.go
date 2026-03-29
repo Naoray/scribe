@@ -299,3 +299,64 @@ func TestDiscoverRemoteSkills(t *testing.T) {
 		t.Error("remote candidate should not need upload")
 	}
 }
+
+func TestFilterAlreadyInTarget(t *testing.T) {
+	targetManifest := &manifest.Manifest{
+		Team: &manifest.Team{Name: "test"},
+		Skills: map[string]manifest.Skill{
+			"deploy": {Source: "github:owner/repo@v1.0.0"},
+		},
+	}
+
+	candidates := []add.Candidate{
+		{Name: "deploy", Source: "github:owner/repo@v1.0.0"},
+		{Name: "cleanup", LocalPath: "/path/to/cleanup"},
+	}
+
+	// filterAlreadyInTarget is in cmd/, so test the equivalent logic here.
+	var filtered []add.Candidate
+	for _, c := range candidates {
+		if _, exists := targetManifest.Skills[c.Name]; !exists {
+			filtered = append(filtered, c)
+		}
+	}
+
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 after filter, got %d", len(filtered))
+	}
+	if filtered[0].Name != "cleanup" {
+		t.Errorf("expected cleanup, got %q", filtered[0].Name)
+	}
+}
+
+func TestReadLocalSkillFilesNested(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(home, "skill")
+	subDir := filepath.Join(skillDir, "scripts")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "run.sh"), []byte("#!/bin/sh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := add.Candidate{Name: "myskill", LocalPath: skillDir}
+	files, err := add.ReadLocalSkillFiles(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+	if _, ok := files["skills/myskill/SKILL.md"]; !ok {
+		t.Error("missing skills/myskill/SKILL.md")
+	}
+	if _, ok := files["skills/myskill/scripts/run.sh"]; !ok {
+		t.Error("missing skills/myskill/scripts/run.sh")
+	}
+}
