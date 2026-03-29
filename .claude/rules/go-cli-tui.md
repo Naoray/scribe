@@ -31,7 +31,7 @@ internal/
 func runSync(cmd *cobra.Command, args []string) error {
     cfg := configFromFlags()  // flags → config struct
     m := newModel(cfg)        // config → model constructor
-    p := tea.NewProgram(m)
+    p := tea.NewProgram(m, tea.WithContext(cmd.Context()))  // propagate Cobra context
 
     finalModel, err := p.Run()
     switch {
@@ -59,6 +59,39 @@ func runSync(cmd *cobra.Command, args []string) error {
 - `tea.Suspend` for ctrl+z job control (v2 only)
 - External SIGTERM triggers clean terminal restoration automatically
 - Use `tea.WithoutSignalHandler` only if you need custom signal handling
+
+## Cobra + Huh v2: Flags-Then-Prompt Pattern
+
+The production-ready pattern is a three-tier priority chain — **flags override config, config overrides interactive prompts**:
+
+```go
+RunE: func(cmd *cobra.Command, args []string) error {
+    name, _ := cmd.Flags().GetString("name")
+    isTTY := isatty.IsTerminal(os.Stdin.Fd())
+
+    // Prompt only for missing values, only if interactive
+    if name == "" && isTTY {
+        if err := huh.NewInput().Title("Name").Value(&name).Run(); err != nil {
+            return err
+        }
+    }
+    if name == "" {
+        return fmt.Errorf("--name is required in non-interactive mode")
+    }
+    return execute(name)
+}
+```
+
+### Standalone fields vs forms
+- **Standalone field** (single prompt): `huh.NewInput().Title(...).Value(&v).Run()` — no `NewForm` wrapper needed
+- **Full form** (multi-field with context): `huh.NewForm(huh.NewGroup(...)).RunWithContext(cmd.Context())`
+- Use `RunWithContext(cmd.Context())` for forms so Cobra's signal handling flows through
+- Standalone `.Run()` is fine for quick single-value prompts
+
+### Rules
+- Always check TTY with `isatty.IsTerminal(os.Stdin.Fd())` before running any Huh prompt
+- Non-TTY must fail with an actionable error ("--flag is required in non-interactive mode")
+- Flags take precedence over prompts — only prompt for values not provided via flags
 
 ## Event-Driven Core Pattern
 
@@ -340,5 +373,7 @@ func TestSomething(t *testing.T) {
 - **Atomic write without rename** — writing directly to the state file risks corruption on interrupt. Always write `.tmp` then `os.Rename`.
 - **Aborting loops on per-item errors** — emit error event, continue loop, report aggregate failure count.
 - **Hardcoding output format** — always support `--json` and auto-detect non-TTY. CI agents and piped commands need machine-readable output.
-- **Blocking huh prompts without TTY check** — Huh v2 does NOT auto-detect non-TTY. `huh.NewForm().Run()` hangs on non-TTY stdin. Always gate with `term.IsTerminal(int(os.Stdin.Fd()))`.
+- **Blocking huh prompts without TTY check** — Huh v2 does NOT auto-detect non-TTY. `huh.NewForm().Run()` hangs on non-TTY stdin. Always gate with `isatty.IsTerminal(os.Stdin.Fd())`.
 - **Using globals for state sharing** — pass flags via config struct to model constructor, type-assert final model for results. Never use package-level variables to shuttle data between Cobra and Bubble Tea.
+- **Not propagating Cobra context to Huh forms** — use `form.RunWithContext(cmd.Context())` so Cobra's signal handling flows through.
+- **Relying on `tea.BackgroundColorMsg` in tmux** — `tea.RequestBackgroundColor` silently fails in tmux. Provide a fallback (force dark mode or use `lipgloss.HasDarkBackground()`).
