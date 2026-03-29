@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
