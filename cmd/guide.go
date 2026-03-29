@@ -154,13 +154,11 @@ func waitForAuth() error {
 }
 
 // runSyncWithProgress runs sync with a Bubble Tea progress display.
-func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (syncsvc.SyncCompleteMsg, error) {
+func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (syncsvc.SyncCompleteMsg, []targets.Target, error) {
 	st, err := state.Load()
 	if err != nil {
-		return syncsvc.SyncCompleteMsg{}, err
+		return syncsvc.SyncCompleteMsg{}, nil, err
 	}
-
-	tgts := targets.DefaultTargets()
 
 	model := ui.NewSyncProgress(repo)
 	p := tea.NewProgram(model)
@@ -169,14 +167,20 @@ func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (sy
 	defer cancel()
 
 	syncer := &syncsvc.Syncer{
-		Client:  syncsvc.WrapGitHubClient(client),
-		Targets: tgts,
-		Emit:    func(msg any) { p.Send(msg) },
+		Client: syncsvc.WrapGitHubClient(client),
+		Emit:   func(msg any) { p.Send(msg) },
 	}
 
-	// Run sync in background, sending events to the Bubble Tea program.
+	// Diff first to get manifest targets, then sync without a redundant fetch.
 	go func() {
-		if err := syncer.Run(ctx, repo, st); err != nil {
+		statuses, m, err := syncer.Diff(ctx, repo, st)
+		if err != nil {
+			p.Send(syncsvc.SkillErrorMsg{Name: "sync", Err: err})
+			p.Send(syncsvc.SyncCompleteMsg{Failed: 1})
+			return
+		}
+		syncer.Targets = resolveTargets(m.Targets)
+		if err := syncer.RunWithDiff(ctx, statuses, m, st); err != nil {
 			p.Send(syncsvc.SkillErrorMsg{Name: "sync", Err: err})
 			p.Send(syncsvc.SyncCompleteMsg{Failed: 1})
 		}
@@ -184,17 +188,17 @@ func runSyncWithProgress(repo string, cfg *config.Config, client *gh.Client) (sy
 
 	finalModel, err := p.Run()
 	if err != nil {
-		return syncsvc.SyncCompleteMsg{}, fmt.Errorf("TUI error: %w", err)
+		return syncsvc.SyncCompleteMsg{}, nil, fmt.Errorf("TUI error: %w", err)
 	}
 
 	if fm, ok := finalModel.(ui.SyncProgress); ok {
-		return fm.Summary, nil
+		return fm.Summary, syncer.Targets, nil
 	}
-	return syncsvc.SyncCompleteMsg{}, nil
+	return syncsvc.SyncCompleteMsg{}, syncer.Targets, nil
 }
 
 // displaySummary renders the final summary box with next steps.
-func displaySummary(repo string, summary syncsvc.SyncCompleteMsg, path string) {
+func displaySummary(repo string, summary syncsvc.SyncCompleteMsg, tgts []targets.Target, path string) {
 	var content strings.Builder
 
 	content.WriteString(ui.Bold.Render("All set!"))
@@ -202,8 +206,8 @@ func displaySummary(repo string, summary syncsvc.SyncCompleteMsg, path string) {
 	content.WriteString(fmt.Sprintf("  Registry    %s\n", repo))
 	if path == "join" {
 		content.WriteString(fmt.Sprintf("  Skills      %d installed, %d current, %d failed\n", summary.Installed+summary.Updated, summary.Skipped, summary.Failed))
-		tgtNames := make([]string, len(targets.DefaultTargets()))
-		for i, t := range targets.DefaultTargets() {
+		tgtNames := make([]string, len(tgts))
+		for i, t := range tgts {
 			tgtNames[i] = t.Name()
 		}
 		content.WriteString(fmt.Sprintf("  Targets     %s\n", strings.Join(tgtNames, ", ")))
@@ -278,11 +282,11 @@ func runGuideInteractive() error {
 		} else {
 			fmt.Printf("  Connected to %s\n\n", repo)
 		}
-		summary, err := runSyncWithProgress(repo, cfg, client)
+		summary, tgts, err := runSyncWithProgress(repo, cfg, client)
 		if err != nil {
 			return err
 		}
-		displaySummary(repo, summary, "join")
+		displaySummary(repo, summary, tgts, "join")
 
 	case "create":
 		if err := runCreateRegistry(createRegistryCmd, nil); err != nil {
@@ -294,7 +298,7 @@ func runGuideInteractive() error {
 		}
 		if len(cfg.TeamRepos) > 0 {
 			repo := cfg.TeamRepos[len(cfg.TeamRepos)-1]
-			displaySummary(repo, syncsvc.SyncCompleteMsg{}, "create")
+			displaySummary(repo, syncsvc.SyncCompleteMsg{}, nil, "create")
 		}
 
 	case "view":

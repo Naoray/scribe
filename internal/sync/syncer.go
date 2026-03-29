@@ -115,7 +115,16 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	if err != nil {
 		return err
 	}
+	return s.apply(ctx, statuses, m, st)
+}
 
+// RunWithDiff is like Run but uses pre-computed diff results, avoiding a
+// redundant manifest fetch when the caller already called Diff.
+func (s *Syncer) RunWithDiff(ctx context.Context, statuses []SkillStatus, m *manifest.Manifest, st *state.State) error {
+	return s.apply(ctx, statuses, m, st)
+}
+
+func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, m *manifest.Manifest, st *state.State) error {
 	// Emit resolved status for each skill (populates list view before downloads start).
 	for _, sk := range statuses {
 		s.emit(SkillResolvedMsg{sk})

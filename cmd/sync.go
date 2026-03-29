@@ -82,8 +82,8 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, teamRepo := range repos {
-		// Resolve targets from the manifest for this registry.
-		_, m, err := syncer.Diff(ctx, teamRepo, st)
+		// Diff once to get statuses and the manifest for target resolution.
+		statuses, m, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
 			return err
 		}
@@ -163,7 +163,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "syncing %s...\n\n", teamRepo)
 		}
 
-		if err := syncer.Run(ctx, teamRepo, st); err != nil {
+		if err := syncer.RunWithDiff(ctx, statuses, m, st); err != nil {
 			return err
 		}
 
