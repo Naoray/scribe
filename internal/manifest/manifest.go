@@ -112,3 +112,13 @@ func (m *Manifest) Validate() error {
 }
 
 func (m *Manifest) IsLoadout() bool { return m.Team != nil }
+
+// ParseOwnerRepo splits an "owner/repo" string and validates it.
+func ParseOwnerRepo(s string) (owner, repo string, err error) {
+	s = strings.TrimSpace(s)
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo", s)
+	}
+	return parts[0], parts[1], nil
+}

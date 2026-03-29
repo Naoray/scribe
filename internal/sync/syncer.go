@@ -135,8 +135,14 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 				continue
 			}
 
+			// Convert github.SkillFile → targets.SkillFile for the store writer.
+			tFiles := make([]targets.SkillFile, len(files))
+			for i, f := range files {
+				tFiles[i] = targets.SkillFile{Path: f.Path, Content: f.Content}
+			}
+
 			// Write files to canonical store once, then symlink per target.
-			canonicalDir, err := targets.WriteToStore(sk.Name, files)
+			canonicalDir, err := targets.WriteToStore(sk.Name, tFiles)
 			if err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("write store: %w", err)})
 				summary.Failed++
