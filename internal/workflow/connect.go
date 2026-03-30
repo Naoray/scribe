@@ -39,7 +39,6 @@ func StepDedupCheck(_ context.Context, b *Bag) error {
 	for _, existing := range b.Config.TeamRepos {
 		if strings.EqualFold(existing, b.RepoArg) {
 			fmt.Printf("Already connected to %s\n", existing)
-			b.skipRemaining = true
 			return errSkip
 		}
 	}

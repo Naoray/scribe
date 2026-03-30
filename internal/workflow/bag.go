@@ -16,11 +16,6 @@ type Bag struct {
 	JSONFlag bool
 	RepoFlag string // --registry filter
 
-	// Create-specific inputs
-	Team, Owner, Repo string
-	Private           bool
-	IsTTY             bool
-
 	// Populated by steps
 	Config    *config.Config
 	State     *state.State
@@ -36,7 +31,6 @@ type Bag struct {
 	// If nil, defaults to returning all repos.
 	FilterRegistries func(flag string, repos []string) ([]string, error)
 
-	// Internal fields populated by steps (unexported via methods)
-	manifest      *manifest.Manifest
-	skipRemaining bool
+	// Internal fields populated by steps
+	manifest *manifest.Manifest
 }
