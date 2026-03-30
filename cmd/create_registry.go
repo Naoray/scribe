@@ -147,16 +147,14 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "\nRegistry created: %s\n\n", repoSlug)
 
-	// Connect to the newly created registry via the connect workflow.
+	// Connect to the newly created registry via the connect workflow tail.
+	// Config and Client are already loaded — skip LoadConfig.
 	bag := &workflow.Bag{
 		RepoArg: repoSlug,
 		Config:  cfg,
 		Client:  client,
 	}
-	// Skip LoadConfig — we already have cfg and client.
-	connectSteps := workflow.ConnectSteps()
-	// Remove LoadConfig (first step) since we've already loaded.
-	return workflow.Run(ctx, connectSteps[1:], bag)
+	return workflow.Run(ctx, workflow.ConnectTail(), bag)
 }
 
 // ghNameRe matches valid GitHub owner and repo names (alphanumeric, hyphens, dots, underscores).

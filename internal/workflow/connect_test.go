@@ -30,6 +30,16 @@ func TestConnectSteps_StartsWithLoadConfig(t *testing.T) {
 	}
 }
 
+func TestConnectTail_SkipsLoadConfig(t *testing.T) {
+	tail := workflow.ConnectTail()
+	if tail[0].Name == "LoadConfig" {
+		t.Error("ConnectTail should not start with LoadConfig")
+	}
+	if tail[0].Name != "DedupCheck" {
+		t.Errorf("expected ConnectTail to start with DedupCheck, got %s", tail[0].Name)
+	}
+}
+
 func TestConnectSteps_ContainsDedupCheck(t *testing.T) {
 	steps := workflow.ConnectSteps()
 	found := false

@@ -29,6 +29,12 @@ func ConnectSteps() []Step {
 	}
 }
 
+// ConnectTail returns the connect steps starting from DedupCheck — for use
+// by create-registry when Config and Client are already populated.
+func ConnectTail() []Step {
+	return ConnectSteps()[1:] // skip LoadConfig
+}
+
 func StepDedupCheck(_ context.Context, b *Bag) error {
 	for _, existing := range b.Config.TeamRepos {
 		if strings.EqualFold(existing, b.RepoArg) {
