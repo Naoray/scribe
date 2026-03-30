@@ -16,6 +16,7 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 var connectCmd = &cobra.Command{
@@ -88,22 +89,25 @@ func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
 	}
 
 	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
+	fmtr := workflow.NewFormatter(false, false) // connect always uses text, single registry
+
 	syncer := &sync.Syncer{
 		Client:  client,
 		Targets: tgts,
 		Emit: func(msg any) {
 			switch m := msg.(type) {
+			case sync.SkillResolvedMsg:
+				fmtr.OnSkillResolved(m.Name, m.SkillStatus)
+			case sync.SkillSkippedMsg:
+				fmtr.OnSkillSkipped(m.Name, sync.SkillStatus{})
+			case sync.SkillDownloadingMsg:
+				fmtr.OnSkillDownloading(m.Name)
 			case sync.SkillInstalledMsg:
-				verb := "installed"
-				if m.Updated {
-					verb = "updated to"
-				}
-				fmt.Printf("  %-20s %s %s\n", m.Name, verb, m.Version)
+				fmtr.OnSkillInstalled(m.Name, m.Version, m.Updated)
 			case sync.SkillErrorMsg:
-				fmt.Fprintf(os.Stderr, "  %-20s error: %v\n", m.Name, m.Err)
+				fmtr.OnSkillError(m.Name, m.Err)
 			case sync.SyncCompleteMsg:
-				fmt.Printf("\ndone: %d installed, %d updated, %d current, %d failed\n",
-					m.Installed, m.Updated, m.Skipped, m.Failed)
+				fmtr.OnSyncComplete(m)
 			}
 		},
 	}
@@ -115,9 +119,10 @@ func connectToRepo(repo string, cfg *config.Config, client *gh.Client) error {
 		if !isatty.IsTerminal(os.Stdout.Fd()) {
 			return fmt.Errorf("sync failed: %w", err)
 		}
+		return nil
 	}
 
-	return nil
+	return fmtr.Flush()
 }
 
 // resolveRepo returns the owner/repo string from args or an interactive prompt.
