@@ -32,6 +32,9 @@ func newJSONFormatter(out io.Writer) *jsonFormatter {
 	return &jsonFormatter{out: out}
 }
 
+func (f *jsonFormatter) OnStepStarted(_ string, _, _ int)   {}
+func (f *jsonFormatter) OnStepCompleted(_ string, _, _ int) {}
+
 func (f *jsonFormatter) OnRegistryStart(repo string) {
 	f.current = &registryResult{Registry: repo}
 }

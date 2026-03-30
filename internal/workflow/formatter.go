@@ -10,6 +10,10 @@ import (
 // Formatter absorbs all output-mode decisions. Once constructed, callers
 // never branch on JSON vs text or single vs multi-registry.
 type Formatter interface {
+	// Step lifecycle (called by Runner)
+	OnStepStarted(name string, index, total int)
+	OnStepCompleted(name string, index, total int)
+
 	// Sync lifecycle
 	OnRegistryStart(repo string)
 	OnSkillResolved(name string, status sync.SkillStatus)

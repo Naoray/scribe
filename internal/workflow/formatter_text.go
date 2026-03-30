@@ -23,6 +23,9 @@ func newTextFormatter(out, errOut io.Writer, multiRegistry bool) *textFormatter 
 	}
 }
 
+func (f *textFormatter) OnStepStarted(_ string, _, _ int)   {}
+func (f *textFormatter) OnStepCompleted(_ string, _, _ int) {}
+
 func (f *textFormatter) OnRegistryStart(repo string) {
 	if f.multiRegistry {
 		fmt.Fprintf(f.errOut, "── %s ──\n", repo)
