@@ -96,7 +96,7 @@ func StepResolveFormatter(_ context.Context, b *Bag) error {
 
 func StepResolveTargets(_ context.Context, b *Bag) error {
 	if b.Targets == nil {
-		b.Targets = []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
+		b.Targets = targets.DefaultTargets()
 	}
 	return nil
 }

@@ -8,3 +8,8 @@ type Target interface {
 	// (~/.scribe/skills/<name>). Returns the paths of the links created.
 	Install(skillName, canonicalDir string) (paths []string, err error)
 }
+
+// DefaultTargets returns the standard set of install targets.
+func DefaultTargets() []Target {
+	return []Target{ClaudeTarget{}, CursorTarget{}}
+}
