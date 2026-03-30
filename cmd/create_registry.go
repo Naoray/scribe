@@ -16,6 +16,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 var createRegistryCmd = &cobra.Command{
@@ -145,7 +146,17 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "\nRegistry created: %s\n\n", repoSlug)
-	return connectToRepo(repoSlug, cfg, client)
+
+	// Connect to the newly created registry via the connect workflow.
+	bag := &workflow.Bag{
+		RepoArg: repoSlug,
+		Config:  cfg,
+		Client:  client,
+	}
+	// Skip LoadConfig — we already have cfg and client.
+	connectSteps := workflow.ConnectSteps()
+	// Remove LoadConfig (first step) since we've already loaded.
+	return workflow.Run(ctx, connectSteps[1:], bag)
 }
 
 // ghNameRe matches valid GitHub owner and repo names (alphanumeric, hyphens, dots, underscores).

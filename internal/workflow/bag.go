@@ -3,6 +3,7 @@ package workflow
 import (
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
 )
@@ -34,4 +35,8 @@ type Bag struct {
 	// FilterRegistries is injected by cmd/ to bridge flag resolution.
 	// If nil, defaults to returning all repos.
 	FilterRegistries func(flag string, repos []string) ([]string, error)
+
+	// Internal fields populated by steps (unexported via methods)
+	manifest      *manifest.Manifest
+	skipRemaining bool
 }
