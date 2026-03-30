@@ -6,7 +6,10 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var listJSON bool
+var (
+	listJSON  bool
+	listLocal bool
+)
 
 var listCmd = &cobra.Command{
 	Use:   "list",
@@ -16,19 +19,20 @@ var listCmd = &cobra.Command{
 
 func init() {
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output machine-readable JSON")
+	listCmd.Flags().BoolVar(&listLocal, "local", false, "Show locally installed skills (offline, no registry needed)")
 	listCmd.Flags().StringVar(&registryFlag, "registry", "", "Show only this registry (owner/repo or repo name)")
 	listCmd.Flags().Bool("all", false, "List all registries (default behavior)")
 	listCmd.Flags().MarkHidden("all")
+	listCmd.MarkFlagsMutuallyExclusive("local", "registry")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
 	bag := &workflow.Bag{
-		Args:     args,
-		JSONFlag: listJSON,
-		RepoFlag: registryFlag,
-		FilterRegistries: func(flag string, repos []string) ([]string, error) {
-			return filterRegistries(flag, repos)
-		},
+		Args:             args,
+		JSONFlag:         listJSON,
+		LocalFlag:        listLocal,
+		RepoFlag:         registryFlag,
+		FilterRegistries: filterRegistries,
 	}
 	return workflow.Run(cmd.Context(), workflow.ListSteps(), bag)
 }

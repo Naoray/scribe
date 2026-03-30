@@ -12,7 +12,6 @@ import (
 
 	"github.com/mattn/go-isatty"
 
-	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/targets"
@@ -29,34 +28,30 @@ func ListSteps() []Step {
 
 // StepBranchLocalOrRemote handles both the local-only view and the
 // remote diff view, keeping the workflow linear.
-func StepBranchLocalOrRemote(_ context.Context, b *Bag) error {
+func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	w := os.Stdout
 
-	if len(b.Config.TeamRepos) == 0 {
+	// Local view: explicit --local flag or no registries connected.
+	if b.LocalFlag || len(b.Config.TeamRepos) == 0 {
 		return listLocal(w, b.State, useJSON)
 	}
 
-	// Remote diff view.
-	b.State.MigrateRegistries(b.Config.TeamRepos[0])
-
-	repos := b.Config.TeamRepos
-	if b.RepoFlag != "" && b.FilterRegistries != nil {
-		var err error
-		repos, err = b.FilterRegistries(b.RepoFlag, b.Config.TeamRepos)
-		if err != nil {
-			return err
-		}
+	// Reuse shared steps for migration and filtering.
+	if err := StepMigrateRegistries(ctx, b); err != nil {
+		return err
+	}
+	if err := StepFilterRegistries(ctx, b); err != nil {
+		return err
 	}
 
-	client := gh.NewClient(b.Config.Token)
-	syncer := &sync.Syncer{Client: client, Targets: []targets.Target{}}
-	multiRegistry := len(repos) > 1
+	syncer := &sync.Syncer{Client: b.Client, Targets: []targets.Target{}}
+	multiRegistry := len(b.Repos) > 1
 
 	if useJSON {
-		return printMultiListJSON(w, repos, syncer, b.State)
+		return printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
 	}
-	return printMultiListTable(w, repos, syncer, b.State, multiRegistry)
+	return printMultiListTable(ctx, w, b.Repos, syncer, b.State, multiRegistry)
 }
 
 func listLocal(w io.Writer, st *state.State, useJSON bool) error {
@@ -124,11 +119,11 @@ func printLocalJSON(w io.Writer, st *state.State) error {
 	return enc.Encode(skills)
 }
 
-func printMultiListTable(w io.Writer, repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
+func printMultiListTable(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
 	var footerParts []string
 
 	for i, teamRepo := range repos {
-		statuses, err := syncer.Diff(context.Background(), teamRepo, st)
+		statuses, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
 			return err
 		}
@@ -184,7 +179,7 @@ func printMultiListTable(w io.Writer, repos []string, syncer *sync.Syncer, st *s
 	return nil
 }
 
-func printMultiListJSON(w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) error {
+func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) error {
 	type skillJSON struct {
 		Name       string   `json:"name"`
 		Status     string   `json:"status"`
@@ -202,7 +197,7 @@ func printMultiListJSON(w io.Writer, repos []string, syncer *sync.Syncer, st *st
 	var registries []registryJSON
 
 	for _, teamRepo := range repos {
-		statuses, err := syncer.Diff(context.Background(), teamRepo, st)
+		statuses, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
 			return err
 		}

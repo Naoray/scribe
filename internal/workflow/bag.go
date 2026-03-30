@@ -12,9 +12,10 @@ import (
 // Each step reads/writes only its relevant fields.
 type Bag struct {
 	// Inputs (set by cmd/ before Run)
-	Args     []string
-	JSONFlag bool
-	RepoFlag string // --registry filter
+	Args      []string
+	JSONFlag  bool
+	LocalFlag bool   // --local: show local inventory only
+	RepoFlag  string // --registry filter
 
 	// Populated by steps
 	Config    *config.Config

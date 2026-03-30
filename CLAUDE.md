@@ -13,12 +13,13 @@ Team skill sync CLI for AI coding agents. Go + Cobra + Charm (Bubble Tea).
 ```
 cmd/                    # Cobra commands (connect, sync, list, add, create)
 internal/
+  config/               # config.toml loading (~/.scribe/config.toml)
   manifest/             # scribe.toml parsing (BurntSushi/toml)
   github/               # GitHub API client (go-github + oauth2)
   targets/              # Install target writers (claude, cursor)
   state/                # ~/.scribe/state.json management
   sync/                 # Sync algorithm — UI-agnostic, emits tea.Msg events
-  ui/                   # Bubbletea models: list view, sync progress, init wizard
+  workflow/             # Step-sequence engine: Runner, Bag, Formatter, per-command steps
 ```
 
 ## North Star

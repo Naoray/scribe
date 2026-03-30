@@ -26,9 +26,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		Args:     args,
 		JSONFlag: syncJSON,
 		RepoFlag: registryFlag,
-		FilterRegistries: func(flag string, repos []string) ([]string, error) {
-			return filterRegistries(flag, repos)
-		},
+		FilterRegistries: filterRegistries,
 	}
 	return workflow.Run(cmd.Context(), workflow.SyncSteps(), bag)
 }

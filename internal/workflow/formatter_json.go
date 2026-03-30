@@ -32,9 +32,6 @@ func newJSONFormatter(out io.Writer) *jsonFormatter {
 	return &jsonFormatter{out: out}
 }
 
-func (f *jsonFormatter) OnStepStarted(_ string, _, _ int)   {}
-func (f *jsonFormatter) OnStepCompleted(_ string, _, _ int) {}
-
 func (f *jsonFormatter) OnRegistryStart(repo string) {
 	f.current = &registryResult{Registry: repo}
 }
@@ -48,6 +45,9 @@ func (f *jsonFormatter) OnSkillDownloading(_ string) {
 }
 
 func (f *jsonFormatter) OnSkillInstalled(name string, version string, updated bool) {
+	if f.current == nil {
+		return
+	}
 	action := "installed"
 	if updated {
 		action = "updated"
@@ -60,6 +60,9 @@ func (f *jsonFormatter) OnSkillInstalled(name string, version string, updated bo
 }
 
 func (f *jsonFormatter) OnSkillSkipped(name string, status sync.SkillStatus) {
+	if f.current == nil {
+		return
+	}
 	ver := ""
 	if status.Installed != nil {
 		ver = status.Installed.DisplayVersion()
@@ -73,6 +76,9 @@ func (f *jsonFormatter) OnSkillSkipped(name string, status sync.SkillStatus) {
 }
 
 func (f *jsonFormatter) OnSkillError(name string, err error) {
+	if f.current == nil {
+		return
+	}
 	f.current.Skills = append(f.current.Skills, skillResult{
 		Name:   name,
 		Action: "error",

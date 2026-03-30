@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
@@ -53,7 +52,7 @@ func resolveRepo(args []string) (string, error) {
 		Title("Team skills repo").
 		Placeholder("owner/repo").
 		Validate(func(s string) error {
-			_, _, err := parseOwnerRepo(s)
+			_, _, err := workflow.ParseOwnerRepo(s)
 			return err
 		}).
 		Value(&repo).
@@ -64,12 +63,3 @@ func resolveRepo(args []string) (string, error) {
 	return repo, nil
 }
 
-// parseOwnerRepo validates and splits an "owner/repo" string.
-func parseOwnerRepo(s string) (owner, repo string, err error) {
-	s = strings.TrimSpace(s)
-	parts := strings.SplitN(s, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo (e.g. ArtistfyHQ/team-skills)", s)
-	}
-	return parts[0], parts[1], nil
-}

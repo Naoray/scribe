@@ -1,6 +1,10 @@
 package cmd
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Naoray/scribe/internal/workflow"
+)
 
 func TestParseOwnerRepo(t *testing.T) {
 	cases := []struct {
@@ -19,12 +23,14 @@ func TestParseOwnerRepo(t *testing.T) {
 		{"", "", "", true},
 		{"/repo", "", "", true},
 		{"owner/", "", "", true},
-		{"a/b/c", "a", "b/c", false}, // SplitN(2) keeps the rest
+		{"a/b/c", "", "", true},           // b/c is not a valid repo name
+		{"../../../etc", "", "", true},    // path traversal rejected
+		{"my.org/my_repo.go", "my.org", "my_repo.go", false}, // dots and underscores allowed
 	}
 
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			owner, repo, err := parseOwnerRepo(c.input)
+			owner, repo, err := workflow.ParseOwnerRepo(c.input)
 			if c.wantErr {
 				if err == nil {
 					t.Errorf("expected error for %q", c.input)

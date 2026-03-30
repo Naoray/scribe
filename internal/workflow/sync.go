@@ -83,12 +83,13 @@ func StepFilterRegistries(_ context.Context, b *Bag) error {
 
 // StepResolveFormatter constructs the Formatter once. Idempotent — if
 // bag.Formatter is already set (e.g. by a parent workflow), it skips.
+// Must run after StepFilterRegistries so b.Repos reflects the actual set.
 func StepResolveFormatter(_ context.Context, b *Bag) error {
 	if b.Formatter != nil {
 		return nil
 	}
 	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
-	multiRegistry := len(b.Config.TeamRepos) > 1
+	multiRegistry := len(b.Repos) > 1
 	b.Formatter = NewFormatter(useJSON, multiRegistry)
 	return nil
 }
@@ -106,12 +107,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	syncer := &sync.Syncer{
 		Client:  b.Client,
 		Targets: b.Targets,
-	}
-
-	for _, teamRepo := range b.Repos {
-		clear(resolved)
-
-		syncer.Emit = func(msg any) {
+		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:
 				resolved[m.Name] = m.SkillStatus
@@ -127,8 +123,11 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 			case sync.SyncCompleteMsg:
 				b.Formatter.OnSyncComplete(m)
 			}
-		}
+		},
+	}
 
+	for _, teamRepo := range b.Repos {
+		clear(resolved)
 		b.Formatter.OnRegistryStart(teamRepo)
 
 		if err := syncer.Run(ctx, teamRepo, b.State); err != nil {
