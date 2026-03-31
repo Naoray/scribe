@@ -8,8 +8,8 @@ import (
 	"github.com/Naoray/scribe/internal/paths"
 )
 
-// WriteToStore writes all skill files to ~/.scribe/skills/<name>/ and
-// generates a .cursor.mdc file there. Returns the canonical directory path.
+// WriteToStore writes all skill files to ~/.scribe/skills/<name>/.
+// Returns the canonical directory path.
 // Called once per skill before any target links are created.
 func WriteToStore(skillName string, files []SkillFile) (string, error) {
 	base, err := StoreDir()
@@ -27,7 +27,6 @@ func WriteToStore(skillName string, files []SkillFile) (string, error) {
 		return "", fmt.Errorf("create store dir: %w", err)
 	}
 
-	var skillMD []byte
 	for _, f := range files {
 		dest := filepath.Join(skillDir, f.Path)
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -35,17 +34,6 @@ func WriteToStore(skillName string, files []SkillFile) (string, error) {
 		}
 		if err := os.WriteFile(dest, f.Content, 0o644); err != nil {
 			return "", fmt.Errorf("write %s: %w", f.Path, err)
-		}
-		if isSkillMD(f.Path) {
-			skillMD = f.Content
-		}
-	}
-
-	// Generate .cursor.mdc into the store so Cursor target can symlink it.
-	if skillMD != nil {
-		mdc := generateMDC(skillMD)
-		if err := os.WriteFile(filepath.Join(skillDir, ".cursor.mdc"), mdc, 0o644); err != nil {
-			return "", fmt.Errorf("write .cursor.mdc: %w", err)
 		}
 	}
 
