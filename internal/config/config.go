@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/Naoray/scribe/internal/paths"
 )
 
 // Config holds user preferences from ~/.scribe/config.toml.
@@ -87,9 +89,5 @@ func Path() (string, error) {
 }
 
 func configPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("home dir: %w", err)
-	}
-	return filepath.Join(home, ".scribe", "config.toml"), nil
+	return paths.ConfigPath()
 }

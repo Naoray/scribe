@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/Naoray/scribe/internal/paths"
 )
 
 // WriteToStore writes all skill files to ~/.scribe/skills/<name>/ and
@@ -52,9 +54,5 @@ func WriteToStore(skillName string, files []SkillFile) (string, error) {
 
 // StoreDir returns the ~/.scribe/skills/ directory path.
 func StoreDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("home dir: %w", err)
-	}
-	return filepath.Join(home, ".scribe", "skills"), nil
+	return paths.StoreDir()
 }
