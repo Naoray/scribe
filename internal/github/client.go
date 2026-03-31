@@ -32,13 +32,13 @@ func (c *Client) IsAuthenticated() bool { return c.authenticated }
 //  2. GITHUB_TOKEN   environment variable
 //  3. token argument (pass "" to skip — loaded from config by caller)
 //  4. unauthenticated (public repos only)
-func NewClient(configToken string) *Client {
+func NewClient(ctx context.Context, configToken string) *Client {
 	token := resolveToken(configToken)
 
 	var httpClient *http.Client
 	if token != "" {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-		httpClient = oauth2.NewClient(context.Background(), ts)
+		httpClient = oauth2.NewClient(ctx, ts)
 	}
 
 	return &Client{gh: github.NewClient(httpClient), authenticated: token != ""}
@@ -257,13 +257,13 @@ func wrapErr(err error, context string) error {
 	if errors.As(err, &ghErr) {
 		switch ghErr.Response.StatusCode {
 		case http.StatusNotFound:
-			return fmt.Errorf("%s: not found (check the repo/path exists and you have access)", context)
+			return fmt.Errorf("%s: not found (check the repo/path exists and you have access): %w", context, err)
 		case http.StatusUnauthorized, http.StatusForbidden:
 			if ghErr.Response.Header.Get("X-RateLimit-Remaining") == "0" {
 				reset := ghErr.Response.Header.Get("X-RateLimit-Reset")
-				return fmt.Errorf("%s: rate limit exceeded, resets at %s — set GITHUB_TOKEN for higher limits", context, formatReset(reset))
+				return fmt.Errorf("%s: rate limit exceeded, resets at %s — set GITHUB_TOKEN for higher limits: %w", context, formatReset(reset), err)
 			}
-			return fmt.Errorf("%s: authentication required — run `gh auth login` or set GITHUB_TOKEN", context)
+			return fmt.Errorf("%s: authentication required — run `gh auth login` or set GITHUB_TOKEN: %w", context, err)
 		}
 	}
 	return fmt.Errorf("%s: %w", context, err)

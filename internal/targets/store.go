@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	gh "github.com/Naoray/scribe/internal/github"
 )
 
 // WriteToStore writes all skill files to ~/.scribe/skills/<name>/ and
 // generates a .cursor.mdc file there. Returns the canonical directory path.
 // Called once per skill before any target links are created.
-func WriteToStore(skillName string, files []gh.SkillFile) (string, error) {
+func WriteToStore(skillName string, files []SkillFile) (string, error) {
 	base, err := StoreDir()
 	if err != nil {
 		return "", err
