@@ -6,11 +6,6 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var (
-	listJSON  bool
-	listLocal bool
-)
-
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "Show installed skills and their status vs team loadout",
@@ -18,20 +13,24 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output machine-readable JSON")
-	listCmd.Flags().BoolVar(&listLocal, "local", false, "Show locally installed skills (offline, no registry needed)")
-	listCmd.Flags().StringVar(&registryFlag, "registry", "", "Show only this registry (owner/repo or repo name)")
+	listCmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	listCmd.Flags().Bool("local", false, "Show locally installed skills (offline, no registry needed)")
+	listCmd.Flags().String("registry", "", "Show only this registry (owner/repo or repo name)")
 	listCmd.Flags().Bool("all", false, "List all registries (default behavior)")
 	listCmd.Flags().MarkHidden("all")
 	listCmd.MarkFlagsMutuallyExclusive("local", "registry")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	localFlag, _ := cmd.Flags().GetBool("local")
+	repoFlag, _ := cmd.Flags().GetString("registry")
+
 	bag := &workflow.Bag{
 		Args:             args,
-		JSONFlag:         listJSON,
-		LocalFlag:        listLocal,
-		RepoFlag:         registryFlag,
+		JSONFlag:         jsonFlag,
+		LocalFlag:        localFlag,
+		RepoFlag:         repoFlag,
 		FilterRegistries: filterRegistries,
 	}
 	return workflow.Run(cmd.Context(), workflow.ListSteps(), bag)

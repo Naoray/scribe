@@ -21,12 +21,6 @@ import (
 	"github.com/Naoray/scribe/internal/targets"
 )
 
-var (
-	addYes      bool
-	addJSON     bool
-	addRegistry string
-)
-
 type addResult struct {
 	Name     string `json:"name"`
 	Registry string `json:"registry"`
@@ -56,12 +50,16 @@ Examples:
 }
 
 func init() {
-	addCmd.Flags().BoolVar(&addYes, "yes", false, "Skip confirmation prompt")
-	addCmd.Flags().BoolVar(&addJSON, "json", false, "Output machine-readable JSON")
-	addCmd.Flags().StringVar(&addRegistry, "registry", "", "Target registry (owner/repo)")
+	addCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+	addCmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	addCmd.Flags().String("registry", "", "Target registry (owner/repo)")
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
+	addYes, _ := cmd.Flags().GetBool("yes")
+	addJSON, _ := cmd.Flags().GetBool("json")
+	addRegistry, _ := cmd.Flags().GetString("registry")
+
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 	useJSON := addJSON || !isatty.IsTerminal(os.Stdout.Fd())
 
@@ -148,11 +146,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	)
 
 	if len(args) == 1 {
-		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, isTTY)
+		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, isTTY, addYes)
 	}
 
 	// Mode 2: interactive browse (TTY, no args) — Task 7.
-	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON)
+	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, addYes)
 }
 
 func runAddByName(
@@ -167,6 +165,7 @@ func runAddByName(
 	tgts []targets.Target,
 	useJSON bool,
 	isTTY bool,
+	skipConfirm bool,
 ) error {
 	// Find the candidate.
 	var found *add.Candidate
@@ -181,7 +180,7 @@ func runAddByName(
 	}
 
 	// Confirmation.
-	if !addYes && isTTY {
+	if !skipConfirm && isTTY {
 		action := "add reference"
 		if found.NeedsUpload() {
 			action = "upload files"
@@ -218,6 +217,7 @@ func runAddInteractive(
 	client *gh.Client,
 	tgts []targets.Target,
 	useJSON bool,
+	skipConfirm bool,
 ) error {
 	if len(candidates) == 0 {
 		fmt.Printf("All available skills are already in %s.\n", targetRepo)
@@ -246,7 +246,7 @@ func runAddInteractive(
 	}
 
 	// Confirmation (unless --yes).
-	if !addYes {
+	if !skipConfirm {
 		fmt.Printf("\nAdding %d skill(s) to %s:\n", len(selected), targetRepo)
 		for _, c := range selected {
 			action := "reference"
