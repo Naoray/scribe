@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// HostGitHub is the source host identifier for GitHub repositories.
+const HostGitHub = "github"
+
 // Source is a parsed skill source reference.
 // Format: "github:owner/repo@ref"
 // Ref can be a semver tag (v1.2.3), a non-semver tag (v0.12.9.0), or a branch (main).
@@ -21,7 +24,7 @@ func ParseSource(raw string) (Source, error) {
 	if !ok {
 		return Source{}, fmt.Errorf("invalid source %q: missing host prefix (expected github:owner/repo@ref)", raw)
 	}
-	if host != "github" {
+	if host != HostGitHub {
 		return Source{}, fmt.Errorf("unsupported source host %q (only github is supported)", host)
 	}
 

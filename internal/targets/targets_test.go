@@ -6,11 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/targets"
 )
 
-var testFiles = []gh.SkillFile{
+var testFiles = []targets.SkillFile{
 	{Path: "SKILL.md", Content: []byte(`---
 name: deploy
 description: "Artistfy deployment workflow"

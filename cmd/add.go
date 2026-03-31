@@ -78,7 +78,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := gh.NewClient(cfg.Token)
+	client := gh.NewClient(cmd.Context(), cfg.Token)
 	if !client.IsAuthenticated() {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}
@@ -104,8 +104,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Fetch target registry manifest to filter already-added skills.
-	ctx := context.Background()
-	targetOwner, targetRepoName, err := parseOwnerRepo(targetRepo)
+	ctx := cmd.Context()
+	targetOwner, targetRepoName, err := manifest.ParseOwnerRepo(targetRepo)
 	if err != nil {
 		return fmt.Errorf("invalid target registry: %w", err)
 	}
@@ -124,7 +124,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if repo == targetRepo {
 			continue
 		}
-		o, r, err := parseOwnerRepo(repo)
+		o, r, err := manifest.ParseOwnerRepo(repo)
 		if err != nil {
 			continue // skip malformed registry entries
 		}
@@ -381,7 +381,7 @@ func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *
 // autoSync runs a sync for the target registry after adding skills.
 func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, tgts []targets.Target, useJSON bool) bool {
 	syncer := &sync.Syncer{
-		Client:  client,
+		Client:  sync.WrapGitHubClient(client),
 		Targets: tgts,
 		Emit: func(msg any) {
 			if useJSON {
