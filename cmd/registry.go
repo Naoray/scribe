@@ -8,6 +8,9 @@ import (
 	"github.com/Naoray/scribe/internal/targets"
 )
 
+// registryFlag is the shared --registry flag value for sync and list.
+var registryFlag string
+
 // resolveRegistry matches a user-provided registry string against connected repos.
 // Accepts full "owner/repo" (case-insensitive) or partial "repo" name if unambiguous.
 func resolveRegistry(input string, repos []string) (string, error) {

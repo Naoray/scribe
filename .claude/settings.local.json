@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/krishankonig/.claude/plugins/**)",
+      "Bash(2)",
+      "Bash(/dev/null find:*)"
+    ]
+  }
+}

@@ -11,7 +11,7 @@ Team skill sync CLI for AI coding agents. Go + Cobra + Charm (Bubble Tea).
 ## Architecture
 
 ```
-cmd/                    # Cobra commands (connect, sync, list, add, create, guide)
+cmd/                    # Cobra commands (connect, sync, list, add, create)
 internal/
   config/               # config.toml loading (~/.scribe/config.toml)
   manifest/             # scribe.toml parsing (BurntSushi/toml)
@@ -19,8 +19,7 @@ internal/
   targets/              # Install target writers (claude, cursor)
   state/                # ~/.scribe/state.json management
   sync/                 # Sync algorithm — UI-agnostic, emits tea.Msg events
-  prereq/               # Prerequisite checker (auth, dir, connections)
-  ui/                   # Bubbletea TUI layer (sync progress, styles)
+  workflow/             # Step-sequence engine: Runner, Bag, Formatter, per-command steps
 ```
 
 ## North Star
@@ -32,7 +31,7 @@ internal/
 - Core packages (`sync/`, `state/`, `github/`) are **UI-agnostic** — they emit events, never print
 - TUI (`internal/ui/`) is a pure presentation layer consuming those events
 - Non-TTY auto-detected: when stdout is not a terminal, fall back to plain line output
-- `--json` flag available on `sync`, `list`, and `guide` for CI/agent use
+- `--json` flag available on `sync` and `list` for CI/agent use
 - GitHub auth chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/config.toml` → unauthenticated
 
 ## Build

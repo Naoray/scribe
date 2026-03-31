@@ -1,20 +1,14 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/config"
-	gh "github.com/Naoray/scribe/internal/github"
-	"github.com/Naoray/scribe/internal/manifest"
-	"github.com/Naoray/scribe/internal/state"
-	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 var connectCmd = &cobra.Command{
@@ -37,98 +31,10 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+	bag := &workflow.Bag{
+		RepoArg: repo,
 	}
-
-	return connectToRepo(cmd.Context(), repo, cfg, gh.NewClient(cmd.Context(), cfg.Token))
-}
-
-// validateAndConnect validates the repo, checks for duplicates, verifies it has a
-// scribe.toml with a [team] section, and appends it to config. Does NOT sync.
-// Returns true if the repo was already connected (no-op), and the parsed manifest.
-func validateAndConnect(ctx context.Context, repo string, cfg *config.Config, client *gh.Client) (alreadyConnected bool, m *manifest.Manifest, err error) {
-	owner, name, err := manifest.ParseOwnerRepo(repo)
-	if err != nil {
-		return false, nil, err
-	}
-
-	for _, existing := range cfg.TeamRepos {
-		if strings.EqualFold(existing, repo) {
-			return true, &manifest.Manifest{}, nil
-		}
-	}
-
-	raw, err := client.FetchFile(ctx, owner, name, "scribe.toml", "HEAD")
-	if err != nil {
-		return false, nil, fmt.Errorf("could not access %s: %w", repo, err)
-	}
-
-	m, err = manifest.Parse(raw)
-	if err != nil {
-		return false, nil, fmt.Errorf("invalid scribe.toml in %s: %w", repo, err)
-	}
-	if !m.IsLoadout() {
-		return false, nil, fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", repo)
-	}
-
-	cfg.TeamRepos = append(cfg.TeamRepos, repo)
-	if err := cfg.Save(); err != nil {
-		return false, nil, fmt.Errorf("save config: %w", err)
-	}
-	return false, m, nil
-}
-
-// connectToRepo performs the connect-and-sync workflow for a given "owner/repo" string.
-func connectToRepo(ctx context.Context, repo string, cfg *config.Config, client *gh.Client) error {
-	already, m, err := validateAndConnect(ctx, repo, cfg, client)
-	if err != nil {
-		return err
-	}
-	if already {
-		fmt.Printf("Already connected to %s\n", repo)
-		return nil
-	}
-	fmt.Printf("Connected to %s\n", repo)
-
-	// Auto-sync the newly connected repo only.
-	st, err := state.Load()
-	if err != nil {
-		return err
-	}
-
-	tgts := resolveTargets(m.Targets)
-	syncer := &sync.Syncer{
-		Client:  sync.WrapGitHubClient(client),
-		Targets: tgts,
-		Emit: func(msg any) {
-			switch m := msg.(type) {
-			case sync.SkillInstalledMsg:
-				verb := "installed"
-				if m.Updated {
-					verb = "updated to"
-				}
-				fmt.Printf("  %-20s %s %s\n", m.Name, verb, m.Version)
-			case sync.SkillErrorMsg:
-				fmt.Fprintf(os.Stderr, "  %-20s error: %v\n", m.Name, m.Err)
-			case sync.SyncCompleteMsg:
-				fmt.Printf("\ndone: %d installed, %d updated, %d current, %d failed\n",
-					m.Installed, m.Updated, m.Skipped, m.Failed)
-			}
-		},
-	}
-
-	fmt.Printf("\nsyncing skills...\n\n")
-	if err := syncer.Run(ctx, repo, st); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: sync failed for %s: %v\n", repo, err)
-		fmt.Fprintf(os.Stderr, "run `scribe sync` to retry\n")
-		if !isatty.IsTerminal(os.Stdout.Fd()) {
-			return fmt.Errorf("sync failed: %w", err)
-		}
-	}
-
-	return nil
+	return workflow.Run(cmd.Context(), workflow.ConnectSteps(), bag)
 }
 
 // resolveRepo returns the owner/repo string from args or an interactive prompt.
@@ -146,7 +52,7 @@ func resolveRepo(args []string) (string, error) {
 		Title("Team skills repo").
 		Placeholder("owner/repo").
 		Validate(func(s string) error {
-			_, _, err := manifest.ParseOwnerRepo(s)
+			_, _, err := workflow.ParseOwnerRepo(s)
 			return err
 		}).
 		Value(&repo).
@@ -156,3 +62,4 @@ func resolveRepo(args []string) (string, error) {
 	}
 	return repo, nil
 }
+
