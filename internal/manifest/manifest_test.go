@@ -138,6 +138,47 @@ func TestParseSource(t *testing.T) {
 	}
 }
 
+func TestManifestEncode(t *testing.T) {
+	m, err := manifest.Parse([]byte(teamLoadout))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	data, err := m.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	// Round-trip: re-parse the encoded output.
+	m2, err := manifest.Parse(data)
+	if err != nil {
+		t.Fatalf("re-Parse: %v", err)
+	}
+
+	if m2.Team.Name != m.Team.Name {
+		t.Errorf("team name: got %q, want %q", m2.Team.Name, m.Team.Name)
+	}
+	if len(m2.Skills) != len(m.Skills) {
+		t.Errorf("skills count: got %d, want %d", len(m2.Skills), len(m.Skills))
+	}
+	for name, skill := range m.Skills {
+		got, ok := m2.Skills[name]
+		if !ok {
+			t.Errorf("missing skill %q after round-trip", name)
+			continue
+		}
+		if got.Source != skill.Source {
+			t.Errorf("skill %q source: got %q, want %q", name, got.Source, skill.Source)
+		}
+		if got.Path != skill.Path {
+			t.Errorf("skill %q path: got %q, want %q", name, got.Path, skill.Path)
+		}
+		if got.Private != skill.Private {
+			t.Errorf("skill %q private: got %v, want %v", name, got.Private, skill.Private)
+		}
+	}
+}
+
 func TestParseSourceErrors(t *testing.T) {
 	cases := []string{
 		"garrytan/gstack@v1.0.0",  // missing host

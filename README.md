@@ -106,7 +106,7 @@ ArtistfyHQ/team-skills/
 | `scribe connect <owner/repo>` | Connect to a team skills repo and run an initial sync |
 | `scribe sync` | Install missing skills, update outdated ones |
 | `scribe list` | Show all skills: what's installed, what's outdated, what's missing |
-| `scribe add <source>` | Add a skill to the team's scribe.toml *(coming soon)* |
+| `scribe add [name]` | Add a skill to the team registry (interactive picker or by name) |
 | `scribe create registry` | Scaffold a new team skills registry on GitHub and connect to it |
 
 ### scribe list output
@@ -160,6 +160,7 @@ Scribe auto-detects non-TTY environments (CI, agent invocations). `--json` flag 
 ```bash
 scribe sync --json
 scribe list --json
+scribe add --json skillname --yes
 ```
 
 Output:
@@ -204,9 +205,9 @@ Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specificati
 
 - `scribe connect` — connect to a team repo with interactive setup
 - `scribe create registry` — scaffold a new team skills registry on GitHub
+- `scribe add` — add local or remote skills to your team registry
 
 **Coming later:**
-- `scribe add` — add a skill to the team loadout
 - Lockfile (`scribe.lock`) — pin exact versions across the team
 - `scribe publish` — publish skill packages
 
