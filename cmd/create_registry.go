@@ -47,32 +47,19 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	isTTY := isatty.IsTerminal(os.Stdin.Fd())
 
 	// Prompt for missing values if TTY; error if non-TTY.
-	if team == "" {
-		if !isTTY {
-			return fmt.Errorf("--team is required in non-interactive mode")
-		}
-		if err := huh.NewInput().Title("What's your team name?").Validate(notEmpty("team name")).Value(&team).Run(); err != nil {
+	if err := promptOrRequire(&team, "team", "What's your team name?", isTTY); err != nil {
+		return err
+	}
+	if err := promptOrRequire(&owner, "owner", "GitHub org or username?", isTTY); err != nil {
+		return err
+	}
+	if !cmd.Flags().Changed("repo") {
+		if err := promptOrRequire(&repo, "repo", "Repository name?", isTTY); err != nil {
 			return err
 		}
 	}
-
-	if owner == "" {
-		if !isTTY {
-			return fmt.Errorf("--owner is required in non-interactive mode")
-		}
-		if err := huh.NewInput().Title("GitHub org or username?").Validate(notEmpty("owner")).Value(&owner).Run(); err != nil {
-			return err
-		}
-	}
-
-	if !cmd.Flags().Changed("repo") && isTTY {
-		if err := huh.NewInput().Title("Repository name?").Value(&repo).Validate(notEmpty("repo name")).Run(); err != nil {
-			return err
-		}
-	}
-
-	if !cmd.Flags().Changed("private") && isTTY {
-		if err := huh.NewConfirm().Title("Private repository?").Value(&private).Run(); err != nil {
+	if !cmd.Flags().Changed("private") {
+		if err := confirmOrRequire(&private, "private", "Private repository?", isTTY); err != nil {
 			return err
 		}
 	}
@@ -162,6 +149,27 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return nil
+}
+
+// promptOrRequire prompts for a missing string value in TTY mode, or returns an
+// error in non-TTY mode. If the value is already non-empty, it's a no-op.
+func promptOrRequire(value *string, flag, title string, isTTY bool) error {
+	if *value != "" {
+		return nil
+	}
+	if !isTTY {
+		return fmt.Errorf("--%s is required in non-interactive mode", flag)
+	}
+	return huh.NewInput().Title(title).Validate(notEmpty(flag)).Value(value).Run()
+}
+
+// confirmOrRequire prompts for a bool value in TTY mode. In non-TTY mode it's
+// a no-op (the flag default is used).
+func confirmOrRequire(value *bool, flag, title string, isTTY bool) error {
+	if !isTTY {
+		return nil
+	}
+	return huh.NewConfirm().Title(title).Value(value).Run()
 }
 
 // ghNameRe matches valid GitHub owner and repo names (alphanumeric, hyphens, dots, underscores).
