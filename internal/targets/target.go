@@ -1,5 +1,11 @@
 package targets
 
+// SkillFile represents a file to be written to the skill store.
+type SkillFile struct {
+	Path    string // relative to the skill root (e.g. "scripts/deploy.sh")
+	Content []byte
+}
+
 // Target links a skill from the canonical store into a specific AI tool's directory.
 type Target interface {
 	// Name returns the tool identifier (e.g. "claude", "cursor").

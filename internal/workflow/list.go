@@ -45,7 +45,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 		return err
 	}
 
-	syncer := &sync.Syncer{Client: b.Client, Targets: []targets.Target{}}
+	syncer := &sync.Syncer{Client: sync.WrapGitHubClient(b.Client), Targets: []targets.Target{}}
 	multiRegistry := len(b.Repos) > 1
 
 	if useJSON {
@@ -123,7 +123,7 @@ func printMultiListTable(ctx context.Context, w io.Writer, repos []string, synce
 	var footerParts []string
 
 	for i, teamRepo := range repos {
-		statuses, err := syncer.Diff(ctx, teamRepo, st)
+		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
 			return err
 		}
@@ -197,7 +197,7 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 	var registries []registryJSON
 
 	for _, teamRepo := range repos {
-		statuses, err := syncer.Diff(ctx, teamRepo, st)
+		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
 			return err
 		}

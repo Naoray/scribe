@@ -37,13 +37,13 @@ func SyncTail() []Step {
 	}
 }
 
-func StepLoadConfig(_ context.Context, b *Bag) error {
+func StepLoadConfig(ctx context.Context, b *Bag) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 	b.Config = cfg
-	b.Client = gh.NewClient(cfg.Token)
+	b.Client = gh.NewClient(ctx, cfg.Token)
 	return nil
 }
 
@@ -105,7 +105,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	resolved := map[string]sync.SkillStatus{}
 
 	syncer := &sync.Syncer{
-		Client:  b.Client,
+		Client:  sync.WrapGitHubClient(b.Client),
 		Targets: b.Targets,
 		Emit: func(msg any) {
 			switch m := msg.(type) {

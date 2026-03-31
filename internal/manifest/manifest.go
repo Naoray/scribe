@@ -1,11 +1,15 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 )
+
+// ManifestFilename is the conventional name for a scribe manifest file.
+const ManifestFilename = "scribe.toml"
 
 // Manifest represents a parsed scribe.toml.
 // A file with [team] is a loadout; [package] is a skill package.
@@ -84,23 +88,37 @@ type Targets struct {
 	Default []string `toml:"default"`
 }
 
-// Load parses a scribe.toml file from disk.
-func Load(path string) (*Manifest, error) {
-	var m Manifest
-	if _, err := toml.DecodeFile(path, &m); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return &m, nil
-}
-
 // Parse parses scribe.toml content from a byte slice (e.g. fetched from GitHub API).
 func Parse(data []byte) (*Manifest, error) {
 	var m Manifest
 	if err := toml.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
+	if m.Skills == nil {
+		m.Skills = make(map[string]Skill)
+	}
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
 	return &m, nil
 }
 
-func (m *Manifest) IsLoadout() bool  { return m.Team != nil }
-func (m *Manifest) IsPackage() bool  { return m.Package != nil }
+// Validate checks invariants on a parsed manifest.
+func (m *Manifest) Validate() error {
+	if m.Team != nil && m.Package != nil {
+		return errors.New("manifest cannot have both [team] and [package] sections")
+	}
+	return nil
+}
+
+func (m *Manifest) IsLoadout() bool { return m.Team != nil }
+
+// ParseOwnerRepo splits an "owner/repo" string and validates it.
+func ParseOwnerRepo(s string) (owner, repo string, err error) {
+	s = strings.TrimSpace(s)
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo", s)
+	}
+	return parts[0], parts[1], nil
+}

@@ -43,8 +43,8 @@ func TestParseTeamLoadout(t *testing.T) {
 	if !m.IsLoadout() {
 		t.Error("expected IsLoadout() = true")
 	}
-	if m.IsPackage() {
-		t.Error("expected IsPackage() = false")
+	if m.Package != nil {
+		t.Error("expected Package == nil for team loadout")
 	}
 	if m.Team.Name != "artistfy" {
 		t.Errorf("team name: got %q, want %q", m.Team.Name, "artistfy")
@@ -88,8 +88,8 @@ func TestParsePackageManifest(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	if !m.IsPackage() {
-		t.Error("expected IsPackage() = true")
+	if m.Package == nil {
+		t.Error("expected Package != nil for package manifest")
 	}
 	if m.Package.Name != "scribe-skills" {
 		t.Errorf("package name: got %q", m.Package.Name)
@@ -149,5 +149,37 @@ func TestParseSourceErrors(t *testing.T) {
 		if _, err := manifest.ParseSource(raw); err == nil {
 			t.Errorf("ParseSource(%q): expected error, got nil", raw)
 		}
+	}
+}
+
+const invalidBothSections = `
+[team]
+name = "artistfy"
+
+[package]
+name = "scribe-skills"
+version = "1.0.0"
+`
+
+func TestValidateMutualExclusivity(t *testing.T) {
+	_, err := manifest.Parse([]byte(invalidBothSections))
+	if err == nil {
+		t.Fatal("expected error when both [team] and [package] are present")
+	}
+	want := "manifest cannot have both [team] and [package] sections"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestParseInitializesSkillsMap(t *testing.T) {
+	m, err := manifest.Parse([]byte(`[team]
+name = "empty"
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if m.Skills == nil {
+		t.Error("expected Skills map to be initialized, got nil")
 	}
 }

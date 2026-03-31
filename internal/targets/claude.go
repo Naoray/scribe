@@ -6,12 +6,15 @@ import (
 	"path/filepath"
 )
 
+// TargetClaude is the identifier for the Claude Code target.
+const TargetClaude = "claude"
+
 // ClaudeTarget symlinks ~/.claude/skills/<name> → ~/.scribe/skills/<name>.
 // The whole skill directory is linked, so Claude Code sees all files
 // (SKILL.md, scripts/, references/, etc.) without duplication.
 type ClaudeTarget struct{}
 
-func (t ClaudeTarget) Name() string { return "claude" }
+func (t ClaudeTarget) Name() string { return TargetClaude }
 
 func (t ClaudeTarget) Install(skillName, canonicalDir string) ([]string, error) {
 	skillsDir, err := claudeSkillsDir()
