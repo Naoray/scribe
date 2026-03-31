@@ -8,6 +8,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
@@ -52,7 +53,7 @@ func resolveRepo(args []string) (string, error) {
 		Title("Team skills repo").
 		Placeholder("owner/repo").
 		Validate(func(s string) error {
-			_, _, err := workflow.ParseOwnerRepo(s)
+			_, _, err := manifest.ParseOwnerRepo(s)
 			return err
 		}).
 		Value(&repo).
