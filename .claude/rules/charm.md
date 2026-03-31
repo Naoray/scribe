@@ -23,17 +23,26 @@ type Model interface {
 ```
 **Never modify state outside Update()**. View must be pure function of model.
 
-`View()` returns a `tea.View` struct. Set fields on it for alt screen, cursor, mouse, etc:
+`View()` returns a `tea.View` struct. Use `tea.NewView(content)` constructor and set fields for alt screen, cursor, mouse, etc:
 ```go
 func (m model) View() tea.View {
-    var v tea.View
-    v.Body = m.renderContent()       // string content
-    v.AltScreen = true               // replaces tea.WithAltScreen()
-    v.MouseCellMotion = true         // replaces tea.WithMouseCellMotion()
-    v.Cursor = tea.NewCursor(m.x, m.y) // declarative cursor positioning
+    v := tea.NewView(m.renderContent())          // content via constructor
+    v.AltScreen = true                           // replaces tea.WithAltScreen()
+    v.MouseMode = tea.MouseModeCellMotion        // enum: MouseModeNone, MouseModeCellMotion, MouseModeAllMotion
+    v.ReportFocus = true                         // replaces tea.WithReportFocus()
+    v.WindowTitle = "My App"                     // declarative window title
+    if m.showCursor {
+        v.Cursor = &tea.Cursor{                  // nil = hidden; set struct to show
+            Position: tea.Position{X: m.cursorX, Y: m.cursorY},
+            Shape:    tea.CursorBar,
+            Blink:    true,
+        }
+    }
     return v
 }
 ```
+
+**`MouseMode` is an enum, not a boolean.** `MouseModeNone` (default), `MouseModeCellMotion` (clicks/wheel/drag), `MouseModeAllMotion` (all events including passive motion).
 
 ### Message Handling
 ```go
@@ -45,6 +54,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         case "space":                  // NOT " " — space bar is now "space"
             m.toggle()
         }
+        // Modifier checking (beyond String()):
+        if msg.Mod == tea.ModCtrl && msg.Code == 's' {
+            return m, m.save()
+        }
     case tea.WindowSizeMsg:
         m.width, m.height = msg.Width, msg.Height
     case tea.BackgroundColorMsg:       // detect light/dark terminal
@@ -52,7 +65,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     case tea.InterruptMsg:             // SIGINT handling
         return m, tea.Quit
     case tea.PasteMsg:                 // paste events (was KeyMsg.Paste)
-        m.input += string(msg)
+        m.input += msg.Content           // use .Content, not string(msg)
     case errMsg:
         m.err = msg.err
     }
@@ -61,16 +74,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 ```
 
 ### Mouse Messages
-Mouse is now split into specific message types (no generic `tea.MouseMsg` struct):
+Mouse uses an interface-based approach. `MouseMsg` is an interface with a `Mouse()` method; four concrete types handle specific events:
 ```go
 case tea.MouseClickMsg:
-    // msg.X, msg.Y, msg.Button
+    if msg.Button == tea.MouseLeft {
+        m.handleClick(msg.Mouse().X, msg.Mouse().Y)  // position via .Mouse() method
+    }
 case tea.MouseReleaseMsg:
-    // click ended
+    // click ended — same .Mouse() accessor
 case tea.MouseWheelMsg:
-    // msg.Delta
+    if msg.Button == tea.MouseWheelUp {               // direction via .Button, not .Delta
+        m.scrollUp()
+    }
 case tea.MouseMotionMsg:
-    // mouse moved
+    m.hover(msg.Mouse().X, msg.Mouse().Y)
 ```
 
 ### Commands (Async)
@@ -87,7 +104,12 @@ func fetchData(url string) tea.Cmd {
 - `tea.Batch(cmd1, cmd2)` — concurrent (no order guarantee)
 - `tea.Sequence(cmd1, cmd2)` — ordered execution
 - `tea.Quit`, `tea.ClearScreen`, `tea.Suspend` (ctrl+z job control)
+- `tea.Tick(d, fn)` — one-shot timer; `tea.Every(d, fn)` — recurring timer
+- `tea.Exec(cmd, callback)` — execute external process (e.g. $EDITOR)
 - `tea.SetClipboard("text")` / receive `tea.ClipboardMsg`
+- `tea.Println(args...)` / `tea.Printf(fmt, args...)` — print above inline program
+- `tea.RequestBackgroundColor` — query terminal for dark/light; response arrives as `BackgroundColorMsg`
+- `tea.RequestWindowSize` — query terminal dimensions
 - Removed: `tea.EnterAltScreen`, `tea.ExitAltScreen`, `tea.EnableMouseCellMotion` — use `tea.View` fields instead
 
 ### Component Composition
@@ -104,10 +126,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 ### Program Options
 ```go
-p := tea.NewProgram(model{})
+p := tea.NewProgram(model{},
+    tea.WithContext(ctx),          // propagate cancellation from Cobra
+    tea.WithFPS(60),              // custom frame rate
+)
 // Send external messages: go func() { p.Send(myMsg{}) }()
 ```
 Alt screen, mouse, etc. are now set via `tea.View` fields in `View()`, not program options.
+
+Surviving program options: `WithContext(ctx)`, `WithFPS(fps)`, `WithFilter(fn)`, `WithColorProfile(p)`, `WithInput(r)`, `WithOutput(w)`, `WithEnvironment(env)`, `WithWindowSize(w, h)`, `WithoutCatchPanics()`, `WithoutSignalHandler()`.
 
 Sentinel errors for program exit:
 - `tea.ErrInterrupted` — SIGINT received
@@ -138,9 +165,12 @@ lipgloss.JoinVertical(lipgloss.Left, header, content)
 lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, content)
 w, h := lipgloss.Size(block)
 
-// Compositing/layering
-layer := lipgloss.NewLayer()
-canvas := lipgloss.NewCanvas()
+// Compositing/layering (with mouse hit testing)
+sidebar := lipgloss.NewLayer(box.Render("Sidebar")).X(0).Y(0).Z(1).ID("sidebar")
+main := lipgloss.NewLayer(box.Render("Main")).X(22).Y(0).Z(0).ID("main")
+comp := lipgloss.NewCompositor(sidebar, main)
+output := comp.Render()
+hit := comp.Hit(mouseX, mouseY)  // returns layer ID at coordinates
 
 // Standalone output (outside Bubble Tea)
 lipgloss.Println("styled output")   // handles color downsampling
@@ -152,13 +182,13 @@ Inside Bubble Tea, the Cursed Renderer handles color downsampling automatically.
 
 | Component | Usage |
 |-----------|-------|
-| `textinput` | `.Focus()`, `.Placeholder`, `.EchoMode`, styles via `.Styles.Focused`/`.Styles.Blurred` |
-| `textarea` | Multi-line, styles via `.Styles.Focused`/`.Styles.Blurred` |
+| `textinput` | `.Focus()`, `.Placeholder`, `.EchoMode`, styles via `.Styles().Focused`/`.Styles().Blurred` (getter method) |
+| `textarea` | Multi-line, styles via `.Styles().Focused`/`.Styles().Blurred` (getter method) |
 | `list` | Items implement `Title()`, `Description()`, `FilterValue()` |
 | `table` | `WithColumns()`, `WithRows()`, `WithFocused(true)` |
-| `viewport` | Functional options constructor, soft wrapping, search, horizontal scroll |
+| `viewport` | Functional options constructor, `.SoftWrap`, `.LeftGutterFunc`, `.SetHighlights()`, `.ScrollRight()` |
 | `spinner` | `.Spinner = spinner.Dot`, use `s.Tick()` method (not package-level `Tick()`) |
-| `progress` | `.SetPercent()` returns Cmd, colors via `lipgloss.Color()` not raw strings |
+| `progress` | `.SetPercent()` returns Cmd, `WithColors(stops...)`, `WithDefaultBlend()`, `WithColorFunc(fn)` |
 | `filepicker` | `.CurrentDirectory`, `.AllowedTypes` |
 | `help` | KeyMap with `ShortHelp()`, `FullHelp()` |
 
@@ -182,6 +212,8 @@ keys := struct{ Up, Quit key.Binding }{
 ```
 
 ### Huh v2 Forms
+
+**Full form (multiple fields grouped):**
 ```go
 import "charm.land/huh/v2"
 
@@ -191,17 +223,50 @@ form := huh.NewForm(huh.NewGroup(
         if len(s) < 3 { return errors.New("too short") }
         return nil
     }),
-))
-form.WithAccessible(true)  // accessible mode is form-level only (per-field removed)
-err := form.Run()
+)).WithTheme(huh.ThemeCharm(isDark))
+
+err := form.RunWithContext(cmd.Context())  // propagate Cobra context for cancellation
 ```
-Fields: `NewInput()`, `NewText()`, `NewSelect[T]()`, `NewMultiSelect[T]()`, `NewConfirm()`
+
+**Standalone field (single prompt — no NewForm wrapper needed):**
+```go
+var repo string
+err := huh.NewInput().
+    Title("Team skills repo").
+    Placeholder("owner/repo").
+    Validate(validateRepo).
+    Value(&repo).
+    Run()  // standalone fields support .Run() directly
+```
+
+**Standalone confirm:**
+```go
+var yes bool
+err := huh.NewConfirm().Title("Continue?").Value(&yes).Run()
+```
+
+Fields: `NewInput()`, `NewText()`, `NewSelect[T]()`, `NewMultiSelect[T]()`, `NewConfirm()`, `NewFilePicker()`, `NewNote()`
+
+**Dynamic options (re-evaluate when watched value changes):**
+```go
+huh.NewSelect[string]().Title("State").
+    OptionsFunc(func() []huh.Option[string] {
+        return huh.NewOptions(statesFor(country)...)
+    }, &country).  // re-evaluates when &country changes
+    Value(&state)
+```
+
+**Form-level options:** `WithTimeout(d)`, `WithLayout(huh.LayoutColumns(n))`, `WithWidth(w)`, `WithHeight(h)`, `WithKeyMap(km)`, `WithAccessible(bool)`, `WithShowHelp(bool)`, `WithProgramOptions(opts...)`
+
+**Form data access by key:** Set `.Key("name")` on fields, then `form.GetString("name")`, `form.GetInt("level")`, `form.GetBool("confirmed")` after submission.
 
 Huh v2 specifics:
-- Themes take `isDark bool`: `huh.ThemeCharm(false)`
-- Spinner action: `ActionWithErr` takes `func(ctx context.Context) error`
+- Themes take `isDark bool`: `huh.ThemeCharm(isDark)`, `huh.ThemeBase16(isDark)`, `huh.ThemeDracula(isDark)`
+- Always use `form.RunWithContext(cmd.Context())` for forms in Cobra commands
+- Standalone fields use `.Run()` directly (no context variant — keep prompts short)
+- Spinner: `ActionWithErr(func(ctx context.Context) error)` for cancellable operations
 - Use `WithViewHook` for Bubble Tea integration
-- Does NOT auto-detect non-TTY — caller must check and set accessible mode
+- Does NOT auto-detect non-TTY — caller must check with `isatty` and fall back to flag-only or accessible mode
 
 ### View Routing (Multiple Screens)
 ```go
@@ -228,7 +293,7 @@ defer f.Close()
 Store in model, display in View:
 ```go
 case errMsg: m.err = msg.err; return m, nil
-// In View: if m.err != nil { v.Body = errorStyle.Render(m.err.Error()); return v }
+// In View: if m.err != nil { return tea.NewView(errorStyle.Render(m.err.Error())) }
 ```
 
 ### Testing
@@ -256,19 +321,30 @@ teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 - **Gum**: Shell script TUI (`gum input`, `gum choose`, `gum confirm`)
 - **Glamour**: Markdown rendering
 
+### Known Issues and Gotchas
+
+**tmux:** `tea.RequestBackgroundColor` silently fails — message never arrives. Workaround: force dark/light mode or use `lipgloss.HasDarkBackground()` (blocking). Key release events and keyboard enhancements also don't work in tmux v3.5.
+
+**Window titles** set via View persist after program exit — not cleaned up on shutdown or panic (known open issue).
+
+**Data race during shutdown** between `cancelreader.Close()` and `cancelreader.wait()`, detectable with `-race` flag.
+
 ### Common Mistakes
 - Never use raw goroutines — use `tea.Cmd`
 - Never mutate model outside Update — return new model
 - Never log to stdout — use `tea.LogToFile()`
 - Never use `tea.KeyMsg` in type switch — use `tea.KeyPressMsg` (KeyMsg is an interface in v2)
 - Never use `" "` for space bar — use `"space"` in v2
-- Never use `tea.WithAltScreen()` or `tea.WithMouseCellMotion()` — set `v.AltScreen`/`v.MouseCellMotion` in View()
+- Never use `tea.WithAltScreen()` or `tea.WithMouseCellMotion()` — set `v.AltScreen`/`v.MouseMode` in View()
 - Never use `lipgloss.AdaptiveColor` — use `lipgloss.LightDark(isDark)` with `tea.BackgroundColorMsg`
 - Never use `lipgloss.Color("string")` as a type — `lipgloss.Color()` is now a function returning `color.Color`
 - Never use `HighPerformanceRendering` — removed in v2
 - Never use package-level `spinner.Tick()` — use `model.Tick()` method
-- Always handle `tea.WindowSizeMsg` for responsive layout
-- Always handle `tea.BackgroundColorMsg` to support light/dark themes
+- Never use `compat.AdaptiveColor` in Wish/SSH contexts — blocking I/O + global state. Use `tea.RequestBackgroundColor` inside Bubble Tea
+- Always request background color in `Init()` via `tea.RequestBackgroundColor` to trigger `BackgroundColorMsg`
+- Always handle `tea.WindowSizeMsg` for responsive layout — account for frame size: `h, v := style.GetFrameSize()`
+- Always handle `tea.BackgroundColorMsg` to set `isDark` and propagate to all component styles
 - Always return child Init() commands from your Init()
 - Always track focus to route input to correct component
 - Always check TTY before running Huh forms — it does not auto-detect non-TTY
+- Always use `form.RunWithContext(cmd.Context())` for Huh forms in Cobra commands
