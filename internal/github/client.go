@@ -144,7 +144,7 @@ func (c *Client) CreateRepo(ctx context.Context, owner, name, description string
 		var ghErr *github.ErrorResponse
 		if errors.As(err, &ghErr) && ghErr.Response.StatusCode == http.StatusUnprocessableEntity {
 			for _, e := range ghErr.Errors {
-				if e.Message == "name already exists on this account" {
+				if e.Field == "name" && (e.Code == "already_exists" || e.Code == "custom") {
 					return nil, ErrRepoExists
 				}
 			}
