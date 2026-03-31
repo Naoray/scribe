@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/mattn/go-isatty"
@@ -47,7 +46,7 @@ func StepDedupCheck(_ context.Context, b *Bag) error {
 }
 
 func StepFetchManifest(ctx context.Context, b *Bag) error {
-	owner, repo, err := ParseOwnerRepo(b.RepoArg)
+	owner, repo, err := manifest.ParseOwnerRepo(b.RepoArg)
 	if err != nil {
 		return err
 	}
@@ -107,19 +106,3 @@ func StepConnectSyncError(ctx context.Context, b *Bag) error {
 	return nil
 }
 
-// ghNameRe matches valid GitHub owner and repo names (alphanumeric, hyphens, dots, underscores).
-var ghNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
-
-// ParseOwnerRepo validates and splits an "owner/repo" string.
-func ParseOwnerRepo(s string) (string, string, error) {
-	s = strings.TrimSpace(s)
-	parts := strings.SplitN(s, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo (e.g. ArtistfyHQ/team-skills)", s)
-	}
-	owner, repo := parts[0], parts[1]
-	if !ghNameRe.MatchString(owner) || !ghNameRe.MatchString(repo) {
-		return "", "", fmt.Errorf("invalid repo %q: owner and repo must be alphanumeric with hyphens, dots, or underscores", s)
-	}
-	return owner, repo, nil
-}

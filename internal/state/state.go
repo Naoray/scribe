@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/Naoray/scribe/internal/paths"
 )
 
 // State is the contents of ~/.scribe/state.json.
@@ -178,20 +180,12 @@ func (s *State) MigrateRegistries(defaultRegistry string) {
 }
 
 func statePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("home dir: %w", err)
-	}
-	return filepath.Join(home, ".scribe", "state.json"), nil
+	return paths.StatePath()
 }
 
 // Dir returns the path to the ~/.scribe directory.
 func Dir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("home dir: %w", err)
-	}
-	return filepath.Join(home, ".scribe"), nil
+	return paths.ScribeDir()
 }
 
 // lockFile acquires an advisory flock on the given path.

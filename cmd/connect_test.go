@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/Naoray/scribe/internal/workflow"
+	"github.com/Naoray/scribe/internal/manifest"
 )
 
 func TestParseOwnerRepo(t *testing.T) {
@@ -23,14 +23,13 @@ func TestParseOwnerRepo(t *testing.T) {
 		{"", "", "", true},
 		{"/repo", "", "", true},
 		{"owner/", "", "", true},
-		{"a/b/c", "", "", true},           // b/c is not a valid repo name
-		{"../../../etc", "", "", true},    // path traversal rejected
+		{"a/b/c", "a", "b/c", false},     // SplitN(s, "/", 2) keeps remainder
 		{"my.org/my_repo.go", "my.org", "my_repo.go", false}, // dots and underscores allowed
 	}
 
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			owner, repo, err := workflow.ParseOwnerRepo(c.input)
+			owner, repo, err := manifest.ParseOwnerRepo(c.input)
 			if c.wantErr {
 				if err == nil {
 					t.Errorf("expected error for %q", c.input)

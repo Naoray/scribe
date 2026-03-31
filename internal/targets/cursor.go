@@ -31,21 +31,29 @@ func (t CursorTarget) Install(skillName, canonicalDir string) ([]string, error) 
 		}
 	}
 
+	// Generate .cursor.mdc from SKILL.md in the store.
+	skillMDPath := filepath.Join(canonicalDir, "SKILL.md")
+	skillMD, err := os.ReadFile(skillMDPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("skill %q has no SKILL.md in store", skillName)
+		}
+		return nil, fmt.Errorf("read SKILL.md for %q: %w", skillName, err)
+	}
+
+	mdcPath := filepath.Join(canonicalDir, ".cursor.mdc")
+	mdc := generateMDC(skillMD)
+	if err := os.WriteFile(mdcPath, mdc, 0o644); err != nil {
+		return nil, fmt.Errorf("write .cursor.mdc for %q: %w", skillName, err)
+	}
+
 	rulesDir := filepath.Join(workDir, ".cursor", "rules")
 	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create cursor rules dir: %w", err)
 	}
 
-	src := filepath.Join(canonicalDir, ".cursor.mdc")
-	if _, err := os.Stat(src); err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("skill %q has no .cursor.mdc in store (missing SKILL.md?)", skillName)
-		}
-		return nil, fmt.Errorf("check cursor rule for %q: %w", skillName, err)
-	}
-
 	link := filepath.Join(rulesDir, skillName+".mdc")
-	if err := replaceSymlink(link, src); err != nil {
+	if err := replaceSymlink(link, mdcPath); err != nil {
 		return nil, fmt.Errorf("symlink cursor/%s: %w", skillName, err)
 	}
 	return []string{link}, nil

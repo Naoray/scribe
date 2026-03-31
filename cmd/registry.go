@@ -3,9 +3,6 @@ package cmd
 import (
 	"fmt"
 	"strings"
-
-	"github.com/Naoray/scribe/internal/manifest"
-	"github.com/Naoray/scribe/internal/targets"
 )
 
 // registryFlag is the shared --registry flag value for sync and list.
@@ -53,23 +50,3 @@ func filterRegistries(flag string, repos []string) ([]string, error) {
 	return []string{resolved}, nil
 }
 
-// resolveTargets converts manifest target defaults into concrete Target implementations.
-// If the manifest has no [targets] section or no defaults, all known targets are returned.
-func resolveTargets(t *manifest.Targets) []targets.Target {
-	if t == nil || len(t.Default) == 0 {
-		return []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
-	}
-	var result []targets.Target
-	for _, name := range t.Default {
-		switch name {
-		case targets.TargetClaude:
-			result = append(result, targets.ClaudeTarget{})
-		case targets.TargetCursor:
-			result = append(result, targets.CursorTarget{})
-		}
-	}
-	if len(result) == 0 {
-		return []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
-	}
-	return result
-}
