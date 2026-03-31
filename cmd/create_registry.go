@@ -141,6 +141,8 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 			"README.md":   scaffoldREADME(team, repoSlug),
 		}
 		if err := client.PushFiles(ctx, owner, repo, files, "Initialize skill registry"); err != nil {
+			fmt.Fprintf(os.Stderr, "\nRepo %s was created but the initial commit failed: %v\n", repoSlug, err)
+			fmt.Fprintf(os.Stderr, "Run the command again to retry, or delete the repo at https://github.com/%s\n", repoSlug)
 			return fmt.Errorf("push initial commit: %w", err)
 		}
 	}
@@ -154,7 +156,12 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		Config:  cfg,
 		Client:  client,
 	}
-	return workflow.Run(ctx, workflow.ConnectTail(), bag)
+	if err := workflow.Run(ctx, workflow.ConnectTail(), bag); err != nil {
+		fmt.Fprintf(os.Stderr, "\nRepo %s was created but connecting failed: %v\n", repoSlug, err)
+		fmt.Fprintf(os.Stderr, "Run `scribe connect %s` to retry.\n", repoSlug)
+		return err
+	}
+	return nil
 }
 
 // ghNameRe matches valid GitHub owner and repo names (alphanumeric, hyphens, dots, underscores).
