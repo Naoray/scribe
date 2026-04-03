@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/mattn/go-isatty"
 
+	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/targets"
@@ -55,32 +55,45 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 }
 
 func listLocal(w io.Writer, st *state.State, useJSON bool) error {
-	if useJSON {
-		return printLocalJSON(w, st)
+	skills, err := discovery.OnDisk(st)
+	if err != nil {
+		return err
 	}
-	return printLocalTable(w, st)
+
+	if useJSON {
+		return printLocalJSON(w, skills)
+	}
+	return printLocalTable(w, skills)
 }
 
-func printLocalTable(w io.Writer, st *state.State) error {
-	if len(st.Installed) == 0 {
+func printLocalTable(w io.Writer, skills []discovery.Skill) error {
+	if len(skills) == 0 {
 		fmt.Fprintln(w, "No skills installed.")
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  Install skills from a registry:  scribe connect <owner/repo>")
 		return nil
 	}
 
-	names := sortedSkillNames(st.Installed)
-
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SKILL\tVERSION\tTARGETS\tSOURCE")
 
-	for _, name := range names {
-		skill := st.Installed[name]
-		source, _, _ := strings.Cut(skill.Source, "@")
+	for _, sk := range skills {
+		version := sk.Version
+		if version == "" {
+			version = "-"
+		}
+
+		source := sk.Source
+		if source != "" {
+			source, _, _ = strings.Cut(source, "@")
+		} else if sk.LocalPath != "" {
+			source = sk.LocalPath
+		}
+
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			name,
-			skill.DisplayVersion(),
-			strings.Join(skill.Targets, ", "),
+			sk.Name,
+			version,
+			strings.Join(sk.Targets, ", "),
 			source,
 		)
 	}
@@ -88,35 +101,35 @@ func printLocalTable(w io.Writer, st *state.State) error {
 	return tw.Flush()
 }
 
-func printLocalJSON(w io.Writer, st *state.State) error {
+func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 	type localSkillJSON struct {
-		Name        string   `json:"name"`
-		Version     string   `json:"version"`
-		Source      string   `json:"source"`
-		Targets     []string `json:"targets"`
-		Registries  []string `json:"registries,omitempty"`
+		Name    string   `json:"name"`
+		Version string   `json:"version"`
+		Source  string   `json:"source"`
+		Targets []string `json:"targets"`
+		Managed bool     `json:"managed"`
+		Path    string   `json:"path,omitempty"`
 	}
 
-	names := sortedSkillNames(st.Installed)
-	skills := make([]localSkillJSON, 0, len(names))
-	for _, name := range names {
-		sk := st.Installed[name]
+	out := make([]localSkillJSON, 0, len(skills))
+	for _, sk := range skills {
 		tgts := sk.Targets
 		if tgts == nil {
 			tgts = []string{}
 		}
-		skills = append(skills, localSkillJSON{
-			Name:       name,
-			Version:    sk.DisplayVersion(),
-			Source:     sk.Source,
-			Targets:    tgts,
-			Registries: sk.Registries,
+		out = append(out, localSkillJSON{
+			Name:    sk.Name,
+			Version: sk.Version,
+			Source:  sk.Source,
+			Targets: tgts,
+			Managed: sk.Managed,
+			Path:    sk.LocalPath,
 		})
 	}
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(skills)
+	return enc.Encode(out)
 }
 
 func printMultiListTable(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
@@ -256,11 +269,3 @@ func formatCounts(counts map[sync.Status]int) string {
 	return strings.Join(parts, " · ")
 }
 
-func sortedSkillNames(installed map[string]state.InstalledSkill) []string {
-	names := make([]string, 0, len(installed))
-	for name := range installed {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}

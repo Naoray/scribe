@@ -6,18 +6,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/Naoray/scribe/internal/discovery"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
 )
 
-// validSkillName matches safe skill names that work as TOML keys and filesystem paths.
-var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // Candidate represents a skill that can be added to a registry.
 type Candidate struct {
@@ -50,61 +48,20 @@ func (a *Adder) emit(msg any) {
 // DiscoverLocal scans ~/.claude/skills/ and ~/.scribe/skills/ for skills on disk.
 // Cross-references state for source info. Deduplicates by name (first seen wins).
 func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
-	home, err := os.UserHomeDir()
+	skills, err := discovery.OnDisk(st)
 	if err != nil {
-		return nil, fmt.Errorf("home dir: %w", err)
+		return nil, err
 	}
 
-	dirs := []string{
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".scribe", "skills"),
+	candidates := make([]Candidate, 0, len(skills))
+	for _, sk := range skills {
+		candidates = append(candidates, Candidate{
+			Name:      sk.Name,
+			Origin:    "local",
+			LocalPath: sk.LocalPath,
+			Source:    sk.Source,
+		})
 	}
-
-	seen := map[string]bool{}
-	var candidates []Candidate
-
-	for _, base := range dirs {
-		entries, err := os.ReadDir(base)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", base, err)
-		}
-
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-			if seen[name] || !validSkillName.MatchString(name) {
-				continue
-			}
-
-			skillDir := filepath.Join(base, name)
-			empty, err := isDirEmpty(skillDir)
-			if err != nil || empty {
-				continue
-			}
-
-			seen[name] = true
-
-			c := Candidate{
-				Name:      name,
-				Origin:    "local",
-				LocalPath: skillDir,
-			}
-			if installed, ok := st.Installed[name]; ok && installed.Source != "" {
-				c.Source = installed.Source
-			}
-
-			candidates = append(candidates, c)
-		}
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].Name < candidates[j].Name
-	})
 
 	return candidates, nil
 }
@@ -266,28 +223,3 @@ func splitRepo(teamRepo string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// isDirEmpty reports whether a directory has no files (ignoring subdirectories).
-func isDirEmpty(dir string) (bool, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false, err
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			return false, nil
-		}
-	}
-	// Check subdirectories recursively.
-	for _, e := range entries {
-		if e.IsDir() {
-			empty, err := isDirEmpty(filepath.Join(dir, e.Name()))
-			if err != nil {
-				return false, err
-			}
-			if !empty {
-				return false, nil
-			}
-		}
-	}
-	return true, nil
-}
