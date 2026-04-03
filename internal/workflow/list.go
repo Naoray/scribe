@@ -171,7 +171,6 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 		Version     string   `json:"version"`
 		Source      string   `json:"source"`
 		Targets     []string `json:"targets"`
-		Managed     bool     `json:"managed"`
 		Path        string   `json:"path,omitempty"`
 	}
 
@@ -188,7 +187,6 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 			Version:     sk.Version,
 			Source:      sk.Source,
 			Targets:     tgts,
-			Managed:     sk.Managed,
 			Path:        sk.LocalPath,
 		})
 	}
