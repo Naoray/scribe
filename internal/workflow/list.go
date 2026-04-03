@@ -62,7 +62,7 @@ func listLocal(w io.Writer, st *state.State, useJSON bool, tuiFn func([]discover
 	}
 
 	if useJSON {
-		return printLocalJSON(w, skills)
+		return printLocalJSON(w, skills, st)
 	}
 	if tuiFn != nil {
 		return tuiFn(skills)
@@ -163,12 +163,13 @@ func printSkillList(w io.Writer, skills []discovery.Skill) {
 	}
 }
 
-func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
+func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) error {
 	type localSkillJSON struct {
 		Name        string   `json:"name"`
 		Description string   `json:"description,omitempty"`
 		Package     string   `json:"package,omitempty"`
 		Version     string   `json:"version"`
+		ContentHash string   `json:"content_hash,omitempty"`
 		Source      string   `json:"source"`
 		Targets     []string `json:"targets"`
 		Managed     bool     `json:"managed"`
@@ -181,14 +182,18 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 		if tgts == nil {
 			tgts = []string{}
 		}
+
+		_, managed := st.Installed[sk.Name]
+
 		out = append(out, localSkillJSON{
 			Name:        sk.Name,
 			Description: sk.Description,
 			Package:     sk.Package,
 			Version:     sk.Version,
+			ContentHash: sk.ContentHash,
 			Source:      sk.Source,
 			Targets:     tgts,
-			Managed:     sk.Managed,
+			Managed:     managed,
 			Path:        sk.LocalPath,
 		})
 	}
