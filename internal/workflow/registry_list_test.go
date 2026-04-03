@@ -57,6 +57,37 @@ func TestCountSkillsPerRegistry(t *testing.T) {
 	}
 }
 
+func TestPrintRegistryList_JSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{
+			"browse": {Registries: []string{"Foo/bar"}},
+			"deploy": {Registries: []string{"Foo/bar"}},
+		},
+	}
+
+	repos := []string{"Foo/bar"}
+
+	counts := workflow.CountSkillsPerRegistry(repos, st)
+
+	// Verify counts are correct.
+	if counts["Foo/bar"] != 2 {
+		t.Fatalf("expected 2 skills for Foo/bar, got %d", counts["Foo/bar"])
+	}
+}
+
+func TestPrintRegistryList_EmptyRepos(t *testing.T) {
+	repos := []string{}
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{},
+	}
+	counts := workflow.CountSkillsPerRegistry(repos, st)
+	if len(counts) != 0 {
+		t.Fatalf("expected empty map, got %v", counts)
+	}
+}
+
 func TestRegistryListSteps_Composition(t *testing.T) {
 	steps := workflow.RegistryListSteps()
 	if len(steps) == 0 {
