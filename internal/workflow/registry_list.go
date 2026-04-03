@@ -68,7 +68,7 @@ func StepPrintRegistryList(_ context.Context, b *Bag) error {
 
 	if len(repos) == 0 {
 		if useJSON {
-			return printRegistryJSON(w, nil, b.State)
+			return PrintRegistryJSON(w, nil, b.State)
 		}
 		fmt.Fprintln(w, "No registries connected.")
 		fmt.Fprintln(w)
@@ -79,7 +79,7 @@ func StepPrintRegistryList(_ context.Context, b *Bag) error {
 	counts := CountSkillsPerRegistry(repos, b.State)
 
 	if useJSON {
-		return printRegistryJSON(w, repos, b.State)
+		return PrintRegistryJSON(w, repos, b.State)
 	}
 	return printRegistryTable(w, repos, counts, b.State)
 }
@@ -116,7 +116,8 @@ type regListJSON struct {
 	LastSync   *string   `json:"last_sync"`
 }
 
-func printRegistryJSON(w io.Writer, repos []string, st *state.State) error {
+// PrintRegistryJSON writes registry list as JSON to w.
+func PrintRegistryJSON(w io.Writer, repos []string, st *state.State) error {
 	counts := CountSkillsPerRegistry(repos, st)
 
 	entries := make([]regJSON, 0, len(repos))

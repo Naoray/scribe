@@ -15,6 +15,7 @@ var registryCmd = &cobra.Command{
 }
 
 func init() {
+	registryCmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	registryCmd.AddCommand(registryListCmd)
 }
 
