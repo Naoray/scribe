@@ -31,7 +31,7 @@ curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_a
 sudo mv scribe /usr/local/bin/
 ```
 
-**Homebrew (macOS):**
+**Homebrew (macOS) — recommended:**
 
 ```bash
 brew install Naoray/tap/scribe
@@ -40,10 +40,26 @@ brew install Naoray/tap/scribe
 **Go users:**
 
 ```bash
-go install github.com/Naoray/scribe@latest
+go install github.com/Naoray/scribe/cmd/scribe@latest
 ```
 
 Verify: `scribe --version`
+
+### Updating
+
+**Homebrew:**
+
+```bash
+brew upgrade scribe
+```
+
+**Go:**
+
+```bash
+go install github.com/Naoray/scribe/cmd/scribe@latest
+```
+
+**Binary:** Download the latest release from the [releases page](https://github.com/Naoray/scribe/releases) and replace the binary in `/usr/local/bin/`.
 
 ## Quickstart
 
