@@ -248,11 +248,11 @@ func readSkillMetadata(skillDir string) SkillMeta {
 				continue
 			}
 			if strings.HasPrefix(line, "version:") {
-				meta.Version = strings.TrimSpace(strings.TrimPrefix(line, "version:"))
+				meta.Version = stripQuotes(strings.TrimSpace(strings.TrimPrefix(line, "version:")))
 				continue
 			}
 			if strings.HasPrefix(line, "name:") {
-				meta.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+				meta.Name = stripQuotes(strings.TrimSpace(strings.TrimPrefix(line, "name:")))
 				continue
 			}
 			continue
@@ -268,6 +268,14 @@ func readSkillMetadata(skillDir string) SkillMeta {
 		}
 	}
 	return meta
+}
+
+// stripQuotes removes surrounding single or double quotes from a YAML value.
+func stripQuotes(s string) string {
+	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 // truncateDescription shortens a description to a scannable length.

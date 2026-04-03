@@ -394,9 +394,12 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 		info, err := os.Lstat(sk.LocalPath)
 		if err == nil {
 			if info.Mode()&os.ModeSymlink != 0 {
-				os.Remove(sk.LocalPath)
+				err = os.Remove(sk.LocalPath)
 			} else {
-				os.RemoveAll(sk.LocalPath)
+				err = os.RemoveAll(sk.LocalPath)
+			}
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Files may remain on disk: %v", err)
 			}
 		}
 	}
@@ -768,8 +771,8 @@ func (m listModel) renderDetail(sk discovery.Skill, width int) string {
 	}
 	if sk.LocalPath != "" {
 		path := sk.LocalPath
-		if home, err := os.UserHomeDir(); err == nil {
-			path = strings.Replace(path, home, "~", 1)
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home) {
+			path = "~" + strings.TrimPrefix(path, home)
 		}
 		pairs = append(pairs, kv{"Path", path})
 	}
