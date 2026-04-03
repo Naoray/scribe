@@ -126,8 +126,12 @@ func displayPrereqs(result prereq.Result) {
 		fmt.Printf("  %s Scribe directory will be created\n", guideCheckPend.Render("○"))
 	}
 
-	if len(result.Connections.Repos) > 0 {
-		fmt.Printf("  %s Connected to %d registry\n", guideCheckOK.Render("✓"), len(result.Connections.Repos))
+	if n := len(result.Connections.Repos); n > 0 {
+		suffix := "y"
+		if n != 1 {
+			suffix = "ies"
+		}
+		fmt.Printf("  %s Connected to %d registr%s\n", guideCheckOK.Render("✓"), n, suffix)
 	} else {
 		fmt.Printf("  %s No team registries connected\n", guideCheckPend.Render("○"))
 	}
@@ -232,6 +236,7 @@ func runGuideInteractive(cmd *cobra.Command) error {
 		displayGuideSummary(repo, "join")
 
 	case "create":
+		createRegistryCmd.SetContext(cmd.Context())
 		if err := runCreateRegistry(createRegistryCmd, nil); err != nil {
 			return err
 		}
@@ -243,6 +248,7 @@ func runGuideInteractive(cmd *cobra.Command) error {
 		}
 
 	case "view":
+		listCmd.SetContext(cmd.Context())
 		return runList(listCmd, nil)
 	}
 
