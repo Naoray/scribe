@@ -10,6 +10,21 @@ import (
 	"github.com/Naoray/scribe/internal/add"
 )
 
+// ── Styles ──────────────────────────────────────────────────────────────────
+
+var (
+	addCursorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00BFFF"))
+	addCheckStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CC66"))
+	addDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	addHeaderStyle = lipgloss.NewStyle().Bold(true)
+	addDivStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	addNameStyle   = lipgloss.NewStyle().Bold(true)
+	addDescStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
+	addCountStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+)
+
+// ── Model ───────────────────────────────────────────────────────────────────
+
 type addItem struct {
 	candidate add.Candidate
 	selected  bool
@@ -18,13 +33,13 @@ type addItem struct {
 type addModel struct {
 	items      []addItem
 	cursor     int
+	offset     int
 	search     string
 	targetRepo string
 	confirmed  bool
 	quitting   bool
 	width      int
 	height     int
-	offset     int // viewport scroll offset
 }
 
 func newAddModel(candidates []add.Candidate, targetRepo string) addModel {
@@ -42,6 +57,8 @@ func (m addModel) Init() tea.Cmd {
 	return tea.RequestWindowSize
 }
 
+// ── Update ──────────────────────────────────────────────────────────────────
+
 func (m addModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -52,14 +69,14 @@ func (m addModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
-			if m.search == "" {
-				m.quitting = true
-				return m, tea.Quit
+			if m.search != "" {
+				m.search = ""
+				m.cursor = 0
+				m.offset = 0
+				return m, nil
 			}
-			// If searching, clear search instead of quitting.
-			m.search = ""
-			m.cursor = 0
-			m.offset = 0
+			m.quitting = true
+			return m, tea.Quit
 		case "escape":
 			if m.search != "" {
 				m.search = ""
@@ -113,43 +130,7 @@ func (m addModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// maxContentLines returns how many lines are available for items + group headers,
-// accounting for the header (title + search + blank) and footer lines.
-func (m addModel) maxContentLines() int {
-	if m.height == 0 {
-		return 30 // sensible default before first WindowSizeMsg
-	}
-	// 3 lines for header (title, search, blank line) + 3 for footer (blank, help, scroll hint)
-	overhead := 6
-	avail := m.height - overhead
-	if avail < 5 {
-		avail = 5
-	}
-	return avail
-}
-
-// visibleItemCount estimates how many items fit, used by ensureCursorVisible.
-// Slightly conservative to leave room for group headers.
-func (m addModel) visibleItemCount() int {
-	return m.maxContentLines() - 3 // reserve space for possible group headers
-}
-
-// ensureCursorVisible adjusts offset so the cursor stays in the viewport.
-func (m *addModel) ensureCursorVisible() {
-	visible := m.visibleItemCount()
-	if m.cursor < m.offset {
-		m.offset = m.cursor
-	}
-	if m.cursor >= m.offset+visible {
-		m.offset = m.cursor - visible + 1
-	}
-}
-
-var (
-	cursorStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00BFFF"))
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CC66"))
-	dimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-)
+// ── View ────────────────────────────────────────────────────────────────────
 
 func (m addModel) View() tea.View {
 	if m.quitting {
@@ -157,42 +138,42 @@ func (m addModel) View() tea.View {
 	}
 
 	var b strings.Builder
+	filtered := m.filteredItems()
 
 	// Header.
-	title := lipgloss.NewStyle().Bold(true).Render(
-		fmt.Sprintf("Add skills to %s", m.targetRepo),
-	)
-	b.WriteString(title + "\n")
+	title := addHeaderStyle.Render(fmt.Sprintf("Add skills to %s", m.targetRepo))
+	total := addCountStyle.Render(fmt.Sprintf("%d skills", len(filtered)))
+	b.WriteString(title + "  " + total + "\n")
+	b.WriteString(addDivStyle.Render(strings.Repeat("─", 40)) + "\n")
 
 	if m.search != "" {
-		b.WriteString(fmt.Sprintf("> %s\n\n", m.search))
-	} else {
-		b.WriteString(dimStyle.Render("> type to filter...") + "\n\n")
+		b.WriteString(fmt.Sprintf("> %s\n", m.search))
 	}
 
-	filtered := m.filteredItems()
 	if len(filtered) == 0 {
 		if m.search != "" {
-			b.WriteString("  No skills matching \"" + m.search + "\"\n")
+			b.WriteString("\n  No skills matching \"" + m.search + "\"\n")
 		} else {
-			b.WriteString("  All available skills are already in " + m.targetRepo + ".\n")
+			b.WriteString("\n  All skills are already in " + m.targetRepo + ".\n")
 		}
 	} else {
 		maxLines := m.maxContentLines()
+		if m.search != "" {
+			maxLines-- // search bar takes a line
+		}
 		linesUsed := 0
 
-		// Scroll indicator top.
 		if m.offset > 0 {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more above", m.offset)) + "\n")
+			b.WriteString(addDimStyle.Render(fmt.Sprintf("  ↑ %d more above", m.offset)) + "\n")
 			linesUsed++
 		}
 
+		// Track groups for headers.
 		lastGroup := ""
-		// If we're scrolled past the first item, show the group of the first visible item.
-		if m.offset > 0 {
+		if m.offset > 0 && m.offset < len(filtered) {
 			lastGroup = skillGroup(filtered[m.offset].candidate)
-			b.WriteString(lipgloss.NewStyle().Bold(true).Render(lastGroup) + "\n")
-			linesUsed++
+			b.WriteString("\n" + addHeaderStyle.Render(lastGroup) + "\n")
+			linesUsed += 2
 		}
 
 		end := m.offset
@@ -200,13 +181,13 @@ func (m addModel) View() tea.View {
 			item := filtered[i]
 			group := skillGroup(item.candidate)
 
-			// Check if item + optional description + optional group header fit.
-			linesNeeded := 1 // the item name
-			if item.candidate.Description != "" {
-				linesNeeded++ // description line
+			// Group header.
+			linesNeeded := 2 // name + description
+			if item.candidate.Description == "" {
+				linesNeeded = 1
 			}
 			if group != lastGroup {
-				linesNeeded += 2 // blank line + header
+				linesNeeded += 2 // blank + header
 			}
 			if linesUsed+linesNeeded > maxLines {
 				break
@@ -214,7 +195,7 @@ func (m addModel) View() tea.View {
 
 			if group != lastGroup {
 				lastGroup = group
-				b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Render(group) + "\n")
+				b.WriteString("\n" + addHeaderStyle.Render(group) + "\n")
 				linesUsed += 2
 			}
 
@@ -222,30 +203,30 @@ func (m addModel) View() tea.View {
 
 			check := "[ ]"
 			if item.selected {
-				check = selectedStyle.Render("[x]")
+				check = addCheckStyle.Render("[x]")
 			}
 
 			name := item.candidate.Name
 			desc := item.candidate.Description
 
 			if isCursor {
-				b.WriteString(cursorStyle.Render(">") + " " + check + " " + cursorStyle.Render(name) + "\n")
+				b.WriteString(addCursorStyle.Render("▸") + " " + check + " " + addCursorStyle.Render(name) + "\n")
 			} else {
-				b.WriteString(fmt.Sprintf("  %s %s\n", check, name))
+				b.WriteString("  " + check + " " + addNameStyle.Render(name) + "\n")
 			}
 			linesUsed++
 
 			if desc != "" {
-				b.WriteString("       " + dimStyle.Render(desc) + "\n")
+				b.WriteString("       " + addDescStyle.Render(desc) + "\n")
 				linesUsed++
 			}
+
 			end = i + 1
 		}
 
-		// Scroll indicator bottom.
 		remaining := len(filtered) - end
 		if remaining > 0 {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more below", remaining)) + "\n")
+			b.WriteString(addDimStyle.Render(fmt.Sprintf("  ↓ %d more below", remaining)) + "\n")
 		}
 	}
 
@@ -255,25 +236,56 @@ func (m addModel) View() tea.View {
 	if n := m.selectedCount(); n > 0 {
 		help += fmt.Sprintf("  (%d selected)", n)
 	}
-	b.WriteString(dimStyle.Render(help) + "\n")
+	b.WriteString(addDimStyle.Render(help) + "\n")
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
 }
 
+// ── Viewport helpers ────────────────────────────────────────────────────────
+
+func (m addModel) maxContentLines() int {
+	if m.height == 0 {
+		return 30
+	}
+	// header (2) + footer (2) + padding
+	overhead := 5
+	avail := m.height - overhead
+	if avail < 5 {
+		avail = 5
+	}
+	return avail
+}
+
+func (m *addModel) ensureCursorVisible() {
+	// Each item is ~2 lines (name + desc), be conservative.
+	visible := m.maxContentLines() / 2
+	if visible < 3 {
+		visible = 3
+	}
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+visible {
+		m.offset = m.cursor - visible + 1
+	}
+}
+
+// ── Data helpers ────────────────────────────────────────────────────────────
+
 func (m addModel) filteredItems() []addItem {
 	if m.search == "" {
 		return m.items
 	}
-	var filtered []addItem
+	var result []addItem
 	lower := strings.ToLower(m.search)
 	for _, item := range m.items {
 		if strings.Contains(strings.ToLower(item.candidate.Name), lower) {
-			filtered = append(filtered, item)
+			result = append(result, item)
 		}
 	}
-	return filtered
+	return result
 }
 
 func (m addModel) selectedCount() int {
@@ -308,4 +320,3 @@ func skillGroup(c add.Candidate) string {
 	}
 	return "standalone"
 }
-
