@@ -15,6 +15,13 @@ import (
 // validSkillName matches safe skill names that work as TOML keys and filesystem paths.
 var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+// SkillMeta holds metadata parsed from SKILL.md frontmatter.
+type SkillMeta struct {
+	Name        string
+	Description string
+	Version     string
+}
+
 // Skill represents a skill found on disk, optionally enriched with state info.
 type Skill struct {
 	Name        string
@@ -23,8 +30,8 @@ type Skill struct {
 	LocalPath   string   // absolute path on disk
 	Source      string   // from state if tracked, else empty
 	Version     string   // from state if tracked, else empty
+	ContentHash string   // deterministic content fingerprint
 	Targets     []string // from state if tracked, else inferred from location
-	Managed     bool     // true if tracked in state.json
 }
 
 // OnDisk scans ~/.claude/skills/ and ~/.scribe/skills/ for skill directories.
@@ -75,20 +82,31 @@ func OnDisk(st *state.State) ([]Skill, error) {
 
 			seen[name] = true
 
+			meta := readSkillMetadata(skillDir)
+			hash, _ := contentHash(skillDir)
+
 			sk := Skill{
 				Name:        name,
-				Description: readSkillDescription(skillDir),
+				Description: meta.Description,
 				LocalPath:   skillDir,
 				Package:     detectPackage(skillDir, dir.path),
+				ContentHash: hash,
 			}
 
 			if installed, ok := st.Installed[name]; ok {
 				sk.Source = installed.Source
 				sk.Version = installed.DisplayVersion()
 				sk.Targets = installed.Targets
-				sk.Managed = true
 			} else if dir.target != "" {
 				sk.Targets = []string{dir.target}
+			}
+
+			// Version resolution: frontmatter → state → content hash.
+			if meta.Version != "" {
+				sk.Version = meta.Version
+			}
+			if sk.Version == "" && hash != "" {
+				sk.Version = "#" + hash
 			}
 
 			skills = append(skills, sk)
@@ -105,7 +123,6 @@ func OnDisk(st *state.State) ([]Skill, error) {
 			Source:  installed.Source,
 			Version: installed.DisplayVersion(),
 			Targets: installed.Targets,
-			Managed: true,
 		})
 	}
 
@@ -175,20 +192,20 @@ func detectPackage(skillDir, scanBase string) string {
 	return pkg
 }
 
-// readSkillDescription extracts a short description from SKILL.md.
-// Tries frontmatter `description:` first, falls back to first paragraph after `# Title`.
-func readSkillDescription(skillDir string) string {
+// readSkillMetadata extracts metadata from SKILL.md frontmatter.
+// Parses name:, version:, and description: fields using line-by-line scanning
+// (not a YAML library) to avoid type coercion issues.
+func readSkillMetadata(skillDir string) SkillMeta {
 	path := filepath.Join(skillDir, "SKILL.md")
 
-	// Resolve symlinks so we read the actual file.
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return ""
+		return SkillMeta{}
 	}
 
 	f, err := os.Open(resolved)
 	if err != nil {
-		return ""
+		return SkillMeta{}
 	}
 	defer f.Close()
 
@@ -197,10 +214,11 @@ func readSkillDescription(skillDir string) string {
 	frontmatterDone := false
 	pastTitle := false
 
+	var meta SkillMeta
+
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Frontmatter handling.
 		if line == "---" {
 			if !inFrontmatter && !frontmatterDone {
 				inFrontmatter = true
@@ -214,21 +232,28 @@ func readSkillDescription(skillDir string) string {
 		}
 
 		if inFrontmatter {
-			// Match `description: <text>` or `description: |` (multiline).
 			if strings.HasPrefix(line, "description:") {
-				val := strings.TrimPrefix(line, "description:")
-				val = strings.TrimSpace(val)
+				val := strings.TrimSpace(strings.TrimPrefix(line, "description:"))
 				if val == "|" || val == ">" {
-					// Read the next non-empty line as the description.
 					for scanner.Scan() {
 						next := strings.TrimSpace(scanner.Text())
 						if next != "" {
-							return truncateDescription(next)
+							meta.Description = truncateDescription(next)
+							break
 						}
 					}
-					return ""
+				} else {
+					meta.Description = truncateDescription(val)
 				}
-				return truncateDescription(val)
+				continue
+			}
+			if strings.HasPrefix(line, "version:") {
+				meta.Version = strings.TrimSpace(strings.TrimPrefix(line, "version:"))
+				continue
+			}
+			if strings.HasPrefix(line, "name:") {
+				meta.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+				continue
 			}
 			continue
 		}
@@ -238,11 +263,11 @@ func readSkillDescription(skillDir string) string {
 			pastTitle = true
 			continue
 		}
-		if pastTitle && strings.TrimSpace(line) != "" {
-			return truncateDescription(strings.TrimSpace(line))
+		if pastTitle && meta.Description == "" && strings.TrimSpace(line) != "" {
+			meta.Description = truncateDescription(strings.TrimSpace(line))
 		}
 	}
-	return ""
+	return meta
 }
 
 // truncateDescription shortens a description to a scannable length.
