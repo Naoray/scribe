@@ -200,8 +200,11 @@ func (m addModel) View() tea.View {
 			item := filtered[i]
 			group := skillGroup(item.candidate)
 
-			// Check if a group header would fit.
-			linesNeeded := 1 // the item itself
+			// Check if item + optional description + optional group header fit.
+			linesNeeded := 1 // the item name
+			if item.candidate.Description != "" {
+				linesNeeded++ // description line
+			}
 			if group != lastGroup {
 				linesNeeded += 2 // blank line + header
 			}
@@ -223,15 +226,19 @@ func (m addModel) View() tea.View {
 			}
 
 			name := item.candidate.Name
-			origin := shortOrigin(item.candidate)
+			desc := item.candidate.Description
 
 			if isCursor {
-				line := fmt.Sprintf("> %s %-24s %s", check, name, dimStyle.Render(origin))
-				b.WriteString(cursorStyle.Render(">") + line[1:] + "\n")
+				b.WriteString(cursorStyle.Render(">") + " " + check + " " + cursorStyle.Render(name) + "\n")
 			} else {
-				b.WriteString(fmt.Sprintf("  %s %-24s %s\n", check, name, dimStyle.Render(origin)))
+				b.WriteString(fmt.Sprintf("  %s %s\n", check, name))
 			}
 			linesUsed++
+
+			if desc != "" {
+				b.WriteString("       " + dimStyle.Render(desc) + "\n")
+				linesUsed++
+			}
 			end = i + 1
 		}
 
@@ -302,21 +309,3 @@ func skillGroup(c add.Candidate) string {
 	return "standalone"
 }
 
-func shortOrigin(c add.Candidate) string {
-	if c.Package != "" {
-		return c.Package
-	}
-	if c.LocalPath != "" {
-		if strings.Contains(c.LocalPath, ".claude") {
-			return "~/.claude/skills"
-		}
-		return "~/.scribe/skills"
-	}
-	if c.Source != "" {
-		if len(c.Source) > 30 {
-			return c.Source[:27] + "..."
-		}
-		return c.Source
-	}
-	return ""
-}

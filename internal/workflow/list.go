@@ -35,7 +35,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 
 	// Local view: explicit --local flag or no registries connected.
 	if b.LocalFlag || len(b.Config.TeamRepos) == 0 {
-		return listLocal(w, b.State, useJSON)
+		return listLocal(w, b.State, useJSON, b.ListTUI)
 	}
 
 	// Reuse shared steps for migration and filtering.
@@ -55,7 +55,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 	return printMultiListTable(ctx, w, b.Repos, syncer, b.State, multiRegistry)
 }
 
-func listLocal(w io.Writer, st *state.State, useJSON bool) error {
+func listLocal(w io.Writer, st *state.State, useJSON bool, tuiFn func([]discovery.Skill) error) error {
 	skills, err := discovery.OnDisk(st)
 	if err != nil {
 		return err
@@ -63,6 +63,9 @@ func listLocal(w io.Writer, st *state.State, useJSON bool) error {
 
 	if useJSON {
 		return printLocalJSON(w, skills)
+	}
+	if tuiFn != nil {
+		return tuiFn(skills)
 	}
 	return printLocalTable(w, skills)
 }
