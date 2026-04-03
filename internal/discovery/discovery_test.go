@@ -51,6 +51,40 @@ func TestReadSkillMetadata_NoFrontmatter(t *testing.T) {
 	}
 }
 
+func TestStripQuotes(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{`"1.0.0"`, "1.0.0"},
+		{`'browse'`, "browse"},
+		{"no-quotes", "no-quotes"},
+		{`""`, ""},
+		{`"mismatched'`, `"mismatched'`},
+		{"a", "a"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := stripQuotes(tt.input)
+			if got != tt.want {
+				t.Errorf("stripQuotes(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadSkillMetadata_QuotedVersion(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: test\nversion: \"3.0.0\"\ndescription: Quoted version test.\n---\n"), 0o644)
+
+	meta := readSkillMetadata(dir)
+
+	if meta.Version != "3.0.0" {
+		t.Errorf("Version: got %q, want %q", meta.Version, "3.0.0")
+	}
+}
+
 func TestReadSkillMetadata_NoSkillMD(t *testing.T) {
 	dir := t.TempDir()
 
