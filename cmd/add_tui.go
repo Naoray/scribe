@@ -113,19 +113,25 @@ func (m addModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// visibleItemCount returns how many item lines fit in the viewport,
+// maxContentLines returns how many lines are available for items + group headers,
 // accounting for the header (title + search + blank) and footer lines.
-func (m addModel) visibleItemCount() int {
+func (m addModel) maxContentLines() int {
 	if m.height == 0 {
-		return 20 // sensible default before first WindowSizeMsg
+		return 30 // sensible default before first WindowSizeMsg
 	}
-	// 3 lines for header (title, search, blank line) + 2 for footer (blank, help)
-	overhead := 5
+	// 3 lines for header (title, search, blank line) + 3 for footer (blank, help, scroll hint)
+	overhead := 6
 	avail := m.height - overhead
-	if avail < 3 {
-		avail = 3
+	if avail < 5 {
+		avail = 5
 	}
 	return avail
+}
+
+// visibleItemCount estimates how many items fit, used by ensureCursorVisible.
+// Slightly conservative to leave room for group headers.
+func (m addModel) visibleItemCount() int {
+	return m.maxContentLines() - 3 // reserve space for possible group headers
 }
 
 // ensureCursorVisible adjusts offset so the cursor stays in the viewport.
@@ -172,15 +178,13 @@ func (m addModel) View() tea.View {
 			b.WriteString("  All available skills are already in " + m.targetRepo + ".\n")
 		}
 	} else {
-		visible := m.visibleItemCount()
-		end := m.offset + visible
-		if end > len(filtered) {
-			end = len(filtered)
-		}
+		maxLines := m.maxContentLines()
+		linesUsed := 0
 
 		// Scroll indicator top.
 		if m.offset > 0 {
 			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more above", m.offset)) + "\n")
+			linesUsed++
 		}
 
 		lastGroup := ""
@@ -188,14 +192,27 @@ func (m addModel) View() tea.View {
 		if m.offset > 0 {
 			lastGroup = skillGroup(filtered[m.offset].candidate)
 			b.WriteString(lipgloss.NewStyle().Bold(true).Render(lastGroup) + "\n")
+			linesUsed++
 		}
 
-		for i := m.offset; i < end; i++ {
+		end := m.offset
+		for i := m.offset; i < len(filtered); i++ {
 			item := filtered[i]
 			group := skillGroup(item.candidate)
+
+			// Check if a group header would fit.
+			linesNeeded := 1 // the item itself
+			if group != lastGroup {
+				linesNeeded += 2 // blank line + header
+			}
+			if linesUsed+linesNeeded > maxLines {
+				break
+			}
+
 			if group != lastGroup {
 				lastGroup = group
 				b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Render(group) + "\n")
+				linesUsed += 2
 			}
 
 			isCursor := i == m.cursor
@@ -214,6 +231,8 @@ func (m addModel) View() tea.View {
 			} else {
 				b.WriteString(fmt.Sprintf("  %s %-24s %s\n", check, name, dimStyle.Render(origin)))
 			}
+			linesUsed++
+			end = i + 1
 		}
 
 		// Scroll indicator bottom.

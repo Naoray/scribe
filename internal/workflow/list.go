@@ -74,54 +74,87 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 		return nil
 	}
 
-	currentGroup := ""
-	headerPrinted := false
-
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "SKILL\tVERSION\tTARGETS\tSOURCE")
+	// Bucket skills by group for clean rendering.
+	type group struct {
+		name   string
+		skills []discovery.Skill
+	}
+	var groups []group
+	groupIdx := map[string]int{}
 
 	for _, sk := range skills {
-		// Print group header when package changes.
-		group := sk.Package
-		if group != currentGroup {
-			tw.Flush()
-			if headerPrinted {
-				fmt.Fprintln(w)
-			}
-			if group != "" {
-				fmt.Fprintf(w, "── %s ──\n", group)
-			}
-			tw = tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-			if !headerPrinted || group != "" {
-				// Re-print column header for new groups.
-			}
-			currentGroup = group
-			headerPrinted = true
+		pkg := sk.Package
+		if idx, ok := groupIdx[pkg]; ok {
+			groups[idx].skills = append(groups[idx].skills, sk)
+		} else {
+			groupIdx[pkg] = len(groups)
+			groups = append(groups, group{name: pkg, skills: []discovery.Skill{sk}})
 		}
-
-		version := sk.Version
-		if version == "" {
-			version = "-"
-		}
-
-		source := sk.Source
-		if source != "" {
-			source, _, _ = strings.Cut(source, "@")
-		} else if sk.Package != "" {
-			source = sk.Package
-		} else if sk.LocalPath != "" {
-			source = sk.LocalPath
-		}
-
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			sk.Name,
-			version,
-			strings.Join(sk.Targets, ", "),
-			source,
-		)
 	}
 
-	return tw.Flush()
+	// Check if any skill has version info — if so, use detailed table.
+	hasVersions := false
+	for _, sk := range skills {
+		if sk.Version != "" {
+			hasVersions = true
+			break
+		}
+	}
+
+	for i, g := range groups {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+
+		if g.name != "" {
+			fmt.Fprintf(w, "%s (%d)\n", g.name, len(g.skills))
+		} else {
+			fmt.Fprintf(w, "standalone (%d)\n", len(g.skills))
+		}
+
+		if hasVersions {
+			// Detailed table when managed skills exist.
+			tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+			for _, sk := range g.skills {
+				ver := sk.Version
+				if ver == "" {
+					ver = "-"
+				}
+				fmt.Fprintf(tw, "  %s\t%s\t%s\n",
+					sk.Name, ver, strings.Join(sk.Targets, ", "))
+			}
+			tw.Flush()
+		} else {
+			// Compact name list when everything is unmanaged.
+			printCompactNames(w, g.skills)
+		}
+	}
+
+	fmt.Fprintf(w, "\n%d skills total\n", len(skills))
+	return nil
+}
+
+// printCompactNames renders skill names in wrapped lines with consistent spacing.
+func printCompactNames(w io.Writer, skills []discovery.Skill) {
+	const indent = "  "
+	const colWidth = 28
+	const maxLineWidth = 88
+
+	cols := (maxLineWidth - len(indent)) / colWidth
+	if cols < 1 {
+		cols = 1
+	}
+
+	for i, sk := range skills {
+		if i%cols == 0 {
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			fmt.Fprint(w, indent)
+		}
+		fmt.Fprintf(w, "%-*s", colWidth, sk.Name)
+	}
+	fmt.Fprintln(w)
 }
 
 func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
