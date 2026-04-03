@@ -64,7 +64,7 @@ type addModel struct {
 	height     int
 }
 
-func newAddModel(candidates []add.Candidate, targetRepo string) addModel {
+func newAddModel(candidates []add.Candidate, targetRepo string, groupFlag string) addModel {
 	items := make([]addItem, len(candidates))
 	for i, c := range candidates {
 		items[i] = addItem{candidate: c}
@@ -95,12 +95,20 @@ func newAddModel(candidates []add.Candidate, targetRepo string) addModel {
 		groups = append(groups, addGroupItem{name: k, key: k, count: counts[k]})
 	}
 
-	return addModel{
+	m := addModel{
 		phase:      addPhaseGroups,
 		groups:     groups,
 		items:      items,
 		targetRepo: targetRepo,
 	}
+
+	// If --group flag is set, skip to skills phase.
+	if groupFlag != "" {
+		m.groupKey = groupFlag
+		m.phase = addPhaseSkills
+	}
+
+	return m
 }
 
 func (m addModel) Init() tea.Cmd {
@@ -369,6 +377,9 @@ func (m addModel) maxContentLines() int {
 
 func (m *addModel) ensureCursorVisible() {
 	visible := m.maxContentLines()
+	if m.search != "" {
+		visible-- // search bar takes a line
+	}
 	if visible < 3 {
 		visible = 3
 	}
@@ -377,6 +388,11 @@ func (m *addModel) ensureCursorVisible() {
 	}
 	if m.cursor >= m.offset+visible {
 		m.offset = m.cursor - visible + 1
+	}
+	// The "↑ more above" indicator takes a line from the budget when
+	// offset > 0, so we need one extra line of room.
+	if m.offset > 0 && m.cursor >= m.offset+visible-1 {
+		m.offset++
 	}
 }
 

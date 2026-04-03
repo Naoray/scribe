@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
@@ -39,7 +40,8 @@ source reference. If it's a local-only skill, uploads the files to the
 registry.
 
 With no arguments in a terminal, shows an interactive browser to select
-skills. In non-TTY mode, the skill name is required.
+skills. In non-TTY mode, pass a skill name directly or use --json to
+list available candidates.
 
 Examples:
   scribe add cleanup
@@ -53,12 +55,19 @@ func init() {
 	addCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
 	addCmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	addCmd.Flags().String("registry", "", "Target registry (owner/repo)")
+	addCmd.Flags().String("group", "", "Jump directly to a group (e.g. gstack, standalone)")
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	addYes, _ := cmd.Flags().GetBool("yes")
 	addJSON, _ := cmd.Flags().GetBool("json")
 	addRegistry, _ := cmd.Flags().GetString("registry")
+	addGroup, _ := cmd.Flags().GetString("group")
+
+	// --group and a positional arg are mutually exclusive.
+	if addGroup != "" && len(args) == 1 {
+		return fmt.Errorf("--group and a skill name argument are mutually exclusive — use one or the other")
+	}
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 	useJSON := addJSON || !isatty.IsTerminal(os.Stdout.Fd())
@@ -88,11 +97,6 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	targetRepo, err := resolveTargetRegistry(addRegistry, cfg.TeamRepos, isTTY)
 	if err != nil {
 		return err
-	}
-
-	// Mode 3: no args, non-TTY.
-	if len(args) == 0 && !isTTY {
-		return fmt.Errorf("skill name required when not running interactively")
 	}
 
 	// Discover candidates.
@@ -145,12 +149,36 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		targetManifest,
 	)
 
+	// Validate --group flag against known groups.
+	if addGroup != "" {
+		known := knownGroups(allCandidates)
+		if _, ok := known[addGroup]; !ok {
+			names := make([]string, 0, len(known))
+			for k := range known {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			return fmt.Errorf("unknown group %q — available groups: %s", addGroup, strings.Join(names, ", "))
+		}
+	}
+
 	if len(args) == 1 {
 		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, isTTY, addYes)
 	}
 
-	// Mode 2: interactive browse (TTY, no args) — Task 7.
-	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, addYes)
+	// No args, non-TTY: list available candidates as JSON (for agents).
+	if !isTTY {
+		if !useJSON {
+			return fmt.Errorf("skill name required when not running interactively — use --json to list candidates")
+		}
+		filtered := filterCandidatesByGroup(allCandidates, addGroup)
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"candidates": candidatesJSON(filtered),
+		})
+	}
+
+	// Interactive browse (TTY, no args).
+	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, addYes, addGroup)
 }
 
 func runAddByName(
@@ -218,6 +246,7 @@ func runAddInteractive(
 	tgts []targets.Target,
 	useJSON bool,
 	skipConfirm bool,
+	groupFlag string,
 ) error {
 	if len(candidates) == 0 {
 		fmt.Printf("All available skills are already in %s.\n", targetRepo)
@@ -227,7 +256,7 @@ func runAddInteractive(
 	// Sort: local first, then remote, alphabetical within each.
 	sortCandidates(candidates)
 
-	m := newAddModel(candidates, targetRepo)
+	m := newAddModel(candidates, targetRepo, groupFlag)
 	p := tea.NewProgram(m)
 
 	finalModel, err := p.Run()
@@ -343,6 +372,50 @@ func filterAlreadyInTarget(candidates []add.Candidate, targetManifest *manifest.
 		filtered = append(filtered, c)
 	}
 	return filtered
+}
+
+// knownGroups returns the set of group names present in the candidates.
+func knownGroups(candidates []add.Candidate) map[string]struct{} {
+	groups := map[string]struct{}{}
+	for _, c := range candidates {
+		groups[skillGroup(c)] = struct{}{}
+	}
+	return groups
+}
+
+// filterCandidatesByGroup filters candidates to a specific group. An empty
+// group returns all candidates.
+func filterCandidatesByGroup(candidates []add.Candidate, group string) []add.Candidate {
+	if group == "" {
+		return candidates
+	}
+	var filtered []add.Candidate
+	for _, c := range candidates {
+		if skillGroup(c) == group {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+// candidatesJSON converts candidates to a JSON-friendly format.
+func candidatesJSON(candidates []add.Candidate) []map[string]string {
+	out := make([]map[string]string, len(candidates))
+	for i, c := range candidates {
+		m := map[string]string{
+			"name":   c.Name,
+			"origin": c.Origin,
+			"group":  skillGroup(c),
+		}
+		if c.Description != "" {
+			m["description"] = c.Description
+		}
+		if c.Source != "" {
+			m["source"] = c.Source
+		}
+		out[i] = m
+	}
+	return out
 }
 
 // wireAddEmit sets up the Adder's Emit callback to collect results. Returns
