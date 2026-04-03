@@ -38,7 +38,6 @@ const (
 
 var (
 	ltNameStyle   = lipgloss.NewStyle().Bold(true)
-	ltDescStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
 	ltDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	ltHeaderStyle = lipgloss.NewStyle().Bold(true)
 	ltCountStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
@@ -721,21 +720,12 @@ func (m listModel) paneWidths() (int, int) {
 func (m listModel) formatSkillLine(sk discovery.Skill, isCursor bool, maxWidth int) string {
 	prefix := "  "
 	nameStyle := ltNameStyle
-	descStyle := ltDescStyle
 	if isCursor {
 		prefix = ltCursorStyle.Render("▸") + " "
 		nameStyle = ltCursorStyle
-		descStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#0088aa"))
 	}
 
-	name := sk.Name
-	// Calculate remaining space for description.
-	// prefix (2) + name + " — " (3) = overhead
-	descSpace := maxWidth - runewidth.StringWidth(name) - 5
-	if sk.Description != "" && descSpace > 10 {
-		desc := runewidth.Truncate(sk.Description, descSpace, "...")
-		return prefix + nameStyle.Render(name) + " " + descStyle.Render("— "+desc)
-	}
+	name := runewidth.Truncate(sk.Name, maxWidth-2, "...")
 	return prefix + nameStyle.Render(name)
 }
 
