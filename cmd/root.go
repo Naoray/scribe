@@ -29,4 +29,5 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(guideCmd)
 }
