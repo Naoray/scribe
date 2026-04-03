@@ -64,7 +64,7 @@ type addModel struct {
 	height     int
 }
 
-func newAddModel(candidates []add.Candidate, targetRepo string) addModel {
+func newAddModel(candidates []add.Candidate, targetRepo string, groupFlag string) addModel {
 	items := make([]addItem, len(candidates))
 	for i, c := range candidates {
 		items[i] = addItem{candidate: c}
@@ -95,12 +95,20 @@ func newAddModel(candidates []add.Candidate, targetRepo string) addModel {
 		groups = append(groups, addGroupItem{name: k, key: k, count: counts[k]})
 	}
 
-	return addModel{
+	m := addModel{
 		phase:      addPhaseGroups,
 		groups:     groups,
 		items:      items,
 		targetRepo: targetRepo,
 	}
+
+	// If --group flag is set, skip to skills phase.
+	if groupFlag != "" {
+		m.groupKey = groupFlag
+		m.phase = addPhaseSkills
+	}
+
+	return m
 }
 
 func (m addModel) Init() tea.Cmd {
