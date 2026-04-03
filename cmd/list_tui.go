@@ -371,7 +371,7 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 
 	pathAllowed := false
 	for _, prefix := range allowedPrefixes {
-		if strings.HasPrefix(sk.LocalPath, prefix) {
+		if strings.HasPrefix(sk.LocalPath, prefix+string(filepath.Separator)) {
 			pathAllowed = true
 			break
 		}
