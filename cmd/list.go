@@ -48,7 +48,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	// Wire up TUI for local list when running in a terminal.
 	if isTTY && !jsonFlag {
 		bag.ListTUI = func(skills []discovery.Skill) error {
-			m := newListModel(skills, groupFlag)
+			m := newListModel(skills, groupFlag, bag.State)
 			p := tea.NewProgram(m)
 			_, err := p.Run()
 			if errors.Is(err, tea.ErrInterrupted) {
