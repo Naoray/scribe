@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/discovery"
@@ -66,6 +67,15 @@ func listLocal(w io.Writer, st *state.State, useJSON bool) error {
 	return printLocalTable(w, skills)
 }
 
+// list styles — scoped to avoid polluting the package namespace.
+var (
+	listHeaderStyle = lipgloss.NewStyle().Bold(true)
+	listCountStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	listNameStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	listDivStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	listTotalStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+)
+
 func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 	if len(skills) == 0 {
 		fmt.Fprintln(w, "No skills installed.")
@@ -106,11 +116,15 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 			fmt.Fprintln(w)
 		}
 
-		if g.name != "" {
-			fmt.Fprintf(w, "%s (%d)\n", g.name, len(g.skills))
-		} else {
-			fmt.Fprintf(w, "standalone (%d)\n", len(g.skills))
+		// Group header with divider line.
+		label := g.name
+		if label == "" {
+			label = "standalone"
 		}
+		count := listCountStyle.Render(fmt.Sprintf("(%d)", len(g.skills)))
+		header := fmt.Sprintf("%s %s", listHeaderStyle.Render(label), count)
+		fmt.Fprintln(w, header)
+		fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(label)+5)))
 
 		if hasVersions {
 			// Detailed table when managed skills exist.
@@ -130,31 +144,18 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 		}
 	}
 
-	fmt.Fprintf(w, "\n%d skills total\n", len(skills))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, listTotalStyle.Render(fmt.Sprintf("%d skills total", len(skills))))
 	return nil
 }
 
-// printCompactNames renders skill names in wrapped lines with consistent spacing.
+// printCompactNames renders skill names in a single column with dot leaders for scanability.
 func printCompactNames(w io.Writer, skills []discovery.Skill) {
-	const indent = "  "
-	const colWidth = 28
-	const maxLineWidth = 88
-
-	cols := (maxLineWidth - len(indent)) / colWidth
-	if cols < 1 {
-		cols = 1
-	}
-
 	for i, sk := range skills {
-		if i%cols == 0 {
-			if i > 0 {
-				fmt.Fprintln(w)
-			}
-			fmt.Fprint(w, indent)
-		}
-		fmt.Fprintf(w, "%-*s", colWidth, sk.Name)
+		num := listCountStyle.Render(fmt.Sprintf("%3d", i+1))
+		name := listNameStyle.Render(sk.Name)
+		fmt.Fprintf(w, "  %s  %s\n", num, name)
 	}
-	fmt.Fprintln(w)
 }
 
 func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
