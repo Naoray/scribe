@@ -12,26 +12,29 @@ Add `scribe registry list` to show connected registries with skill counts and la
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Command structure | `scribe registry list` (not `scribe registries`) | Opens the door for `registry add`, `registry remove` later |
-| Output format | Label-free, one line per registry | Self-describing values: `owner/repo (N) - time ago` |
+| Bare `scribe registry` | Delegates to `list` | Convenience first — only one subcommand exists, don't force users through a help screen |
+| Output format | Label-free, one line per registry | Self-describing values: `owner/repo (N)` |
+| Sync time | Footer only, not per-registry | `LastSync` is global — repeating it per line is misleading |
+| JSON envelope | `{"registries": [...], "last_sync": ...}` | Matches `scribe list` pattern, extensible |
 | Data source | Config + state only (offline) | No GitHub API calls — fast, works offline |
 | No TUI | Styled text or JSON only | Too little data for an interactive view |
 
 ## 1. Command Wiring
 
-### `cmd/registry.go` — parent command group
+### `cmd/registry.go` — extend existing file
+
+This file already contains `resolveRegistry` and `filterRegistries` helpers. Add the parent command and `list` subcommand here.
 
 ```go
 var registryCmd = &cobra.Command{
     Use:   "registry",
     Short: "Manage connected skill registries",
-}
-
-func init() {
-    registryCmd.AddCommand(registryListCmd)
+    RunE:  runRegistryList, // delegate bare command to list
+    Args:  cobra.NoArgs,
 }
 ```
 
-No `RunE` — bare `scribe registry` prints help automatically.
+Bare `scribe registry` delegates to `runRegistryList` directly. When more subcommands are added later, this can be changed to print help instead.
 
 ### `cmd/registry_list.go` — list subcommand
 
@@ -58,10 +61,12 @@ Add `registryCmd` to `rootCmd.AddCommand(...)`.
 Steps:
 
 ```
-LoadConfig → LoadState → StepPrintRegistryList
+LoadConfig → LoadState → MigrateRegistries → StepPrintRegistryList
 ```
 
-Reuses existing `StepLoadConfig` and `StepLoadState`.
+Reuses existing `StepLoadConfig`, `StepLoadState`, and `StepMigrateRegistries`.
+
+**Migration guard:** `StepMigrateRegistries` calls `b.Config.TeamRepos[0]`, so the step must be skipped when `len(TeamRepos) == 0`. `StepPrintRegistryList` handles the empty case directly (prints empty-state message).
 
 ### `StepPrintRegistryList`
 
@@ -69,24 +74,31 @@ Reads `b.Config.TeamRepos` and `b.State.Installed` to compute per-registry skill
 
 **Skill counting:** For each registry in `Config.TeamRepos`, count installed skills whose `Registries` slice contains that repo (case-insensitive match via `strings.EqualFold`).
 
+**Migration note:** After `MigrateRegistries`, legacy skills are attributed to `TeamRepos[0]` only. Secondary registries may show 0 skills until a full multi-registry sync runs. This is a model truth, not a counting bug.
+
 **Last sync:** Uses `b.State.Team.LastSync` (global — not per-registry today).
 
-**Time formatting:** Relative time ("2 hours ago", "3 days ago", "just now"). Simple helper — no external dependency. Falls back to absolute date if > 30 days ago.
+**Time formatting:** Relative time helper with 5 buckets:
+- `< 1 minute` -> "just now"
+- `< 1 hour` -> "N minutes ago"
+- `< 24 hours` -> "N hours ago"
+- `< 30 days` -> "N days ago"
+- `>= 30 days` -> absolute date "2026-03-01"
 
 ## 3. TTY Output
 
 ```
-ArtistfyHQ/skills (12) - 2 hours ago
-Naoray/my-skills (3) - 2 hours ago
+ArtistfyHQ/skills (12)
+Naoray/my-skills (3)
 
-2 registries connected
+2 registries connected · last sync 2 hours ago
 ```
 
 - One line per registry, no header row
-- Format: `owner/repo (count) - relative_time`
-- Styled: repo name bold, count and time dimmed
-- Footer: total count in dimmed style
-- If `LastSync` is zero (never synced): omit the time portion, show `owner/repo (0) - never synced`
+- Format: `owner/repo (count)`
+- Styled: repo name bold, count dimmed
+- Footer: total count + last sync time, dimmed
+- If `LastSync` is zero (never synced): footer shows `N registries connected · never synced`
 
 ### Empty state
 
@@ -101,32 +113,42 @@ No registries connected.
 Auto-JSON when stdout is not a TTY, explicit via `--json`:
 
 ```json
-[
-  {
-    "registry": "ArtistfyHQ/skills",
-    "skills": 12,
-    "last_sync": "2026-04-03T10:00:00Z"
-  },
-  {
-    "registry": "Naoray/my-skills",
-    "skills": 3,
-    "last_sync": "2026-04-03T10:00:00Z"
-  }
-]
+{
+  "registries": [
+    {
+      "registry": "ArtistfyHQ/skills",
+      "skill_count": 12
+    },
+    {
+      "registry": "Naoray/my-skills",
+      "skill_count": 3
+    }
+  ],
+  "last_sync": "2026-04-03T10:00:00Z"
+}
 ```
 
-- `last_sync` uses RFC 3339 format
+- `last_sync` at top level (global, not per-registry) in RFC 3339 format
 - `last_sync` is `null` if never synced
-- Empty registries list outputs `[]`
+- `skill_count` (not `skills`) to avoid ambiguity with other commands that use `skills` for arrays
+- Empty registries: `{"registries": [], "last_sync": null}`
 
-## 5. Files to Create/Modify
+## 5. Testing
+
+- Unit test for relative time helper (all 5 buckets + zero time)
+- Unit test for skill counting logic (including nil/empty `Registries` field, multi-registry membership)
+- Unit test for "never synced" path
+- Workflow integration test: migration on/off, empty config
+- JSON output shape validation
+
+## 6. Files to Create/Modify
 
 | File | Action |
 |------|--------|
-| `cmd/registry.go` | New — parent `registry` command |
+| `cmd/registry.go` | Extend — add `registryCmd` parent command with `RunE` delegating to list |
 | `cmd/registry_list.go` | New — `list` subcommand with `--json` flag |
 | `cmd/root.go` | Add `registryCmd` to root |
-| `internal/workflow/registry_list.go` | New — steps + styled table + JSON rendering |
+| `internal/workflow/registry_list.go` | New — steps + styled output + JSON rendering + relative time helper |
 
 ## Out of Scope
 
