@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-isatty"
 
+	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/targets"
@@ -34,7 +35,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 
 	// Local view: explicit --local flag or no registries connected.
 	if b.LocalFlag || len(b.Config.TeamRepos) == 0 {
-		return listLocal(w, b.State, useJSON)
+		return listLocal(w, b.State, useJSON, b.ListTUI)
 	}
 
 	// Reuse shared steps for migration and filtering.
@@ -54,69 +55,147 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 	return printMultiListTable(ctx, w, b.Repos, syncer, b.State, multiRegistry)
 }
 
-func listLocal(w io.Writer, st *state.State, useJSON bool) error {
-	if useJSON {
-		return printLocalJSON(w, st)
+func listLocal(w io.Writer, st *state.State, useJSON bool, tuiFn func([]discovery.Skill) error) error {
+	skills, err := discovery.OnDisk(st)
+	if err != nil {
+		return err
 	}
-	return printLocalTable(w, st)
+
+	if useJSON {
+		return printLocalJSON(w, skills)
+	}
+	if tuiFn != nil {
+		return tuiFn(skills)
+	}
+	return printLocalTable(w, skills)
 }
 
-func printLocalTable(w io.Writer, st *state.State) error {
-	if len(st.Installed) == 0 {
+// list styles — scoped to avoid polluting the package namespace.
+var (
+	listHeaderStyle = lipgloss.NewStyle().Bold(true)
+	listCountStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	listNameStyle   = lipgloss.NewStyle().Bold(true)
+	listDescStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
+	listDivStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	listTotalStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+)
+
+func printLocalTable(w io.Writer, skills []discovery.Skill) error {
+	if len(skills) == 0 {
 		fmt.Fprintln(w, "No skills installed.")
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  Install skills from a registry:  scribe connect <owner/repo>")
 		return nil
 	}
 
-	names := sortedSkillNames(st.Installed)
+	// Bucket skills by group for clean rendering.
+	type group struct {
+		name   string
+		skills []discovery.Skill
+	}
+	var groups []group
+	groupIdx := map[string]int{}
 
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "SKILL\tVERSION\tTARGETS\tSOURCE")
-
-	for _, name := range names {
-		skill := st.Installed[name]
-		source, _, _ := strings.Cut(skill.Source, "@")
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			name,
-			skill.DisplayVersion(),
-			strings.Join(skill.Targets, ", "),
-			source,
-		)
+	for _, sk := range skills {
+		pkg := sk.Package
+		if idx, ok := groupIdx[pkg]; ok {
+			groups[idx].skills = append(groups[idx].skills, sk)
+		} else {
+			groupIdx[pkg] = len(groups)
+			groups = append(groups, group{name: pkg, skills: []discovery.Skill{sk}})
+		}
 	}
 
-	return tw.Flush()
+	// Check if any skill has version info — if so, use detailed table.
+	hasVersions := false
+	for _, sk := range skills {
+		if sk.Version != "" {
+			hasVersions = true
+			break
+		}
+	}
+
+	for i, g := range groups {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+
+		// Group header with divider line.
+		label := g.name
+		if label == "" {
+			label = "standalone"
+		}
+		count := listCountStyle.Render(fmt.Sprintf("(%d)", len(g.skills)))
+		header := fmt.Sprintf("%s %s", listHeaderStyle.Render(label), count)
+		fmt.Fprintln(w, header)
+		fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(label)+5)))
+
+		if hasVersions {
+			// Detailed table when managed skills exist.
+			tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+			for _, sk := range g.skills {
+				ver := sk.Version
+				if ver == "" {
+					ver = "-"
+				}
+				fmt.Fprintf(tw, "  %s\t%s\t%s\n",
+					sk.Name, ver, strings.Join(sk.Targets, ", "))
+			}
+			tw.Flush()
+		} else {
+			printSkillList(w, g.skills)
+		}
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, listTotalStyle.Render(fmt.Sprintf("%d skills total", len(skills))))
+	return nil
 }
 
-func printLocalJSON(w io.Writer, st *state.State) error {
+// printSkillList renders skills with name and description on two lines.
+func printSkillList(w io.Writer, skills []discovery.Skill) {
+	for _, sk := range skills {
+		name := listNameStyle.Render(sk.Name)
+		fmt.Fprintf(w, "  %s\n", name)
+		if sk.Description != "" {
+			fmt.Fprintf(w, "  %s\n", listDescStyle.Render(sk.Description))
+		}
+	}
+}
+
+func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 	type localSkillJSON struct {
 		Name        string   `json:"name"`
+		Description string   `json:"description,omitempty"`
+		Package     string   `json:"package,omitempty"`
 		Version     string   `json:"version"`
 		Source      string   `json:"source"`
 		Targets     []string `json:"targets"`
-		Registries  []string `json:"registries,omitempty"`
+		Managed     bool     `json:"managed"`
+		Path        string   `json:"path,omitempty"`
 	}
 
-	names := sortedSkillNames(st.Installed)
-	skills := make([]localSkillJSON, 0, len(names))
-	for _, name := range names {
-		sk := st.Installed[name]
+	out := make([]localSkillJSON, 0, len(skills))
+	for _, sk := range skills {
 		tgts := sk.Targets
 		if tgts == nil {
 			tgts = []string{}
 		}
-		skills = append(skills, localSkillJSON{
-			Name:       name,
-			Version:    sk.DisplayVersion(),
-			Source:     sk.Source,
-			Targets:    tgts,
-			Registries: sk.Registries,
+		out = append(out, localSkillJSON{
+			Name:        sk.Name,
+			Description: sk.Description,
+			Package:     sk.Package,
+			Version:     sk.Version,
+			Source:      sk.Source,
+			Targets:     tgts,
+			Managed:     sk.Managed,
+			Path:        sk.LocalPath,
 		})
 	}
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(skills)
+	return enc.Encode(out)
 }
 
 func printMultiListTable(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
@@ -256,11 +335,3 @@ func formatCounts(counts map[sync.Status]int) string {
 	return strings.Join(parts, " · ")
 }
 
-func sortedSkillNames(installed map[string]state.InstalledSkill) []string {
-	names := make([]string, 0, len(installed))
-	for name := range installed {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
