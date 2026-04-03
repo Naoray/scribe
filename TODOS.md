@@ -76,6 +76,23 @@
 
 ---
 
+## `scribe create registry --existing <owner/repo>` (initialize registry in existing repo)
+
+**What:** Allow `scribe create registry` to scaffold a `scribe.toml` + `skills/` folder inside an existing GitHub repo instead of always creating a new one.
+
+**Why:** Teams already have repos (e.g., a team hub, monorepo, or docs repo) where they want to add a skill registry. Currently the only option is to manually push the manifest and then `scribe connect`. The CLI should handle this end-to-end.
+
+**Behavior:**
+- `scribe create registry --existing Artistfy/hq` — clones (or fetches) the repo, creates `scribe.toml` + `skills/` on a branch, pushes, opens PR (or commits directly), then auto-connects
+- Interactive mode: prompt for repo selection from user's orgs/repos if no `--existing` flag
+- Detect if `scribe.toml` already exists and abort with message
+
+**Context:** User tried to use `Artistfy/hq` as a registry (2026-04-03). Had to fall back to manual setup because the CLI only supports creating new repos.
+
+**Depends on:** Nothing blocking.
+
+---
+
 ## `scribe init` (package author mode)
 
 **What:** Scaffold a new skill package in the current directory — creates `scribe.toml` with `[package]` section, detects existing SKILL.md files, prompts for name/description/author.
