@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
@@ -39,7 +40,8 @@ source reference. If it's a local-only skill, uploads the files to the
 registry.
 
 With no arguments in a terminal, shows an interactive browser to select
-skills. In non-TTY mode, the skill name is required.
+skills. In non-TTY mode, pass a skill name directly or use --json to
+list available candidates.
 
 Examples:
   scribe add cleanup
@@ -61,6 +63,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	addJSON, _ := cmd.Flags().GetBool("json")
 	addRegistry, _ := cmd.Flags().GetString("registry")
 	addGroup, _ := cmd.Flags().GetString("group")
+
+	// --group and a positional arg are mutually exclusive.
+	if addGroup != "" && len(args) == 1 {
+		return fmt.Errorf("--group and a skill name argument are mutually exclusive — use one or the other")
+	}
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 	useJSON := addJSON || !isatty.IsTerminal(os.Stdout.Fd())
@@ -141,6 +148,19 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		append(localCandidates, remoteCandidates...),
 		targetManifest,
 	)
+
+	// Validate --group flag against known groups.
+	if addGroup != "" {
+		known := knownGroups(allCandidates)
+		if _, ok := known[addGroup]; !ok {
+			names := make([]string, 0, len(known))
+			for k := range known {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			return fmt.Errorf("unknown group %q — available groups: %s", addGroup, strings.Join(names, ", "))
+		}
+	}
 
 	if len(args) == 1 {
 		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, isTTY, addYes)
@@ -352,6 +372,15 @@ func filterAlreadyInTarget(candidates []add.Candidate, targetManifest *manifest.
 		filtered = append(filtered, c)
 	}
 	return filtered
+}
+
+// knownGroups returns the set of group names present in the candidates.
+func knownGroups(candidates []add.Candidate) map[string]struct{} {
+	groups := map[string]struct{}{}
+	for _, c := range candidates {
+		groups[skillGroup(c)] = struct{}{}
+	}
+	return groups
 }
 
 // filterCandidatesByGroup filters candidates to a specific group. An empty

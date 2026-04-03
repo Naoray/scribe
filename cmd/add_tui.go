@@ -377,6 +377,9 @@ func (m addModel) maxContentLines() int {
 
 func (m *addModel) ensureCursorVisible() {
 	visible := m.maxContentLines()
+	if m.search != "" {
+		visible-- // search bar takes a line
+	}
 	if visible < 3 {
 		visible = 3
 	}
@@ -385,6 +388,11 @@ func (m *addModel) ensureCursorVisible() {
 	}
 	if m.cursor >= m.offset+visible {
 		m.offset = m.cursor - visible + 1
+	}
+	// The "↑ more above" indicator takes a line from the budget when
+	// offset > 0, so we need one extra line of room.
+	if m.offset > 0 && m.cursor >= m.offset+visible-1 {
+		m.offset++
 	}
 }
 
