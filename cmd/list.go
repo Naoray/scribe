@@ -49,7 +49,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	if isTTY && !jsonFlag {
 		bag.ListTUI = func(skills []discovery.Skill) error {
 			m := newListModel(skills, groupFlag, bag.State)
-			p := tea.NewProgram(m)
+			p := tea.NewProgram(m, tea.WithContext(cmd.Context()))
 			_, err := p.Run()
 			if errors.Is(err, tea.ErrInterrupted) {
 				os.Exit(130)
