@@ -71,7 +71,8 @@ func listLocal(w io.Writer, st *state.State, useJSON bool) error {
 var (
 	listHeaderStyle = lipgloss.NewStyle().Bold(true)
 	listCountStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	listNameStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	listNameStyle   = lipgloss.NewStyle().Bold(true)
+	listDescStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
 	listDivStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	listTotalStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 )
@@ -139,8 +140,7 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 			}
 			tw.Flush()
 		} else {
-			// Compact name list when everything is unmanaged.
-			printCompactNames(w, g.skills)
+			printSkillList(w, g.skills)
 		}
 	}
 
@@ -149,24 +149,27 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 	return nil
 }
 
-// printCompactNames renders skill names in a single column with dot leaders for scanability.
-func printCompactNames(w io.Writer, skills []discovery.Skill) {
-	for i, sk := range skills {
-		num := listCountStyle.Render(fmt.Sprintf("%3d", i+1))
+// printSkillList renders skills with name and description on two lines.
+func printSkillList(w io.Writer, skills []discovery.Skill) {
+	for _, sk := range skills {
 		name := listNameStyle.Render(sk.Name)
-		fmt.Fprintf(w, "  %s  %s\n", num, name)
+		fmt.Fprintf(w, "  %s\n", name)
+		if sk.Description != "" {
+			fmt.Fprintf(w, "  %s\n", listDescStyle.Render(sk.Description))
+		}
 	}
 }
 
 func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 	type localSkillJSON struct {
-		Name    string   `json:"name"`
-		Package string   `json:"package,omitempty"`
-		Version string   `json:"version"`
-		Source  string   `json:"source"`
-		Targets []string `json:"targets"`
-		Managed bool     `json:"managed"`
-		Path    string   `json:"path,omitempty"`
+		Name        string   `json:"name"`
+		Description string   `json:"description,omitempty"`
+		Package     string   `json:"package,omitempty"`
+		Version     string   `json:"version"`
+		Source      string   `json:"source"`
+		Targets     []string `json:"targets"`
+		Managed     bool     `json:"managed"`
+		Path        string   `json:"path,omitempty"`
 	}
 
 	out := make([]localSkillJSON, 0, len(skills))
@@ -176,13 +179,14 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 			tgts = []string{}
 		}
 		out = append(out, localSkillJSON{
-			Name:    sk.Name,
-			Package: sk.Package,
-			Version: sk.Version,
-			Source:  sk.Source,
-			Targets: tgts,
-			Managed: sk.Managed,
-			Path:    sk.LocalPath,
+			Name:        sk.Name,
+			Description: sk.Description,
+			Package:     sk.Package,
+			Version:     sk.Version,
+			Source:      sk.Source,
+			Targets:     tgts,
+			Managed:     sk.Managed,
+			Path:        sk.LocalPath,
 		})
 	}
 

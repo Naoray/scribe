@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,13 +17,14 @@ var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // Skill represents a skill found on disk, optionally enriched with state info.
 type Skill struct {
-	Name      string
-	Package   string   // parent package name if skill is a symlink sub-skill (e.g. "gstack")
-	LocalPath string   // absolute path on disk
-	Source    string   // from state if tracked, else empty
-	Version   string   // from state if tracked, else empty
-	Targets   []string // from state if tracked, else inferred from location
-	Managed   bool     // true if tracked in state.json
+	Name        string
+	Description string   // short description from SKILL.md frontmatter or first paragraph
+	Package     string   // parent package name if skill is a symlink sub-skill (e.g. "gstack")
+	LocalPath   string   // absolute path on disk
+	Source      string   // from state if tracked, else empty
+	Version     string   // from state if tracked, else empty
+	Targets     []string // from state if tracked, else inferred from location
+	Managed     bool     // true if tracked in state.json
 }
 
 // OnDisk scans ~/.claude/skills/ and ~/.scribe/skills/ for skill directories.
@@ -74,9 +76,10 @@ func OnDisk(st *state.State) ([]Skill, error) {
 			seen[name] = true
 
 			sk := Skill{
-				Name:      name,
-				LocalPath: skillDir,
-				Package:   detectPackage(skillDir, dir.path),
+				Name:        name,
+				Description: readSkillDescription(skillDir),
+				LocalPath:   skillDir,
+				Package:     detectPackage(skillDir, dir.path),
 			}
 
 			if installed, ok := st.Installed[name]; ok {
@@ -170,6 +173,93 @@ func detectPackage(skillDir, scanBase string) string {
 		return "" // points to itself
 	}
 	return pkg
+}
+
+// readSkillDescription extracts a short description from SKILL.md.
+// Tries frontmatter `description:` first, falls back to first paragraph after `# Title`.
+func readSkillDescription(skillDir string) string {
+	path := filepath.Join(skillDir, "SKILL.md")
+
+	// Resolve symlinks so we read the actual file.
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return ""
+	}
+
+	f, err := os.Open(resolved)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	inFrontmatter := false
+	frontmatterDone := false
+	pastTitle := false
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Frontmatter handling.
+		if line == "---" {
+			if !inFrontmatter && !frontmatterDone {
+				inFrontmatter = true
+				continue
+			}
+			if inFrontmatter {
+				inFrontmatter = false
+				frontmatterDone = true
+				continue
+			}
+		}
+
+		if inFrontmatter {
+			// Match `description: <text>` or `description: |` (multiline).
+			if strings.HasPrefix(line, "description:") {
+				val := strings.TrimPrefix(line, "description:")
+				val = strings.TrimSpace(val)
+				if val == "|" || val == ">" {
+					// Read the next non-empty line as the description.
+					for scanner.Scan() {
+						next := strings.TrimSpace(scanner.Text())
+						if next != "" {
+							return truncateDescription(next)
+						}
+					}
+					return ""
+				}
+				return truncateDescription(val)
+			}
+			continue
+		}
+
+		// Past frontmatter: look for first paragraph after # Title.
+		if strings.HasPrefix(line, "# ") {
+			pastTitle = true
+			continue
+		}
+		if pastTitle && strings.TrimSpace(line) != "" {
+			return truncateDescription(strings.TrimSpace(line))
+		}
+	}
+	return ""
+}
+
+// truncateDescription shortens a description to a scannable length.
+func truncateDescription(s string) string {
+	// Take first sentence or max 80 chars.
+	if idx := strings.IndexAny(s, ".!"); idx > 0 && idx < 80 {
+		return s[:idx+1]
+	}
+	if len(s) > 80 {
+		// Break at word boundary.
+		cut := strings.LastIndex(s[:80], " ")
+		if cut > 40 {
+			return s[:cut] + "..."
+		}
+		return s[:80] + "..."
+	}
+	return s
 }
 
 // isDirEmpty reports whether a directory has no files (ignoring subdirectories).
