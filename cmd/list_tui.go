@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/Naoray/scribe/internal/discovery"
 )
@@ -247,9 +249,15 @@ func (m listModel) viewGroups() string {
 }
 
 func (m listModel) viewSkills() string {
+	if m.width < 80 {
+		return m.viewSkillsSingleColumn()
+	}
+	return m.viewSkillsSplitPane()
+}
+
+func (m listModel) viewSkillsSingleColumn() string {
 	var b strings.Builder
 
-	// Header.
 	label := m.groupKey
 	if label == "" {
 		label = "all"
@@ -263,10 +271,7 @@ func (m listModel) viewSkills() string {
 		b.WriteString(fmt.Sprintf("> %s\n", m.search))
 	}
 
-	maxLines := m.maxContentLines()
-	if m.search != "" {
-		maxLines--
-	}
+	contentHeight := m.contentHeight()
 	linesUsed := 0
 
 	if m.offset > 0 {
@@ -276,29 +281,15 @@ func (m listModel) viewSkills() string {
 
 	end := m.offset
 	for i := m.offset; i < len(m.filtered); i++ {
-		sk := m.filtered[i]
-
-		linesNeeded := 2 // name + description
-		if sk.Description == "" {
-			linesNeeded = 1
-		}
-		if linesUsed+linesNeeded > maxLines {
+		if linesUsed >= contentHeight {
 			break
 		}
-
+		sk := m.filtered[i]
 		isCursor := i == m.cursor
-		if isCursor {
-			b.WriteString(ltCursorStyle.Render("▸") + " " + ltCursorStyle.Render(sk.Name) + "\n")
-		} else {
-			b.WriteString("  " + ltNameStyle.Render(sk.Name) + "\n")
-		}
+
+		line := m.formatSkillLine(sk, isCursor, m.width-4)
+		b.WriteString(line + "\n")
 		linesUsed++
-
-		if sk.Description != "" {
-			b.WriteString("  " + ltDescStyle.Render(sk.Description) + "\n")
-			linesUsed++
-		}
-
 		end = i + 1
 	}
 
@@ -309,28 +300,110 @@ func (m listModel) viewSkills() string {
 
 	b.WriteString("\n")
 	b.WriteString(ltDimStyle.Render("↑↓ navigate · type to search · esc back · q quit") + "\n")
+	return b.String()
+}
 
+func (m listModel) viewSkillsSplitPane() string {
+	var b strings.Builder
+
+	// Header.
+	label := m.groupKey
+	if label == "" {
+		label = "all"
+	}
+	title := ltHeaderStyle.Render("Installed Skills")
+	group := ltCountStyle.Render(fmt.Sprintf("%s · %d skills", label, len(m.filtered)))
+	b.WriteString(title + "  " + group + "\n")
+	b.WriteString(ltDivStyle.Render(strings.Repeat("─", m.width)) + "\n")
+
+	if m.search != "" {
+		b.WriteString(fmt.Sprintf("> %s\n", m.search))
+	}
+
+	contentHeight := m.contentHeight()
+	leftWidth, rightWidth := m.paneWidths()
+
+	// Left pane: skill list.
+	var leftLines []string
+	if m.offset > 0 {
+		leftLines = append(leftLines, ltDimStyle.Render(fmt.Sprintf("  ↑ %d more", m.offset)))
+	}
+
+	end := m.offset
+	maxItems := contentHeight
+	if m.offset > 0 {
+		maxItems-- // scroll indicator takes a line
+	}
+
+	for i := m.offset; i < len(m.filtered) && len(leftLines) < maxItems; i++ {
+		sk := m.filtered[i]
+		isCursor := i == m.cursor
+		leftLines = append(leftLines, m.formatSkillLine(sk, isCursor, leftWidth-2))
+		end = i + 1
+	}
+
+	remaining := len(m.filtered) - end
+	if remaining > 0 {
+		leftLines = append(leftLines, ltDimStyle.Render(fmt.Sprintf("  ↓ %d more", remaining)))
+	}
+
+	// Pad left pane to contentHeight.
+	for len(leftLines) < contentHeight {
+		leftLines = append(leftLines, "")
+	}
+	leftContent := strings.Join(leftLines[:contentHeight], "\n")
+
+	// Right pane: detail for cursor skill.
+	rightContent := ""
+	if m.cursor < len(m.filtered) {
+		rightContent = m.renderDetail(m.filtered[m.cursor], rightWidth)
+	}
+
+	// Pad right pane to contentHeight.
+	rightLines := strings.Split(rightContent, "\n")
+	for len(rightLines) < contentHeight {
+		rightLines = append(rightLines, "")
+	}
+	rightContent = strings.Join(rightLines[:contentHeight], "\n")
+
+	// Join panes.
+	leftRendered := lipgloss.NewStyle().Width(leftWidth).Height(contentHeight).Render(leftContent)
+	divider := strings.TrimRight(strings.Repeat("│\n", contentHeight), "\n")
+	divRendered := lipgloss.NewStyle().Height(contentHeight).Foreground(lipgloss.Color("#555555")).Render(divider)
+	rightRendered := lipgloss.NewStyle().Width(rightWidth).Height(contentHeight).Render(rightContent)
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, divRendered, rightRendered)
+	b.WriteString(body)
+
+	// Footer.
+	b.WriteString("\n\n")
+	b.WriteString(ltDimStyle.Render("↑↓ navigate · enter actions · type to search · esc back · q quit") + "\n")
 	return b.String()
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-func (m listModel) maxContentLines() int {
+func (m listModel) contentHeight() int {
 	if m.height == 0 {
-		return 30
+		return 20
 	}
-	overhead := 5
-	avail := m.height - overhead
-	if avail < 5 {
-		avail = 5
+	headerHeight := 2 // title + divider
+	searchHeight := 0
+	if m.search != "" {
+		searchHeight = 1
 	}
-	return avail
+	footerHeight := 2 // blank + help
+	h := m.height - headerHeight - searchHeight - footerHeight
+	if h < 5 {
+		h = 5
+	}
+	return h
 }
 
 func (m *listModel) ensureCursorVisible() {
-	visible := m.maxContentLines() / 2
-	if visible < 3 {
-		visible = 3
+	visible := m.contentHeight()
+	if visible < 5 {
+		visible = 5
 	}
 	if m.cursor < m.offset {
 		m.offset = m.cursor
@@ -338,6 +411,93 @@ func (m *listModel) ensureCursorVisible() {
 	if m.cursor >= m.offset+visible {
 		m.offset = m.cursor - visible + 1
 	}
+}
+
+func (m listModel) paneWidths() (int, int) {
+	left := m.width * 45 / 100
+	if maxDynamic := m.width - 40; left > maxDynamic {
+		left = maxDynamic
+	}
+	if left > 60 {
+		left = 60
+	}
+	if left < 20 {
+		left = 20
+	}
+	right := m.width - left - 3 // 3 for divider + padding
+	if right < 20 {
+		right = 20
+	}
+	return left, right
+}
+
+func (m listModel) formatSkillLine(sk discovery.Skill, isCursor bool, maxWidth int) string {
+	prefix := "  "
+	nameStyle := ltNameStyle
+	descStyle := ltDescStyle
+	if isCursor {
+		prefix = ltCursorStyle.Render("▸") + " "
+		nameStyle = ltCursorStyle
+		descStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#0088aa"))
+	}
+
+	name := sk.Name
+	// Calculate remaining space for description.
+	// prefix (2) + name + " — " (3) = overhead
+	descSpace := maxWidth - runewidth.StringWidth(name) - 5
+	if sk.Description != "" && descSpace > 10 {
+		desc := runewidth.Truncate(sk.Description, descSpace, "...")
+		return prefix + nameStyle.Render(name) + " " + descStyle.Render("— "+desc)
+	}
+	return prefix + nameStyle.Render(name)
+}
+
+func (m listModel) renderDetail(sk discovery.Skill, width int) string {
+	var b strings.Builder
+
+	b.WriteString(ltCursorStyle.Render(sk.Name) + "\n")
+
+	if sk.Description != "" {
+		descStyle := lipgloss.NewStyle().Width(width - 2).Foreground(lipgloss.Color("#aaaaaa"))
+		b.WriteString(descStyle.Render(sk.Description) + "\n")
+	}
+
+	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
+
+	type kv struct{ key, val string }
+	var pairs []kv
+
+	if sk.Version != "" {
+		pairs = append(pairs, kv{"Version", sk.Version})
+	}
+	if sk.ContentHash != "" {
+		pairs = append(pairs, kv{"Hash", sk.ContentHash})
+	}
+	if sk.Package != "" {
+		pairs = append(pairs, kv{"Package", sk.Package})
+	}
+	if sk.Source != "" {
+		pairs = append(pairs, kv{"Source", sk.Source})
+	}
+	if len(sk.Targets) > 0 {
+		pairs = append(pairs, kv{"Targets", strings.Join(sk.Targets, ", ")})
+	}
+	if sk.LocalPath != "" {
+		path := sk.LocalPath
+		if home, err := os.UserHomeDir(); err == nil {
+			path = strings.Replace(path, home, "~", 1)
+		}
+		pairs = append(pairs, kv{"Path", path})
+	}
+
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Width(10)
+	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
+
+	for _, p := range pairs {
+		b.WriteString(keyStyle.Render(p.key) + valStyle.Render(p.val) + "\n")
+	}
+
+	return b.String()
 }
 
 func (m listModel) filterSkills() []discovery.Skill {
