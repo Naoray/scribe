@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	runewidth "github.com/mattn/go-runewidth"
 
 	"github.com/Naoray/scribe/internal/discovery"
 )
@@ -274,30 +275,38 @@ func (m listModel) viewSkills() string {
 		linesUsed++
 	}
 
+	width := m.width
+	if width == 0 {
+		width = 80
+	}
+
 	end := m.offset
 	for i := m.offset; i < len(m.filtered); i++ {
 		sk := m.filtered[i]
 
-		linesNeeded := 2 // name + description
-		if sk.Description == "" {
-			linesNeeded = 1
-		}
+		linesNeeded := 1
 		if linesUsed+linesNeeded > maxLines {
 			break
 		}
 
 		isCursor := i == m.cursor
+
+		// Build inline description.
+		var descPart string
+		if sk.Description != "" {
+			prefixLen := 2 // "▸ " or "  "
+			avail := width - prefixLen - runewidth.StringWidth(sk.Name) - 4 // 4 for " — "
+			if avail > 3 {
+				descPart = " — " + ltDescStyle.Render(runewidth.Truncate(sk.Description, avail, "…"))
+			}
+		}
+
 		if isCursor {
-			b.WriteString(ltCursorStyle.Render("▸") + " " + ltCursorStyle.Render(sk.Name) + "\n")
+			b.WriteString(ltCursorStyle.Render("▸") + " " + ltCursorStyle.Render(sk.Name) + descPart + "\n")
 		} else {
-			b.WriteString("  " + ltNameStyle.Render(sk.Name) + "\n")
+			b.WriteString("  " + ltNameStyle.Render(sk.Name) + descPart + "\n")
 		}
 		linesUsed++
-
-		if sk.Description != "" {
-			b.WriteString("  " + ltDescStyle.Render(sk.Description) + "\n")
-			linesUsed++
-		}
 
 		end = i + 1
 	}
@@ -328,7 +337,7 @@ func (m listModel) maxContentLines() int {
 }
 
 func (m *listModel) ensureCursorVisible() {
-	visible := m.maxContentLines() / 2
+	visible := m.maxContentLines()
 	if visible < 3 {
 		visible = 3
 	}
