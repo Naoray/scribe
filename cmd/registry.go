@@ -3,7 +3,21 @@ package cmd
 import (
 	"fmt"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
+
+var registryCmd = &cobra.Command{
+	Use:   "registry",
+	Short: "Manage connected skill registries",
+	RunE:  runRegistryList,
+	Args:  cobra.NoArgs,
+}
+
+func init() {
+	registryCmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	registryCmd.AddCommand(registryListCmd)
+}
 
 // resolveRegistry matches a user-provided registry string against connected repos.
 // Accepts full "owner/repo" (case-insensitive) or partial "repo" name if unambiguous.
