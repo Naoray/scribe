@@ -21,6 +21,7 @@ import (
 type Candidate struct {
 	Name      string // skill name (directory basename)
 	Origin    string // "local" or "registry:owner/repo"
+	Package   string // parent package name if sub-skill (e.g. "gstack")
 	Source    string // "github:owner/repo@ref" or empty for local-only
 	LocalPath string // absolute path on disk, empty for remote-only
 }
@@ -58,6 +59,7 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 		candidates = append(candidates, Candidate{
 			Name:      sk.Name,
 			Origin:    "local",
+			Package:   sk.Package,
 			LocalPath: sk.LocalPath,
 			Source:    sk.Source,
 		})

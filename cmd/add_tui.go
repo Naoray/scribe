@@ -24,6 +24,7 @@ type addModel struct {
 	quitting   bool
 	width      int
 	height     int
+	offset     int // viewport scroll offset
 }
 
 func newAddModel(candidates []add.Candidate, targetRepo string) addModel {
@@ -37,39 +38,51 @@ func newAddModel(candidates []add.Candidate, targetRepo string) addModel {
 	}
 }
 
-func (m addModel) Init() tea.Cmd { return nil }
+func (m addModel) Init() tea.Cmd {
+	return tea.RequestWindowSize
+}
 
 func (m addModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.ensureCursorVisible()
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
-			m.quitting = true
-			return m, tea.Quit
+			if m.search == "" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			// If searching, clear search instead of quitting.
+			m.search = ""
+			m.cursor = 0
+			m.offset = 0
+		case "escape":
+			if m.search != "" {
+				m.search = ""
+				m.cursor = 0
+				m.offset = 0
+			} else {
+				m.quitting = true
+				return m, tea.Quit
+			}
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
-			}
-			// Skip group headers.
-			for m.cursor > 0 && m.filteredItems()[m.cursor].candidate.Name == "" {
-				m.cursor--
+				m.ensureCursorVisible()
 			}
 		case "down", "j":
 			filtered := m.filteredItems()
 			if m.cursor < len(filtered)-1 {
 				m.cursor++
-			}
-			for m.cursor < len(filtered)-1 && filtered[m.cursor].candidate.Name == "" {
-				m.cursor++
+				m.ensureCursorVisible()
 			}
 		case "space":
 			filtered := m.filteredItems()
 			if m.cursor < len(filtered) {
-				// Toggle in the original items list.
 				name := filtered[m.cursor].candidate.Name
 				for i := range m.items {
 					if m.items[i].candidate.Name == name {
@@ -87,16 +100,50 @@ func (m addModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.search) > 0 {
 				m.search = m.search[:len(m.search)-1]
 				m.cursor = 0
+				m.offset = 0
 			}
 		default:
 			if len(msg.String()) == 1 {
 				m.search += msg.String()
 				m.cursor = 0
+				m.offset = 0
 			}
 		}
 	}
 	return m, nil
 }
+
+// visibleItemCount returns how many item lines fit in the viewport,
+// accounting for the header (title + search + blank) and footer lines.
+func (m addModel) visibleItemCount() int {
+	if m.height == 0 {
+		return 20 // sensible default before first WindowSizeMsg
+	}
+	// 3 lines for header (title, search, blank line) + 2 for footer (blank, help)
+	overhead := 5
+	avail := m.height - overhead
+	if avail < 3 {
+		avail = 3
+	}
+	return avail
+}
+
+// ensureCursorVisible adjusts offset so the cursor stays in the viewport.
+func (m *addModel) ensureCursorVisible() {
+	visible := m.visibleItemCount()
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+visible {
+		m.offset = m.cursor - visible + 1
+	}
+}
+
+var (
+	cursorStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00BFFF"))
+	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CC66"))
+	dimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+)
 
 func (m addModel) View() tea.View {
 	if m.quitting {
@@ -104,15 +151,17 @@ func (m addModel) View() tea.View {
 	}
 
 	var b strings.Builder
+
+	// Header.
 	title := lipgloss.NewStyle().Bold(true).Render(
 		fmt.Sprintf("Add skills to %s", m.targetRepo),
 	)
 	b.WriteString(title + "\n")
 
 	if m.search != "" {
-		b.WriteString(fmt.Sprintf("> Search: %s\n\n", m.search))
+		b.WriteString(fmt.Sprintf("> %s\n\n", m.search))
 	} else {
-		b.WriteString("> Search: \n\n")
+		b.WriteString(dimStyle.Render("> type to filter...") + "\n\n")
 	}
 
 	filtered := m.filteredItems()
@@ -122,39 +171,69 @@ func (m addModel) View() tea.View {
 		} else {
 			b.WriteString("  All available skills are already in " + m.targetRepo + ".\n")
 		}
-	}
-
-	// Group by origin.
-	currentGroup := ""
-	for i, item := range filtered {
-		group := itemGroup(item.candidate)
-		if group != currentGroup {
-			currentGroup = group
-			header := lipgloss.NewStyle().Bold(true).Render(group)
-			b.WriteString("\n" + header + "\n")
+	} else {
+		visible := m.visibleItemCount()
+		end := m.offset + visible
+		if end > len(filtered) {
+			end = len(filtered)
 		}
 
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "> "
-		}
-		check := "[ ]"
-		if item.selected {
-			check = "[x]"
+		// Scroll indicator top.
+		if m.offset > 0 {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more above", m.offset)) + "\n")
 		}
 
-		origin := shortOrigin(item.candidate)
-		b.WriteString(fmt.Sprintf("%s%s %-20s %s\n", cursor, check, item.candidate.Name, origin))
+		lastGroup := ""
+		// If we're scrolled past the first item, show the group of the first visible item.
+		if m.offset > 0 {
+			lastGroup = skillGroup(filtered[m.offset].candidate)
+			b.WriteString(lipgloss.NewStyle().Bold(true).Render(lastGroup) + "\n")
+		}
+
+		for i := m.offset; i < end; i++ {
+			item := filtered[i]
+			group := skillGroup(item.candidate)
+			if group != lastGroup {
+				lastGroup = group
+				b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Render(group) + "\n")
+			}
+
+			isCursor := i == m.cursor
+
+			check := "[ ]"
+			if item.selected {
+				check = selectedStyle.Render("[x]")
+			}
+
+			name := item.candidate.Name
+			origin := shortOrigin(item.candidate)
+
+			if isCursor {
+				line := fmt.Sprintf("> %s %-24s %s", check, name, dimStyle.Render(origin))
+				b.WriteString(cursorStyle.Render(">") + line[1:] + "\n")
+			} else {
+				b.WriteString(fmt.Sprintf("  %s %-24s %s\n", check, name, dimStyle.Render(origin)))
+			}
+		}
+
+		// Scroll indicator bottom.
+		remaining := len(filtered) - end
+		if remaining > 0 {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more below", remaining)) + "\n")
+		}
 	}
 
-	b.WriteString("\n↑↓ navigate · space select · enter add · q quit")
-
-	if n := m.selectedCount(); n > 0 {
-		b.WriteString(fmt.Sprintf("  (%d selected)", n))
-	}
+	// Footer.
 	b.WriteString("\n")
+	help := "↑↓ navigate · space select · enter add · q quit"
+	if n := m.selectedCount(); n > 0 {
+		help += fmt.Sprintf("  (%d selected)", n)
+	}
+	b.WriteString(dimStyle.Render(help) + "\n")
 
-	return tea.NewView(b.String())
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
 }
 
 func (m addModel) filteredItems() []addItem {
@@ -191,19 +270,24 @@ func (m addModel) selectedCandidates() []add.Candidate {
 	return selected
 }
 
-func itemGroup(c add.Candidate) string {
-	if c.Origin == "local" {
-		return "LOCAL"
+func skillGroup(c add.Candidate) string {
+	if c.Origin != "local" {
+		if strings.HasPrefix(c.Origin, "registry:") {
+			return strings.TrimPrefix(c.Origin, "registry:")
+		}
+		return c.Origin
 	}
-	if strings.HasPrefix(c.Origin, "registry:") {
-		return "FROM " + strings.TrimPrefix(c.Origin, "registry:")
+	if c.Package != "" {
+		return c.Package
 	}
-	return "OTHER"
+	return "standalone"
 }
 
 func shortOrigin(c add.Candidate) string {
+	if c.Package != "" {
+		return c.Package
+	}
 	if c.LocalPath != "" {
-		// Show abbreviated path.
 		if strings.Contains(c.LocalPath, ".claude") {
 			return "~/.claude/skills"
 		}

@@ -74,10 +74,31 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 		return nil
 	}
 
+	currentGroup := ""
+	headerPrinted := false
+
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SKILL\tVERSION\tTARGETS\tSOURCE")
 
 	for _, sk := range skills {
+		// Print group header when package changes.
+		group := sk.Package
+		if group != currentGroup {
+			tw.Flush()
+			if headerPrinted {
+				fmt.Fprintln(w)
+			}
+			if group != "" {
+				fmt.Fprintf(w, "── %s ──\n", group)
+			}
+			tw = tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+			if !headerPrinted || group != "" {
+				// Re-print column header for new groups.
+			}
+			currentGroup = group
+			headerPrinted = true
+		}
+
 		version := sk.Version
 		if version == "" {
 			version = "-"
@@ -86,6 +107,8 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 		source := sk.Source
 		if source != "" {
 			source, _, _ = strings.Cut(source, "@")
+		} else if sk.Package != "" {
+			source = sk.Package
 		} else if sk.LocalPath != "" {
 			source = sk.LocalPath
 		}
@@ -104,6 +127,7 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 	type localSkillJSON struct {
 		Name    string   `json:"name"`
+		Package string   `json:"package,omitempty"`
 		Version string   `json:"version"`
 		Source  string   `json:"source"`
 		Targets []string `json:"targets"`
@@ -119,6 +143,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill) error {
 		}
 		out = append(out, localSkillJSON{
 			Name:    sk.Name,
+			Package: sk.Package,
 			Version: sk.Version,
 			Source:  sk.Source,
 			Targets: tgts,

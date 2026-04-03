@@ -274,13 +274,25 @@ func runAddInteractive(
 	return finishAdd(ctx, *results, targetRepo, st, client, tgts, useJSON)
 }
 
-// sortCandidates sorts local-first, then remote, alphabetical within each.
+// sortCandidates groups by origin (local first, then remote), then by package,
+// alphabetical within each group.
 func sortCandidates(candidates []add.Candidate) {
 	sort.Slice(candidates, func(i, j int) bool {
 		iLocal := candidates[i].Origin == "local"
 		jLocal := candidates[j].Origin == "local"
 		if iLocal != jLocal {
 			return iLocal
+		}
+		// Within local: standalone first, then by package name.
+		pi, pj := candidates[i].Package, candidates[j].Package
+		if pi != pj {
+			if pi == "" {
+				return true
+			}
+			if pj == "" {
+				return false
+			}
+			return pi < pj
 		}
 		return candidates[i].Name < candidates[j].Name
 	})

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/Naoray/scribe/internal/state"
 )
@@ -16,11 +17,12 @@ var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 // Skill represents a skill found on disk, optionally enriched with state info.
 type Skill struct {
 	Name      string
-	LocalPath string // absolute path on disk
-	Source    string // from state if tracked, else empty
-	Version   string // from state if tracked, else empty
+	Package   string   // parent package name if skill is a symlink sub-skill (e.g. "gstack")
+	LocalPath string   // absolute path on disk
+	Source    string   // from state if tracked, else empty
+	Version   string   // from state if tracked, else empty
 	Targets   []string // from state if tracked, else inferred from location
-	Managed   bool   // true if tracked in state.json
+	Managed   bool     // true if tracked in state.json
 }
 
 // OnDisk scans ~/.claude/skills/ and ~/.scribe/skills/ for skill directories.
@@ -74,6 +76,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 			sk := Skill{
 				Name:      name,
 				LocalPath: skillDir,
+				Package:   detectPackage(skillDir, dir.path),
 			}
 
 			if installed, ok := st.Installed[name]; ok {
@@ -104,10 +107,69 @@ func OnDisk(st *state.State) ([]Skill, error) {
 	}
 
 	sort.Slice(skills, func(i, j int) bool {
+		// Group by package (standalone first, then by package name), alpha within.
+		pi, pj := skills[i].Package, skills[j].Package
+		if pi != pj {
+			if pi == "" {
+				return true // standalone before packages
+			}
+			if pj == "" {
+				return false
+			}
+			return pi < pj
+		}
 		return skills[i].Name < skills[j].Name
 	})
 
 	return skills, nil
+}
+
+// detectPackage determines if a skill directory is a sub-skill of a parent
+// package by checking if SKILL.md is a symlink pointing into another skill dir.
+// For example, browse/SKILL.md -> gstack/browse/SKILL.md means package "gstack".
+// Also detects whole-directory symlinks (e.g., find-skills -> ~/.agents/skills/find-skills).
+func detectPackage(skillDir, scanBase string) string {
+	// Check if the directory itself is a symlink.
+	if target, err := os.Readlink(skillDir); err == nil {
+		// Resolve relative to the scan base for relative symlinks.
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(scanBase, target)
+		}
+		// Not a sibling in the same skills dir — external package.
+		return ""
+	}
+
+	// Check if SKILL.md is a symlink into a sibling package.
+	skillMD := filepath.Join(skillDir, "SKILL.md")
+	target, err := os.Readlink(skillMD)
+	if err != nil {
+		return "" // not a symlink
+	}
+
+	// Resolve to absolute path.
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(skillDir, target)
+	}
+	target, err = filepath.Clean(target), nil
+	if err != nil {
+		return ""
+	}
+
+	// Check if the target is inside a sibling dir in the same scan base.
+	// Pattern: <scanBase>/<package>/<subdir>/SKILL.md
+	rel, err := filepath.Rel(scanBase, target)
+	if err != nil {
+		return ""
+	}
+	parts := strings.SplitN(rel, string(filepath.Separator), 2)
+	if len(parts) < 2 {
+		return "" // target is directly in scanBase, not a sub-skill
+	}
+	pkg := parts[0]
+	if pkg == filepath.Base(skillDir) {
+		return "" // points to itself
+	}
+	return pkg
 }
 
 // isDirEmpty reports whether a directory has no files (ignoring subdirectories).
