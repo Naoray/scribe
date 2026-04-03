@@ -64,6 +64,18 @@
 
 ---
 
+## Guide command: table-driven path dispatch
+
+**What:** Replace the options-list + switch-case pair in `runGuideInteractive` with a single `[]guidePath` slice that co-locates each path's label, availability predicate, and handler.
+
+**Why:** Currently the huh options list and the `switch chosen` must be kept in sync manually — add a path in one place, forget the other. A table-driven slice eliminates that duplication.
+
+**When:** When a fourth guide path is actually needed. Three paths is fine with a switch.
+
+**Context:** Identified during PR #37 review (2026-04-03). Deliberately deferred — not worth doing for three cases.
+
+---
+
 ## `scribe init` (package author mode)
 
 **What:** Scaffold a new skill package in the current directory — creates `scribe.toml` with `[package]` section, detects existing SKILL.md files, prompts for name/description/author.
