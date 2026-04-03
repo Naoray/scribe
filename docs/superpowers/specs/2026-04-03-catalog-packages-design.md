@@ -87,6 +87,8 @@ catalog:
 | `install` | No | Shell command for package installation. Only for `type: package`. |
 | `update` | No | Shell command for package updates. Only for `type: package`. |
 | `author` | Registry: yes, Package: no | GitHub username of the creator. Package manifests use `package.authors` instead. |
+| `description` | No | Short description for display in `scribe list` and `scribe add`. For skills, falls back to SKILL.md frontmatter. For packages, recommended since there may be no SKILL.md to read. |
+| `timeout` | No | Timeout in seconds for install/update commands. Default: 300 (5 minutes). Only for `type: package`. |
 
 ### Filename
 
@@ -119,13 +121,15 @@ type Manifest struct {
 }
 
 type Entry struct {
-    Name    string `yaml:"name"`
-    Source  string `yaml:"source"`
-    Path    string `yaml:"path"`
-    Type    string `yaml:"type"`
-    Install string `yaml:"install"`
-    Update  string `yaml:"update"`
-    Author  string `yaml:"author"`
+    Name        string `yaml:"name"`
+    Source      string `yaml:"source"`
+    Path        string `yaml:"path"`
+    Type        string `yaml:"type"`
+    Install     string `yaml:"install"`
+    Update      string `yaml:"update"`
+    Author      string `yaml:"author"`
+    Description string `yaml:"description"`
+    Timeout     int    `yaml:"timeout"`    // seconds, default 300
 }
 
 type Team struct {
@@ -152,6 +156,11 @@ type Package struct {
 - `Encode()` serializes back to YAML
 - `Parse()` accepts `[]byte`, returns `*Manifest`
 - Validation: `apiVersion` must be `scribe/v1`, `kind` must be `Registry` or `Package`, cannot have both `team` and `package`
+- Validation: duplicate `name` values in `catalog` are rejected at parse time (lists allow duplicates unlike TOML maps — must be enforced)
+- Validation: `type` must be `""` (empty/omitted) or `"package"` — unknown values are parse errors, not silent defaults
+- Validation: `install` without `type: package` is a warning (allows future skill post-install hooks)
+- Validation: `path` on a `type: package` entry is ignored (packages manage their own install location)
+- `FindByName(string) *Entry` helper for consistent O(1)-like lookup pattern
 
 ## Catalog Entry Discovery (`scribe add`)
 
@@ -159,15 +168,21 @@ type Package struct {
 
 `scribe add garrytan/gstack` runs a detection chain:
 
-**Step 1 — Check for `scribe.yaml`**
-If found, parse it. Catalog entries are already defined. Present to user.
+**Step 1 — Check for `scribe.yaml` (or legacy `scribe.toml`)**
+If found, parse it. Catalog entries are already defined. Present to user. For `scribe.toml`, emit legacy format warning alongside results.
 
 **Step 2 — Check for plugin manifest (`.claude-plugin/plugin.json`)**
-If found, it's a plugin package. Auto-generate catalog entry with `type: package` and inferred install command (`/plugin install <name>`). Author defaults to repo owner.
+If found, it's a plugin package. Auto-generate catalog entry with `type: package` and inferred install command (`/plugin install <name>`). Author defaults to repo owner. Note: if the repo also has SKILL.md files alongside the plugin manifest, present both the package entry and individual skills — let the user choose.
 
-**Step 3 — Scan tree for `*/SKILL.md` files**
+**Step 3 — Scan tree for `SKILL.md` files**
+Use the recursive tree (already fetched via `GetTree`) and filter for any path ending in `/SKILL.md`. This catches all conventions:
+- `skills/recap/SKILL.md` (agentskills convention)
+- `.ai/skills/deploy/SKILL.md` (Laravel Boost convention)
+- `browse/SKILL.md` (gstack-style, flat)
+- `.agents/skills/foo/SKILL.md` (cross-client convention)
+
 If found, it's a skills repo:
-- Multiple SKILL.md files → offer as single package entry (whole repo) or individual skill entries. Default: single package entry.
+- Multiple SKILL.md files → offer as single package entry (whole repo) or individual skill entries. Default: single package entry. TUI shows both options with a toggle.
 - Single SKILL.md → individual skill entry.
 
 **Step 4 — Nothing detected**
@@ -203,20 +218,24 @@ Unchanged — download files from source, write to canonical store, symlink to t
 Scribe delegates to declared `install`/`update` commands.
 
 **Install flow (not yet installed):**
-1. Hash the install command (SHA-256)
+1. Hash `install + "\n" + update` concatenated (SHA-256). Single hash covers both commands.
 2. Check trust state: approved?
    - No → prompt user, show command + source registry
    - Yes → proceed
-3. Execute install command
-4. Record in state: commit SHA, command hash, approval timestamp
+   - Non-interactive (CI/piped stdout) → skip package with warning, or proceed if `--trust-all` flag is set
+3. Execute install command with context deadline (entry `timeout` or default 300s)
+   - Capture stdout/stderr — do not let subprocess write to terminal in TUI mode (corrupts Bubble Tea display)
+   - On success: record in state with commit SHA, command hash, approval timestamp
+   - On failure: do NOT record in state. Emit `PackageErrorMsg` with captured stderr. Do not attempt cleanup — warn user to clean up manually.
+4. Record in state only on success
 
 **Update flow (already installed):**
 1. Fetch latest commit SHA from source
 2. Match installed SHA? → StatusCurrent, skip
 3. Different? → has update command?
-   - Yes → execute update command
-   - No → re-run install command
-4. Update state
+   - Yes → execute update command (same timeout/capture rules)
+   - No → warn: "No update command declared and install may not be idempotent. Run manually: `<install command>`". Skip, do not re-run install blindly.
+4. Update state only on success
 
 ### Trust state
 
@@ -237,8 +256,8 @@ type InstalledSkill struct {
     Type       string    `json:"type,omitempty"`
     InstallCmd string    `json:"install_cmd,omitempty"`
     UpdateCmd  string    `json:"update_cmd,omitempty"`
-    CmdHash    string    `json:"cmd_hash,omitempty"`
-    Approved   bool      `json:"approved,omitempty"`
+    CmdHash    string    `json:"cmd_hash,omitempty"`       // sha256(install + "\n" + update)
+    Approval   string    `json:"approval,omitempty"`       // "", "approved", "denied" — tri-state, not bool
     ApprovedAt time.Time `json:"approved_at,omitempty"`
 }
 ```
@@ -255,14 +274,26 @@ type InstalledSkill struct {
 type PackageInstallPromptMsg struct{ Name, Command, Source string }
 type PackageApprovedMsg      struct{ Name string }
 type PackageDeniedMsg        struct{ Name string }
+type PackageSkippedMsg       struct{ Name, Reason string }  // CI skip, user denied
 type PackageInstallingMsg    struct{ Name string }
 type PackageInstalledMsg     struct{ Name string }
-type PackageErrorMsg         struct{ Name string; Err error }
+type PackageErrorMsg         struct{ Name string; Err error; Stderr string }
 ```
+
+### Package removal
+
+When a package entry is removed from the registry catalog, `scribe sync` detects it as `StatusExtra`. For skills, Scribe can remove symlinks and store files. For packages, Scribe **cannot** clean up — it doesn't know what the install command did. Behavior: emit a warning ("gstack was removed from the registry but Scribe cannot uninstall it — remove manually") and clear the entry from `state.json`. Do not attempt automated cleanup.
+
+### Non-interactive mode (CI)
+
+When stdout is not a TTY, TOFU prompts cannot be shown. Behavior:
+- `--trust-all` flag: approve all install commands without prompting (for trusted CI environments)
+- Without `--trust-all`: skip packages that need approval, emit warning, continue with skills
+- `--json` output includes skipped packages with reason `"approval_required"`
 
 ### Compare changes
 
-`compareSkill` extended with entry type parameter. For packages: commit SHA match = current, mismatch = outdated. No semver logic for packages.
+`compareSkill` extended with entry type parameter. For packages: commit SHA match = current, mismatch = outdated. No semver logic for packages. Note: any commit to the source repo (even a README change) triggers "outdated" for branch-pinned packages. This is documented and accepted — the alternative (no update detection) is worse.
 
 ## Author Enforcement
 
@@ -289,6 +320,8 @@ Uses existing `c.gh.Users.Get(ctx, "")`, returns login.
 - Adding/removing source references (pointers, no file upload)
 - Changing source ref, path, install command on existing entries
 - Any operation on packages (they have their own install mechanisms)
+
+**Scope limitation (documented, not a bug):** Author enforcement protects **skill file content**, not **registry pointer integrity**. Anyone with registry repo write access can point a catalog entry at a different source. This is intentional — the team lead must be able to update source refs, pin versions, and curate the catalog. Registry-level integrity is delegated to GitHub repository permissions and code review. For higher assurance, teams should enable branch protection and required reviews on their registry repo.
 
 ### Event
 
@@ -333,15 +366,15 @@ Replaces `readSkillDescription`. Uses `yaml.v3` to parse frontmatter instead of 
 
 ```go
 type rawFrontmatter struct {
-    Name        string            `yaml:"name"`
-    Description string            `yaml:"description"`
-    Version     string            `yaml:"version"`
-    Author      string            `yaml:"author"`
-    Metadata    map[string]string `yaml:"metadata"`
+    Name        string         `yaml:"name"`
+    Description string         `yaml:"description"`
+    Version     string         `yaml:"version"`
+    Author      string         `yaml:"author"`
+    Metadata    map[string]any `yaml:"metadata"` // any, not string — agentskills allows nested values
 }
 ```
 
-Priority chain: `Metadata["version"]` overrides `Version`, `Metadata["author"]` overrides `Author`.
+Priority chain: `Metadata["version"]` (stringified) overrides `Version`, `Metadata["author"]` (stringified) overrides `Author`. Non-string metadata values are coerced via `fmt.Sprint`.
 
 ## `scribe migrate` Command
 
@@ -362,9 +395,10 @@ Converts existing `scribe.toml` registries to `scribe.yaml`.
 1. Fetch `scribe.toml` from registry repo
 2. Parse with TOML parser (kept in `internal/migrate/` for this purpose only)
 3. Convert to new YAML `Manifest` struct
-4. Infer author from existing `Maintainer()` logic (path-based or source owner)
-5. Present converted YAML to user for review
-6. Push single commit: delete `scribe.toml`, create `scribe.yaml`
+4. Infer author from existing `Maintainer()` logic (path-based or source owner). Flag entries where author was inferred from an org name (not a personal GitHub username) with a `# TODO: verify author` comment in the output YAML.
+5. Present converted YAML to user for review — user must confirm before push
+6. Push single commit: delete `scribe.toml`, create `scribe.yaml`. Note: `PushFiles` must be extended to support file deletions (create tree entries with `SHA: nil` to remove files). This is a non-trivial GitHub client change.
+7. Catalog order in output YAML is sorted alphabetically by name (TOML map iteration was non-deterministic)
 
 ### Legacy fallback
 
@@ -432,13 +466,13 @@ Shows available updates without applying them. Pairs with lockfile for the check
 | Manifest | `internal/manifest/manifest.go` | Rewrite: YAML structs, `[]Entry` catalog |
 | Manifest | `internal/manifest/source.go` | Unchanged (source parsing stays) |
 | Manifest | `internal/manifest/manifest_test.go` | Rewrite for YAML |
-| Sync | `internal/sync/syncer.go` | Package-aware apply, trust check, new events |
+| Sync | `internal/sync/syncer.go` | Package-aware apply, trust check, new events. New `CommandExecutor` interface for testability (fake success/failure/timeout in tests). |
 | Sync | `internal/sync/compare.go` | Entry type parameter, package SHA comparison |
 | Sync | `internal/sync/events.go` | New package events |
 | Add | `internal/add/add.go` | Author enforcement, `DiscoverRepo`, spec compliance gate |
 | Add | `internal/add/events.go` | New denied/package events |
 | State | `internal/state/state.go` | New fields on `InstalledSkill` |
-| GitHub | `internal/github/client.go` | `AuthenticatedUser()` method |
+| GitHub | `internal/github/client.go` | `AuthenticatedUser()` method, `PushFiles` extended to support file deletions (tree entries with nil SHA) |
 | Discovery | `internal/discovery/discovery.go` | `ReadSkillMeta`, YAML frontmatter parser |
 | Migrate | `internal/migrate/migrate.go` | New: TOML→YAML conversion |
 | Commands | `cmd/migrate.go` | New command |
