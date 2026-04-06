@@ -15,19 +15,19 @@ func TestScaffoldYAML(t *testing.T) {
 		{
 			name:     "simple name",
 			team:     "artistfy",
-			wantTeam: "name: artistfy",
+			wantTeam: `name: "artistfy"`,
 			wantDesc: `description: "Artistfy dev team skill stack"`,
 		},
 		{
 			name:     "hyphenated name",
 			team:     "my-team",
-			wantTeam: "name: my-team",
+			wantTeam: `name: "my-team"`,
 			wantDesc: `description: "My-Team dev team skill stack"`,
 		},
 		{
 			name:     "already capitalized",
 			team:     "DevOps",
-			wantTeam: "name: DevOps",
+			wantTeam: `name: "DevOps"`,
 			wantDesc: `description: "DevOps dev team skill stack"`,
 		},
 	}

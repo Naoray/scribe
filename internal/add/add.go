@@ -174,6 +174,11 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	var failed int
 
 	for _, c := range candidates {
+		// Skip if already in catalog (prevents duplicates within a batch).
+		if m.FindByName(c.Name) != nil {
+			continue
+		}
+
 		a.emit(SkillAddingMsg{Name: c.Name, Upload: c.NeedsUpload()})
 
 		if c.NeedsUpload() {

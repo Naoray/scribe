@@ -13,7 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// validSkillName matches safe skill names that work as TOML keys and filesystem paths.
+// validSkillName matches safe skill names that work as catalog entry names and filesystem paths.
 var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // SkillMeta holds metadata parsed from SKILL.md frontmatter.
@@ -251,21 +251,21 @@ func readSkillMetadata(skillDir string) SkillMeta {
 }
 
 // extractFrontmatter returns the YAML content between --- delimiters.
+// Uses line-by-line scanning so --- inside YAML values doesn't terminate early.
 func extractFrontmatter(data []byte) string {
-	s := string(data)
-	if !strings.HasPrefix(strings.TrimSpace(s), "---") {
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
 		return ""
 	}
-	start := strings.Index(s, "---")
-	if start == -1 {
-		return ""
+	var lines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "---" {
+			return strings.Join(lines, "\n")
+		}
+		lines = append(lines, line)
 	}
-	rest := s[start+3:]
-	end := strings.Index(rest, "---")
-	if end == -1 {
-		return ""
-	}
-	return rest[:end]
+	return ""
 }
 
 // extractFirstParagraph returns the first non-empty line after a # heading.

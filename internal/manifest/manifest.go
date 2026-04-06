@@ -104,9 +104,18 @@ func (m *Manifest) Validate() error {
 	if m.Team != nil && m.Package != nil {
 		return errors.New("manifest cannot have both team and package sections")
 	}
+	if m.Kind == "Registry" && m.Team == nil {
+		return errors.New("kind is Registry but no team section present")
+	}
+	if m.Kind == "Package" && m.Package == nil {
+		return errors.New("kind is Package but no package section present")
+	}
 
 	seen := make(map[string]bool, len(m.Catalog))
 	for _, e := range m.Catalog {
+		if e.Name == "" {
+			return errors.New("catalog entry has empty name")
+		}
 		if seen[e.Name] {
 			return fmt.Errorf("duplicate catalog entry name %q", e.Name)
 		}
