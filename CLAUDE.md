@@ -31,6 +31,8 @@ internal/
 
 **Convenience first, tech debt second.** When facing implementation choices, always ask: "which makes Scribe more convenient for the person running it?" Ship usable > ship perfect.
 
+**The best-designed CLI tool.** Every output should be visually pleasing, intuitively structured, and delightful to use. Color-coded status indicators, styled headers, aligned columns, helpful summaries. If a user screenshots our output, it should look good enough to share. Aim for the most adorable, polished CLI experience in the ecosystem.
+
 ## Key Conventions
 
 - Core packages (`sync/`, `add/`, `state/`, `github/`) are **UI-agnostic** — they emit events, never print
