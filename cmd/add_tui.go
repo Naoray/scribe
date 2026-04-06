@@ -64,7 +64,7 @@ func (m addModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.ensureCursorVisible()
+		m = m.ensureCursorVisible()
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -89,13 +89,13 @@ func (m addModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
-				m.ensureCursorVisible()
+				m = m.ensureCursorVisible()
 			}
 		case "down", "j":
 			filtered := m.filteredItems()
 			if m.cursor < len(filtered)-1 {
 				m.cursor++
-				m.ensureCursorVisible()
+				m = m.ensureCursorVisible()
 			}
 		case "space":
 			filtered := m.filteredItems()
@@ -258,7 +258,7 @@ func (m addModel) maxContentLines() int {
 	return avail
 }
 
-func (m *addModel) ensureCursorVisible() {
+func (m addModel) ensureCursorVisible() addModel {
 	// Each item is ~2 lines (name + desc), be conservative.
 	visible := m.maxContentLines() / 2
 	if visible < 3 {
@@ -270,6 +270,7 @@ func (m *addModel) ensureCursorVisible() {
 	if m.cursor >= m.offset+visible {
 		m.offset = m.cursor - visible + 1
 	}
+	return m
 }
 
 // ── Data helpers ────────────────────────────────────────────────────────────
