@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/tools"
@@ -126,6 +127,52 @@ func (p *GitHubProvider) discoverTreeScan(ctx context.Context, owner, repo strin
 		return nil, fmt.Errorf("no SKILL.md files found in %s/%s", owner, repo)
 	}
 	return entries, nil
+}
+
+// clientAdapter adapts *gh.Client to GitHubClient interface.
+type clientAdapter struct {
+	client *gh.Client
+}
+
+// WrapGitHubClient returns a GitHubClient backed by a real github.Client.
+func WrapGitHubClient(c *gh.Client) GitHubClient {
+	return &clientAdapter{client: c}
+}
+
+func (a *clientAdapter) FetchFile(ctx context.Context, owner, repo, path, ref string) ([]byte, error) {
+	return a.client.FetchFile(ctx, owner, repo, path, ref)
+}
+
+func (a *clientAdapter) FetchDirectory(ctx context.Context, owner, repo, dirPath, ref string) ([]tools.SkillFile, error) {
+	ghFiles, err := a.client.FetchDirectory(ctx, owner, repo, dirPath, ref)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]tools.SkillFile, len(ghFiles))
+	for i, f := range ghFiles {
+		files[i] = tools.SkillFile{Path: f.Path, Content: f.Content}
+	}
+	return files, nil
+}
+
+func (a *clientAdapter) LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error) {
+	return a.client.LatestCommitSHA(ctx, owner, repo, branch)
+}
+
+func (a *clientAdapter) GetTree(ctx context.Context, owner, repo, ref string) ([]TreeEntry, error) {
+	ghEntries, err := a.client.GetTree(ctx, owner, repo, ref)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]TreeEntry, len(ghEntries))
+	for i, e := range ghEntries {
+		entries[i] = TreeEntry{Path: e.Path, Type: e.Type, SHA: e.SHA}
+	}
+	return entries, nil
+}
+
+func (a *clientAdapter) HasPushAccess(ctx context.Context, owner, repo string) (bool, error) {
+	return a.client.HasPushAccess(ctx, owner, repo)
 }
 
 // Fetch downloads all files for a catalog entry from the source repo.

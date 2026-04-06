@@ -17,6 +17,7 @@ var registryCmd = &cobra.Command{
 func init() {
 	registryCmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	registryCmd.AddCommand(registryListCmd)
+	registryCmd.AddCommand(connectCmd) // connect lives under registry
 }
 
 // resolveRegistry matches a user-provided registry string against connected repos.

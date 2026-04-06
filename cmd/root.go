@@ -24,7 +24,12 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.AddCommand(connectCmd)
+	// connectCmd moved under registry — add hidden alias for backward compat
+	aliasConnect := *connectCmd
+	aliasConnect.Hidden = true
+	aliasConnect.Deprecated = "use 'scribe registry connect' instead"
+	rootCmd.AddCommand(&aliasConnect)
+
 	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(addCmd)

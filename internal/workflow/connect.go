@@ -10,7 +10,6 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/manifest"
-	"github.com/Naoray/scribe/internal/migrate"
 )
 
 // ConnectSteps returns the step list for the connect command.
@@ -22,6 +21,7 @@ func ConnectSteps() []Step {
 		{"DedupCheck", StepDedupCheck},
 		{"FetchManifest", StepFetchManifest},
 		{"ValidateManifest", StepValidateManifest},
+		{"InferRegistryType", StepInferRegistryType},
 		{"SaveConfig", StepSaveConfig},
 		{"LoadState", StepLoadState},
 		{"SetSingleRepo", StepSetSingleRepo},
@@ -48,43 +48,57 @@ func StepDedupCheck(_ context.Context, b *Bag) error {
 }
 
 func StepFetchManifest(ctx context.Context, b *Bag) error {
-	owner, repo, err := manifest.ParseOwnerRepo(b.RepoArg)
-	if err != nil {
-		return err
+	if b.Provider == nil {
+		return fmt.Errorf("internal: Provider not set in workflow bag")
 	}
 
-	// Try scribe.yaml first, fall back to scribe.toml (converting via migrate).
-	raw, err := b.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
-	var m *manifest.Manifest
-	if err == nil {
-		m, err = manifest.Parse(raw)
-	} else {
-		raw, err = b.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
-		if err != nil {
-			return fmt.Errorf("could not access %s: %w", b.RepoArg, err)
-		}
-		m, err = migrate.Convert(raw)
-	}
+	entries, err := b.Provider.Discover(ctx, b.RepoArg)
 	if err != nil {
-		return fmt.Errorf("invalid manifest in %s: %w", b.RepoArg, err)
+		return fmt.Errorf("could not discover skills in %s: %w", b.RepoArg, err)
 	}
-	b.manifest = m
+
+	// Build a minimal manifest from discovered entries.
+	b.manifest = &manifest.Manifest{
+		APIVersion: "scribe/v1",
+		Kind:       "Registry",
+		Team:       &manifest.Team{Name: b.RepoArg},
+		Catalog:    entries,
+	}
 	return nil
 }
 
 func StepValidateManifest(_ context.Context, b *Bag) error {
-	if !b.manifest.IsRegistry() {
-		return fmt.Errorf("%s manifest has no team section — is this a skill package?", b.RepoArg)
+	if b.manifest == nil || len(b.manifest.Catalog) == 0 {
+		return fmt.Errorf("%s: no skills discovered — is this a valid skill registry?", b.RepoArg)
 	}
 	return nil
 }
 
-func StepSaveConfig(_ context.Context, b *Bag) error {
+func StepInferRegistryType(ctx context.Context, b *Bag) error {
+	regType := "community"
+	if b.manifest.IsRegistry() {
+		regType = "team"
+	}
+
+	writable := false
+	if b.Client != nil {
+		owner, repo, err := manifest.ParseOwnerRepo(b.RepoArg)
+		if err == nil {
+			writable, _ = b.Client.HasPushAccess(ctx, owner, repo)
+		}
+	}
+
 	b.Config.AddRegistry(config.RegistryConfig{
-		Repo:    b.RepoArg,
-		Enabled: true,
-		Type:    config.RegistryTypeGitHub,
+		Repo:     b.RepoArg,
+		Enabled:  true,
+		Type:     regType,
+		Writable: writable,
 	})
+
+	return nil
+}
+
+func StepSaveConfig(_ context.Context, b *Bag) error {
 	if err := b.Config.Save(); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
