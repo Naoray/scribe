@@ -179,9 +179,17 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				continue
 			}
 
-			// Convert sync.SkillFile → targets.SkillFile for the store writer.
-			tFiles := make([]tools.SkillFile, len(files))
-			for i, f := range files {
+			// Filter out repo infrastructure files that leak when skill path == repo root.
+			var filtered []SkillFile
+			for _, f := range files {
+				if shouldInclude(f.Path) {
+					filtered = append(filtered, f)
+				}
+			}
+
+			// Convert sync.SkillFile → tools.SkillFile for the store writer.
+			tFiles := make([]tools.SkillFile, len(filtered))
+			for i, f := range filtered {
 				tFiles[i] = tools.SkillFile{Path: f.Path, Content: f.Content}
 			}
 
