@@ -61,5 +61,16 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return workflow.Run(cmd.Context(), workflow.ListSteps(), bag)
+	if err := workflow.Run(cmd.Context(), workflow.ListSteps(), bag); err != nil {
+		return err
+	}
+
+	// Render results populated by the workflow step.
+	if bag.LocalSkills != nil {
+		return printLocalTable(os.Stdout, bag.LocalSkills)
+	}
+	if bag.RegistryDiffs != nil {
+		return printMultiListTable(os.Stdout, bag.Repos, bag.RegistryDiffs, bag.State, bag.MultiRegistry)
+	}
+	return nil
 }
