@@ -184,42 +184,38 @@ func TestPrintSkillHeaderMinimal(t *testing.T) {
 	}
 }
 
-func TestExplainWithAISuccess(t *testing.T) {
+func TestRunAIExplanationSuccess(t *testing.T) {
 	original := buildLLMCmd
 	buildLLMCmd = func(ctx context.Context, prompt string) *exec.Cmd {
-		return exec.CommandContext(ctx, "echo", "AI explanation here")
+		return exec.CommandContext(ctx, "echo", "**AI explanation** here")
 	}
 	t.Cleanup(func() { buildLLMCmd = original })
 
-	skill := discovery.Skill{Name: "my-skill", Description: "Does things"}
 	buf := new(bytes.Buffer)
-	err := explainWithAI(buf, context.Background(), skill, "---\nname: my-skill\n---\n\n# Body")
+	err := runAIExplanation(buf, context.Background(), "---\nname: my-skill\n---\n\n# Body")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	output := buf.String()
-	if !strings.Contains(output, "my-skill") {
-		t.Errorf("expected skill name in output, got:\n%s", output)
+	if buf.Len() == 0 {
+		t.Errorf("expected some output from LLM, got empty")
 	}
 }
 
-func TestExplainWithAIFallback(t *testing.T) {
+func TestRunAIExplanationLLMFailure(t *testing.T) {
 	original := buildLLMCmd
 	buildLLMCmd = func(ctx context.Context, prompt string) *exec.Cmd {
 		return exec.CommandContext(ctx, "false") // exits non-zero
 	}
 	t.Cleanup(func() { buildLLMCmd = original })
 
-	skill := discovery.Skill{Name: "my-skill"}
-	content := "---\nname: my-skill\n---\n\n# Body\n\nFallback content."
 	buf := new(bytes.Buffer)
-	err := explainWithAI(buf, context.Background(), skill, content)
+	// LLM failure returns nil — caller already rendered the skill file
+	err := runAIExplanation(buf, context.Background(), "# Body")
 	if err != nil {
-		t.Fatalf("unexpected error on fallback: %v", err)
+		t.Fatalf("expected nil on LLM failure, got: %v", err)
 	}
-	output := buf.String()
-	if !strings.Contains(output, "Fallback content") {
-		t.Errorf("expected fallback body in output, got:\n%s", output)
+	if buf.Len() != 0 {
+		t.Errorf("expected no output on LLM failure, got: %s", buf.String())
 	}
 }
 

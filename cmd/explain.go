@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 	"github.com/mattn/go-isatty"
@@ -92,15 +93,21 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return renderSkillBody(w, content)
 	}
 
+	// Always show the rendered skill file first — instant feedback.
+	if err := explainRendered(w, skill, content); err != nil {
+		return err
+	}
+
 	if rawFlag {
-		return explainRendered(w, skill, content)
+		return nil
 	}
 
+	// Offer AI explanation if an LLM CLI is available.
 	if _, err := detectLLMCLI(); err == nil {
-		return explainWithAI(w, cmd.Context(), skill, content)
+		return offerAIExplanation(w, cmd.Context(), skill, content)
 	}
 
-	return explainRendered(w, skill, content)
+	return nil
 }
 
 // findSkill looks up a skill by exact name or suffix match.
@@ -258,7 +265,26 @@ func (s *spinState) stop() {
 	})
 }
 
-func explainWithAI(w io.Writer, ctx context.Context, skill discovery.Skill, content string) error {
+// offerAIExplanation prompts the user to optionally get an AI-generated explanation.
+// The skill file has already been rendered above; this is an opt-in upgrade.
+func offerAIExplanation(w io.Writer, ctx context.Context, skill discovery.Skill, content string) error {
+	var want bool
+	err := huh.NewConfirm().
+		Title("✨ Get a better explanation with AI?").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&want).
+		Run()
+	if err != nil || !want {
+		return nil
+	}
+	fmt.Fprintln(w)
+	return runAIExplanation(w, ctx, content)
+}
+
+// runAIExplanation calls the LLM, buffers the output, and renders it as markdown.
+// If the LLM fails, it returns nil — the caller has already shown the skill file.
+func runAIExplanation(w io.Writer, ctx context.Context, content string) error {
 	prompt := fmt.Sprintf(
 		"%s\n\nHere's the skill file:\n\n---\n%s",
 		explainSystemPrompt,
@@ -270,21 +296,12 @@ func explainWithAI(w io.Writer, ctx context.Context, skill discovery.Skill, cont
 	c.Stdout = &buf
 	c.Stderr = os.Stderr
 
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, explNameStyle.Render(skill.Name))
-	if skill.Description != "" {
-		fmt.Fprintln(w, explDimStyle.Render(skill.Description))
-	}
-	fmt.Fprintln(w)
-
 	spin := startSpinner(os.Stderr, "Thinking...")
-	err := c.Run()
+	runErr := c.Run()
 	spin.stop()
 
-	if err != nil {
-		fmt.Fprintln(os.Stderr, explDimStyle.Render("LLM unavailable, showing skill file instead..."))
-		fmt.Fprintln(os.Stderr)
-		return renderSkillBody(w, content)
+	if runErr != nil {
+		return nil // silently skip — user already saw the rendered skill
 	}
 
 	rendered, renderErr := glamour.Render(buf.String(), "auto")
