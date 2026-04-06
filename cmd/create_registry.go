@@ -118,12 +118,14 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 
 	hasManifest, err := client.FileExists(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not check for manifest: %v\n", err)
-		hasManifest = false
+		return fmt.Errorf("check for existing manifest: %w", err)
 	}
 	if !hasManifest {
 		// Also check for legacy format.
-		hasManifest, _ = client.FileExists(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
+		hasManifest, err = client.FileExists(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
+		if err != nil {
+			return fmt.Errorf("check for legacy manifest: %w", err)
+		}
 	}
 
 	if !hasManifest {

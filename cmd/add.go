@@ -409,9 +409,7 @@ func autoSync(ctx context.Context, targetRepo string, st *state.State, client *g
 		fmt.Printf("\nsyncing %s...\n\n", targetRepo)
 	}
 	if err := syncer.Run(ctx, targetRepo, st); err != nil {
-		if !useJSON {
-			fmt.Fprintf(os.Stderr, "warning: sync failed: %v\nrun `scribe sync` to retry\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "warning: sync failed: %v\nrun `scribe sync` to retry\n", err)
 		return false
 	}
 	return true
