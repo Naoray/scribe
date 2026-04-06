@@ -127,10 +127,10 @@ func writeStatusStyled(w io.Writer, cfg *config.Config, st *state.State) {
 		lines = out
 	}
 
-	for _, l := range lines {
+	for _, line := range lines {
 		fmt.Fprintf(w, "  %s  %s\n",
-			labelStyle.Render(fmt.Sprintf("%*s", labelWidth, l.label)),
-			valueStyle.Render(l.value),
+			labelStyle.Render(fmt.Sprintf("%*s", labelWidth, line.label)),
+			valueStyle.Render(line.value),
 		)
 	}
 	fmt.Fprintln(w)

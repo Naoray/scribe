@@ -90,10 +90,10 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 		fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(label)+15)))
 
 		// Compute column widths.
-		maxName, maxVer := 4, 7
+		maxName, maxVersionWidth := 4, 7
 		for _, sk := range g.skills {
 			maxName = max(maxName, runewidth.StringWidth(sk.Name))
-			maxVer = max(maxVer, runewidth.StringWidth(sk.Version))
+			maxVersionWidth = max(maxVersionWidth, runewidth.StringWidth(sk.Version))
 		}
 
 		for _, sk := range g.skills {
@@ -104,7 +104,7 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 			agents := listDimStyle.Render(strings.Join(sk.Targets, ", "))
 
 			name := listNameStyle.Render(runewidth.FillRight(sk.Name, maxName))
-			verStr := listDimStyle.Render(runewidth.FillRight(ver, maxVer))
+			verStr := listDimStyle.Render(runewidth.FillRight(ver, maxVersionWidth))
 
 			fmt.Fprintf(w, "  %s  %s  %s\n", name, verStr, agents)
 		}
@@ -147,17 +147,17 @@ func renderSkillTable(w io.Writer, repo string, statuses []sync.SkillStatus) {
 	fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(repo)+15)))
 
 	// Compute column widths in one pass.
-	maxName, maxVer, maxAuthor := 4, 7, 6
+	maxName, maxVersionWidth, maxAuthor := 4, 7, 6
 	for _, sk := range statuses {
 		maxName = max(maxName, runewidth.StringWidth(sk.Name))
-		maxVer = max(maxVer, runewidth.StringWidth(sk.DisplayVersion()))
+		maxVersionWidth = max(maxVersionWidth, runewidth.StringWidth(sk.DisplayVersion()))
 		maxAuthor = max(maxAuthor, runewidth.StringWidth(sk.DisplayAuthor()))
 	}
 
 	// Rows.
 	for _, sk := range statuses {
 		name := listNameStyle.Render(runewidth.FillRight(sk.Name, maxName))
-		ver := listDimStyle.Render(runewidth.FillRight(sk.DisplayVersion(), maxVer))
+		ver := listDimStyle.Render(runewidth.FillRight(sk.DisplayVersion(), maxVersionWidth))
 		author := listAuthorStyle.Render(runewidth.FillRight(sk.DisplayAuthor(), maxAuthor))
 		status := renderStatus(sk.Status)
 		agents := listDimStyle.Render(sk.DisplayAgents())
