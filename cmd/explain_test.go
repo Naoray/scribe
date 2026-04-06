@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/spf13/cobra"
@@ -216,6 +217,20 @@ func TestRunAIExplanationLLMFailure(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("expected no output on LLM failure, got: %s", buf.String())
+	}
+}
+
+func TestStartSpinnerStopIdempotent(t *testing.T) {
+	buf := new(bytes.Buffer)
+	s := startSpinner(buf, "Loading...")
+	time.Sleep(200 * time.Millisecond)
+	s.stop()
+	s.stop() // idempotent — must not panic
+	select {
+	case <-s.done:
+		// goroutine terminated cleanly
+	case <-time.After(time.Second):
+		t.Fatal("spinner goroutine did not terminate after stop()")
 	}
 }
 

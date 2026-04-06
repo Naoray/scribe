@@ -102,9 +102,11 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Offer AI explanation if an LLM CLI is available.
+	// Offer AI explanation if an LLM CLI is available and stdin is interactive.
 	if _, err := detectLLMCLI(); err == nil {
-		return offerAIExplanation(w, cmd.Context(), skill, content)
+		if isatty.IsTerminal(os.Stdin.Fd()) {
+			return offerAIExplanation(w, cmd.Context(), content)
+		}
 	}
 
 	return nil
@@ -228,6 +230,11 @@ Rules:
 - If the skill has specific triggers or flags, mention them briefly
 - End with a one-liner on when NOT to use it (if applicable)`
 
+const (
+	spinnerInterval = 80 * time.Millisecond
+	clearLine       = "\r\033[K"
+)
+
 // spinState drives a braille spinner on an io.Writer until stop() is called.
 type spinState struct {
 	once   sync.Once
@@ -241,13 +248,13 @@ func startSpinner(w io.Writer, label string) *spinState {
 		defer close(s.done)
 		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		i := 0
-		ticker := time.NewTicker(80 * time.Millisecond)
+		ticker := time.NewTicker(spinnerInterval)
 		defer ticker.Stop()
 		fmt.Fprintf(w, "  %s  %s", frames[0], label)
 		for {
 			select {
 			case <-s.stopCh:
-				fmt.Fprintf(w, "\r\033[K") // erase spinner line
+				fmt.Fprint(w, clearLine) // erase spinner line
 				return
 			case <-ticker.C:
 				i++
@@ -267,7 +274,7 @@ func (s *spinState) stop() {
 
 // offerAIExplanation prompts the user to optionally get an AI-generated explanation.
 // The skill file has already been rendered above; this is an opt-in upgrade.
-func offerAIExplanation(w io.Writer, ctx context.Context, skill discovery.Skill, content string) error {
+func offerAIExplanation(w io.Writer, ctx context.Context, content string) error {
 	var want bool
 	err := huh.NewConfirm().
 		Title("✨ Get a better explanation with AI?").
@@ -294,14 +301,20 @@ func runAIExplanation(w io.Writer, ctx context.Context, content string) error {
 	c := buildLLMCmd(ctx, prompt)
 	var buf bytes.Buffer
 	c.Stdout = &buf
-	c.Stderr = os.Stderr
+	c.Stderr = io.Discard // avoid concurrent writes with spinner on os.Stderr
 
-	spin := startSpinner(os.Stderr, "Thinking...")
+	var spin *spinState
+	if isatty.IsTerminal(os.Stderr.Fd()) {
+		spin = startSpinner(os.Stderr, "Thinking...")
+	}
 	runErr := c.Run()
-	spin.stop()
+	if spin != nil {
+		spin.stop()
+	}
 
 	if runErr != nil {
-		return nil // silently skip — user already saw the rendered skill
+		fmt.Fprintln(os.Stderr, explDimStyle.Render("AI explanation unavailable."))
+		return nil
 	}
 
 	rendered, renderErr := glamour.Render(buf.String(), "auto")
