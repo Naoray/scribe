@@ -12,8 +12,11 @@ import (
 	"github.com/Naoray/scribe/internal/paths"
 )
 
-// RegistryTypeGitHub is the registry type for GitHub-hosted registries.
-const RegistryTypeGitHub = "github"
+const (
+	RegistryTypeGitHub    = "github"    // kind: legacy-migrated registry (no type info at migration time)
+	RegistryTypeTeam      = "team"      // kind: org/team registry with scribe.yaml
+	RegistryTypeCommunity = "community" // kind: community registry (marketplace or tree scan)
+)
 
 // RegistryConfig describes a connected skill registry.
 type RegistryConfig struct {
@@ -83,7 +86,7 @@ func (c *Config) EnabledRegistries() []RegistryConfig {
 
 // IsTeam returns whether this is a team registry.
 func (rc RegistryConfig) IsTeam() bool {
-	return rc.Type == "team"
+	return rc.Type == RegistryTypeTeam
 }
 
 // legacyTOML is the shadow struct for reading old config.toml files.

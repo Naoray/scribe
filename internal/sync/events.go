@@ -41,6 +41,7 @@ type SkillStatus struct {
 	LoadoutRef string                 // the ref from the manifest (e.g. "v1.0.0", "main")
 	Maintainer string
 	IsPackage  bool
+	LatestSHA  string                 // resolved SHA for branch-pinned skills; empty if unavailable
 }
 
 // DisplayVersion returns the best human-readable version for this skill.

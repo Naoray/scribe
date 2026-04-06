@@ -14,11 +14,7 @@ import (
 )
 
 // SkillFile is a single file within a downloaded skill directory.
-// Mirrors github.SkillFile so the sync package does not import github directly.
-type SkillFile struct {
-	Path    string
-	Content []byte
-}
+type SkillFile = tools.SkillFile
 
 // GitHubFetcher abstracts GitHub API operations needed by the sync engine.
 type GitHubFetcher interface {
@@ -90,6 +86,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 
 	registrySlug := tools.SlugifyRegistry(teamRepo)
 	var statuses []SkillStatus
+	shaCache := map[string]string{}
 
 	for i := range m.Catalog {
 		entry := &m.Catalog[i]
@@ -98,13 +95,19 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
-		// Only resolve the latest SHA when using the real GitHub client.
-		// When Provider is set, the Client may be a NoopFetcher that cannot make
-		// API calls — silently skipping SHA resolution is correct here.
-		if err == nil && (src.IsBranch() || entry.IsPackage()) && s.Provider == nil {
-			sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
-			if err == nil {
-				latestSHA = sha
+		// Resolve the latest SHA for branch-pinned and package entries.
+		// If Client is a NoopFetcher (or the API is unavailable), LatestCommitSHA
+		// returns an error and latestSHA stays ""; compareEntry handles that gracefully.
+		if err == nil && (src.IsBranch() || entry.IsPackage()) {
+			key := src.Owner + "/" + src.Repo + "/" + src.Ref
+			if cached, ok := shaCache[key]; ok {
+				latestSHA = cached
+			} else {
+				sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
+				if err == nil {
+					shaCache[key] = sha
+					latestSHA = sha
+				}
 			}
 		}
 
@@ -117,6 +120,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 			LoadoutRef: loadoutRef(*entry),
 			Maintainer: entry.Maintainer(),
 			IsPackage:  entry.IsPackage(),
+			LatestSHA:  latestSHA,
 		})
 	}
 
@@ -226,18 +230,10 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 					continue
 				}
 
-				// Filter out repo infrastructure files that leak when skill path == repo root.
-				var filtered []SkillFile
 				for _, f := range files {
 					if shouldInclude(f.Path) {
-						filtered = append(filtered, f)
+						tFiles = append(tFiles, f)
 					}
-				}
-
-				// Convert sync.SkillFile → tools.SkillFile for the store writer.
-				tFiles = make([]tools.SkillFile, len(filtered))
-				for i, f := range filtered {
-					tFiles[i] = tools.SkillFile{Path: f.Path, Content: f.Content}
 				}
 			}
 
@@ -268,24 +264,16 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				continue
 			}
 
-			// Parse source for state recording and version display.
+			// Parse source for version display.
 			src, err := manifest.ParseSource(sk.Entry.Source)
 			version := "unknown"
-			latestSHA := ""
 			if err == nil {
 				version = src.Ref
-				// Only resolve SHA when using the real GitHub client (not NoopFetcher).
-				if src.IsBranch() && s.Provider == nil {
-					sha, shaErr := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
-					if shaErr == nil {
-						latestSHA = sha
-					}
-				}
 			}
 
 			st.RecordInstall(qualifiedName, state.InstalledSkill{
 				Version:   version,
-				CommitSHA: latestSHA,
+				CommitSHA: sk.LatestSHA,
 				Source:    sk.Entry.Source,
 				Tools:     toolNames,
 				Paths:     paths,

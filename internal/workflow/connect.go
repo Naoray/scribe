@@ -78,9 +78,9 @@ func StepValidateManifest(_ context.Context, b *Bag) error {
 }
 
 func StepInferRegistryType(ctx context.Context, b *Bag) error {
-	regType := "community"
+	regType := config.RegistryTypeCommunity
 	if b.manifest.IsRegistry() {
-		regType = "team"
+		regType = config.RegistryTypeTeam
 	}
 
 	writable := false
