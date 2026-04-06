@@ -27,6 +27,15 @@ type Client struct {
 // IsAuthenticated returns true if the client has a GitHub token.
 func (c *Client) IsAuthenticated() bool { return c.authenticated }
 
+// AuthenticatedUser returns the login name of the authenticated GitHub user.
+func (c *Client) AuthenticatedUser(ctx context.Context) (string, error) {
+	user, _, err := c.gh.Users.Get(ctx, "")
+	if err != nil {
+		return "", wrapErr(err, "get authenticated user")
+	}
+	return user.GetLogin(), nil
+}
+
 // NewClient creates a GitHub client using the auth chain:
 //  1. gh auth token  (piggyback on gh CLI if installed)
 //  2. GITHUB_TOKEN   environment variable
