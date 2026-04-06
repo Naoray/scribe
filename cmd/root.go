@@ -39,4 +39,5 @@ func init() {
 	rootCmd.AddCommand(guideCmd)
 	rootCmd.AddCommand(registryCmd)
 	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(newExplainCommand())
 }
