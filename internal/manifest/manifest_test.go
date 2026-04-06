@@ -6,78 +6,129 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 )
 
-const teamLoadout = `
-[team]
-name = "artistfy"
-description = "Artistfy dev team skill stack"
-
-[skills]
-"gstack"       = { source = "github:garrytan/gstack@v0.12.9.0" }
-"laravel-init" = { source = "github:Naoray/scribe-skills@v1.0.0", path = "skills/laravel-init" }
-"deploy"       = { source = "github:ArtistfyHQ/team-skills@main", path = "krishan/deploy" }
-"frontend-prs" = { source = "github:ArtistfyHQ/team-skills@main", path = "markus/frontend-prs", private = true }
-
-[targets]
-default = ["claude", "cursor"]
+const teamRegistry = `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: artistfy
+  description: Artistfy dev team skill stack
+catalog:
+  - name: gstack
+    source: "github:garrytan/gstack@v0.12.9.0"
+    author: garrytan
+  - name: laravel-init
+    source: "github:Naoray/scribe-skills@v1.0.0"
+    path: skills/laravel-init
+    author: krishan
+  - name: deploy
+    source: "github:ArtistfyHQ/team-skills@main"
+    path: krishan/deploy
+    author: krishan
+  - name: superpowers
+    source: "github:obra/superpowers@main"
+    type: package
+    install: /plugin install superpowers@claude-plugins-official
+    author: obra
+targets:
+  default:
+    - claude
+    - cursor
 `
 
 const packageManifest = `
-[package]
-name = "scribe-skills"
-version = "1.0.0"
-description = "Shared skills for the Artistfy team"
-license = "MIT"
-authors = ["Krishan <krishan@artistfy.com>"]
-
-[skills]
-laravel-init = "skills/laravel-init/SKILL.md"
-code-review  = "skills/code-review/SKILL.md"
+apiVersion: scribe/v1
+kind: Package
+package:
+  name: scribe-skills
+  version: "1.0.0"
+  description: Shared skills for the Artistfy team
+  license: MIT
+  authors:
+    - Krishan
+  repository: github.com/Naoray/scribe-skills
+catalog:
+  - name: laravel-init
+    path: skills/laravel-init
+  - name: code-review
+    path: skills/code-review
 `
 
-func TestParseTeamLoadout(t *testing.T) {
-	m, err := manifest.Parse([]byte(teamLoadout))
+func TestParseTeamRegistry(t *testing.T) {
+	m, err := manifest.Parse([]byte(teamRegistry))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
+	if !m.IsRegistry() {
+		t.Error("expected IsRegistry() = true")
+	}
 	if !m.IsLoadout() {
-		t.Error("expected IsLoadout() = true")
+		t.Error("expected IsLoadout() = true (backward compat)")
 	}
 	if m.Package != nil {
-		t.Error("expected Package == nil for team loadout")
+		t.Error("expected Package == nil for team registry")
 	}
 	if m.Team.Name != "artistfy" {
 		t.Errorf("team name: got %q, want %q", m.Team.Name, "artistfy")
 	}
-	if len(m.Skills) != 4 {
-		t.Errorf("skills count: got %d, want 4", len(m.Skills))
+	if len(m.Catalog) != 4 {
+		t.Fatalf("catalog count: got %d, want 4", len(m.Catalog))
 	}
 
-	gstack := m.Skills["gstack"]
+	gstack := m.FindByName("gstack")
+	if gstack == nil {
+		t.Fatal("FindByName(gstack) returned nil")
+	}
 	if gstack.Source != "github:garrytan/gstack@v0.12.9.0" {
 		t.Errorf("gstack source: got %q", gstack.Source)
 	}
-	if gstack.Maintainer() != "garrytan" {
-		t.Errorf("gstack maintainer: got %q, want garrytan", gstack.Maintainer())
+	if gstack.Author != "garrytan" {
+		t.Errorf("gstack author: got %q, want garrytan", gstack.Author)
 	}
 
-	deploy := m.Skills["deploy"]
+	laravelInit := m.FindByName("laravel-init")
+	if laravelInit == nil {
+		t.Fatal("FindByName(laravel-init) returned nil")
+	}
+	if laravelInit.Source != "github:Naoray/scribe-skills@v1.0.0" {
+		t.Errorf("laravel-init source: got %q", laravelInit.Source)
+	}
+	if laravelInit.Path != "skills/laravel-init" {
+		t.Errorf("laravel-init path: got %q", laravelInit.Path)
+	}
+	if laravelInit.Author != "krishan" {
+		t.Errorf("laravel-init author: got %q, want krishan", laravelInit.Author)
+	}
+
+	deploy := m.FindByName("deploy")
+	if deploy == nil {
+		t.Fatal("FindByName(deploy) returned nil")
+	}
 	if deploy.Path != "krishan/deploy" {
 		t.Errorf("deploy path: got %q", deploy.Path)
 	}
-	if deploy.Maintainer() != "krishan" {
-		t.Errorf("deploy maintainer: got %q, want krishan", deploy.Maintainer())
+	if deploy.Author != "krishan" {
+		t.Errorf("deploy author: got %q, want krishan", deploy.Author)
 	}
 
-	frontend := m.Skills["frontend-prs"]
-	if !frontend.Private {
-		t.Error("frontend-prs: expected private = true")
+	superpowers := m.FindByName("superpowers")
+	if superpowers == nil {
+		t.Fatal("FindByName(superpowers) returned nil")
 	}
-	if frontend.Maintainer() != "markus" {
-		t.Errorf("frontend-prs maintainer: got %q, want markus", frontend.Maintainer())
+	if !superpowers.IsPackage() {
+		t.Error("superpowers: expected IsPackage() = true")
+	}
+	if superpowers.Install != "/plugin install superpowers@claude-plugins-official" {
+		t.Errorf("superpowers install: got %q", superpowers.Install)
+	}
+	if superpowers.Author != "obra" {
+		t.Errorf("superpowers author: got %q, want obra", superpowers.Author)
 	}
 
 	if len(m.Targets.Default) != 2 {
+		t.Errorf("targets: got %v, want [claude cursor]", m.Targets.Default)
+	}
+	if m.Targets.Default[0] != "claude" || m.Targets.Default[1] != "cursor" {
 		t.Errorf("targets: got %v, want [claude cursor]", m.Targets.Default)
 	}
 }
@@ -88,16 +139,33 @@ func TestParsePackageManifest(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	if m.Package == nil {
-		t.Error("expected Package != nil for package manifest")
+	if !m.IsPackage() {
+		t.Error("expected IsPackage() = true")
 	}
 	if m.Package.Name != "scribe-skills" {
 		t.Errorf("package name: got %q", m.Package.Name)
 	}
+	if m.Package.Version != "1.0.0" {
+		t.Errorf("package version: got %q", m.Package.Version)
+	}
+	if len(m.Catalog) != 2 {
+		t.Fatalf("catalog count: got %d, want 2", len(m.Catalog))
+	}
 
-	skill := m.Skills["laravel-init"]
-	if skill.Path != "skills/laravel-init/SKILL.md" {
-		t.Errorf("laravel-init path: got %q", skill.Path)
+	laravelInit := m.FindByName("laravel-init")
+	if laravelInit == nil {
+		t.Fatal("FindByName(laravel-init) returned nil")
+	}
+	if laravelInit.Path != "skills/laravel-init" {
+		t.Errorf("laravel-init path: got %q", laravelInit.Path)
+	}
+
+	codeReview := m.FindByName("code-review")
+	if codeReview == nil {
+		t.Fatal("FindByName(code-review) returned nil")
+	}
+	if codeReview.Path != "skills/code-review" {
+		t.Errorf("code-review path: got %q", codeReview.Path)
 	}
 }
 
@@ -139,7 +207,7 @@ func TestParseSource(t *testing.T) {
 }
 
 func TestManifestEncode(t *testing.T) {
-	m, err := manifest.Parse([]byte(teamLoadout))
+	m, err := manifest.Parse([]byte(teamRegistry))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -158,23 +226,27 @@ func TestManifestEncode(t *testing.T) {
 	if m2.Team.Name != m.Team.Name {
 		t.Errorf("team name: got %q, want %q", m2.Team.Name, m.Team.Name)
 	}
-	if len(m2.Skills) != len(m.Skills) {
-		t.Errorf("skills count: got %d, want %d", len(m2.Skills), len(m.Skills))
+	if len(m2.Catalog) != len(m.Catalog) {
+		t.Fatalf("catalog count: got %d, want %d", len(m2.Catalog), len(m.Catalog))
 	}
-	for name, skill := range m.Skills {
-		got, ok := m2.Skills[name]
-		if !ok {
-			t.Errorf("missing skill %q after round-trip", name)
-			continue
+
+	// Verify catalog order is preserved.
+	for i, entry := range m.Catalog {
+		got := m2.Catalog[i]
+		if got.Name != entry.Name {
+			t.Errorf("catalog[%d] name: got %q, want %q", i, got.Name, entry.Name)
 		}
-		if got.Source != skill.Source {
-			t.Errorf("skill %q source: got %q, want %q", name, got.Source, skill.Source)
+		if got.Source != entry.Source {
+			t.Errorf("catalog[%d] source: got %q, want %q", i, got.Source, entry.Source)
 		}
-		if got.Path != skill.Path {
-			t.Errorf("skill %q path: got %q, want %q", name, got.Path, skill.Path)
+		if got.Path != entry.Path {
+			t.Errorf("catalog[%d] path: got %q, want %q", i, got.Path, entry.Path)
 		}
-		if got.Private != skill.Private {
-			t.Errorf("skill %q private: got %v, want %v", name, got.Private, skill.Private)
+		if got.Author != entry.Author {
+			t.Errorf("catalog[%d] author: got %q, want %q", i, got.Author, entry.Author)
+		}
+		if got.Type != entry.Type {
+			t.Errorf("catalog[%d] type: got %q, want %q", i, got.Type, entry.Type)
 		}
 	}
 }
@@ -193,34 +265,147 @@ func TestParseSourceErrors(t *testing.T) {
 	}
 }
 
-const invalidBothSections = `
-[team]
-name = "artistfy"
-
-[package]
-name = "scribe-skills"
-version = "1.0.0"
-`
-
 func TestValidateMutualExclusivity(t *testing.T) {
-	_, err := manifest.Parse([]byte(invalidBothSections))
+	input := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: artistfy
+package:
+  name: scribe-skills
+  version: "1.0.0"
+`
+	_, err := manifest.Parse([]byte(input))
 	if err == nil {
-		t.Fatal("expected error when both [team] and [package] are present")
+		t.Fatal("expected error when both team and package are present")
 	}
-	want := "manifest cannot have both [team] and [package] sections"
+	want := "manifest cannot have both team and package sections"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
 }
 
-func TestParseInitializesSkillsMap(t *testing.T) {
-	m, err := manifest.Parse([]byte(`[team]
-name = "empty"
-`))
+func TestValidateAPIVersion(t *testing.T) {
+	input := `
+apiVersion: scribe/v2
+kind: Registry
+team:
+  name: test
+`
+	_, err := manifest.Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for unsupported apiVersion")
+	}
+	if want := `unsupported apiVersion "scribe/v2" (expected scribe/v1)`; err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestValidateKind(t *testing.T) {
+	input := `
+apiVersion: scribe/v1
+kind: Unknown
+`
+	_, err := manifest.Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for unknown kind")
+	}
+	if want := `unknown kind "Unknown" (expected Registry or Package)`; err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestValidateDuplicateNames(t *testing.T) {
+	input := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test
+catalog:
+  - name: foo
+    path: a
+  - name: foo
+    path: b
+`
+	_, err := manifest.Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for duplicate catalog entry names")
+	}
+	if want := `duplicate catalog entry name "foo"`; err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestValidateUnknownType(t *testing.T) {
+	input := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test
+catalog:
+  - name: foo
+    type: plugin
+`
+	_, err := manifest.Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for unknown entry type")
+	}
+	if want := `unknown entry type "plugin" for "foo" (expected "" or "package")`; err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestFindByName(t *testing.T) {
+	m, err := manifest.Parse([]byte(teamRegistry))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if m.Skills == nil {
-		t.Error("expected Skills map to be initialized, got nil")
+
+	// Found.
+	entry := m.FindByName("deploy")
+	if entry == nil {
+		t.Fatal("FindByName(deploy) returned nil")
+	}
+	if entry.Name != "deploy" {
+		t.Errorf("entry name: got %q, want deploy", entry.Name)
+	}
+
+	// Not found.
+	if m.FindByName("nonexistent") != nil {
+		t.Error("FindByName(nonexistent) should return nil")
+	}
+}
+
+func TestParseInitializesCatalog(t *testing.T) {
+	input := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: empty
+`
+	m, err := manifest.Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if m.Catalog == nil {
+		t.Error("expected Catalog to be initialized, got nil")
+	}
+	if len(m.Catalog) != 0 {
+		t.Errorf("expected empty Catalog, got %d entries", len(m.Catalog))
+	}
+}
+
+func TestEntryMaintainer(t *testing.T) {
+	e := manifest.Entry{
+		Name:   "test",
+		Author: "krishan",
+	}
+	if got := e.Maintainer(); got != "krishan" {
+		t.Errorf("Maintainer() = %q, want krishan", got)
+	}
+
+	empty := manifest.Entry{Name: "no-author"}
+	if got := empty.Maintainer(); got != "" {
+		t.Errorf("Maintainer() = %q, want empty string", got)
 	}
 }
