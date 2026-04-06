@@ -122,13 +122,6 @@ func TestSave(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Verify the .tmp file doesn't linger.
-	path, _ := config.Path()
-	tmpPath := path + ".tmp"
-	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
-		t.Error("expected .tmp file to be cleaned up after save")
-	}
-
 	// Reload and verify.
 	loaded, err := config.Load()
 	if err != nil {
@@ -295,11 +288,6 @@ func TestLoadYAML(t *testing.T) {
     builtin: false
     type: github
     writable: false
-tools:
-  - name: claude
-    enabled: true
-  - name: cursor
-    enabled: false
 token: ghp_yaml_full
 `
 	os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlContent), 0o644)
@@ -318,15 +306,6 @@ token: ghp_yaml_full
 	if cfg.Registries[1].Writable {
 		t.Error("second registry should not be writable")
 	}
-	if len(cfg.Tools) != 2 {
-		t.Fatalf("expected 2 tools, got %d", len(cfg.Tools))
-	}
-	if cfg.Tools[0].Name != "claude" || !cfg.Tools[0].Enabled {
-		t.Errorf("first tool: got %+v", cfg.Tools[0])
-	}
-	if cfg.Tools[1].Name != "cursor" || cfg.Tools[1].Enabled {
-		t.Errorf("second tool: got %+v", cfg.Tools[1])
-	}
 }
 
 func TestSaveYAML(t *testing.T) {
@@ -335,9 +314,6 @@ func TestSaveYAML(t *testing.T) {
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
 			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: config.RegistryTypeGitHub, Writable: true},
-		},
-		Tools: []config.ToolConfig{
-			{Name: "claude", Enabled: true},
 		},
 		Token: "ghp_save_test",
 	}

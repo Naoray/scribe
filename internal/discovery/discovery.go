@@ -327,14 +327,6 @@ func extractFirstParagraph(data []byte) string {
 	return ""
 }
 
-// stripQuotes removes surrounding single or double quotes from a YAML value.
-func stripQuotes(s string) string {
-	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
 // truncateDescription shortens a description to a scannable length.
 func truncateDescription(s string) string {
 	// Take first sentence or max 80 chars.

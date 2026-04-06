@@ -132,9 +132,6 @@ func (m *Manifest) Validate() error {
 // IsRegistry reports whether this manifest describes a team registry.
 func (m *Manifest) IsRegistry() bool { return m.Team != nil }
 
-// IsLoadout is an alias for IsRegistry (backward compatibility).
-func (m *Manifest) IsLoadout() bool { return m.IsRegistry() }
-
 // IsPackage reports whether this manifest describes a skill package.
 func (m *Manifest) IsPackage() bool { return m.Package != nil }
 

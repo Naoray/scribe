@@ -22,9 +22,4 @@ type SkillAddErrorMsg struct {
 	Err  error
 }
 
-// SkillAddDeniedMsg is sent when author enforcement blocks a skill modification.
-type SkillAddDeniedMsg struct {
-	Name   string
-	Author string
-}
 
