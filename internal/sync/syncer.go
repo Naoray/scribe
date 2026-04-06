@@ -62,13 +62,14 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse loadout: %w", err)
 	}
-	if !m.IsLoadout() {
+	if !m.IsRegistry() {
 		return nil, nil, fmt.Errorf("%s has no team section", teamRepo)
 	}
 
 	var statuses []SkillStatus
 
-	for _, entry := range m.Catalog {
+	for i := range m.Catalog {
+		entry := &m.Catalog[i]
 		installedPtr := lookupInstalled(st, entry.Name)
 
 		latestSHA := ""
@@ -80,12 +81,13 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 			}
 		}
 
-		status := compareEntry(entry, installedPtr, latestSHA)
+		status := compareEntry(*entry, installedPtr, latestSHA)
 		statuses = append(statuses, SkillStatus{
 			Name:       entry.Name,
 			Status:     status,
 			Installed:  installedPtr,
-			LoadoutRef: loadoutRef(entry),
+			Entry:      entry,
+			LoadoutRef: loadoutRef(*entry),
 			Maintainer: entry.Maintainer(),
 			IsPackage:  entry.IsPackage(),
 		})
@@ -119,20 +121,20 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 // Emits events throughout. Updates state incrementally — a failed skill
 // does not prevent successful skills from being recorded.
 func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) error {
-	statuses, m, err := s.Diff(ctx, teamRepo, st)
+	statuses, _, err := s.Diff(ctx, teamRepo, st)
 	if err != nil {
 		return err
 	}
-	return s.apply(ctx, statuses, m, st)
+	return s.apply(ctx, statuses, st)
 }
 
 // RunWithDiff is like Run but uses pre-computed diff results, avoiding a
 // redundant manifest fetch when the caller already called Diff.
-func (s *Syncer) RunWithDiff(ctx context.Context, statuses []SkillStatus, m *manifest.Manifest, st *state.State) error {
-	return s.apply(ctx, statuses, m, st)
+func (s *Syncer) RunWithDiff(ctx context.Context, statuses []SkillStatus, st *state.State) error {
+	return s.apply(ctx, statuses, st)
 }
 
-func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, m *manifest.Manifest, st *state.State) error {
+func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.State) error {
 	// Emit resolved status for each skill (populates list view before downloads start).
 	for _, sk := range statuses {
 		s.emit(SkillResolvedMsg{sk})
@@ -155,21 +157,14 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, m *manifest.
 
 			s.emit(SkillDownloadingMsg{Name: sk.Name})
 
-			entry := m.FindByName(sk.Name)
-			if entry == nil {
-				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("entry %q not found in manifest", sk.Name)})
-				summary.Failed++
-				continue
-			}
-
-			src, err := manifest.ParseSource(entry.Source)
+			src, err := manifest.ParseSource(sk.Entry.Source)
 			if err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
 				summary.Failed++
 				continue
 			}
 
-			skillPath := entry.Path
+			skillPath := sk.Entry.Path
 			if skillPath == "" {
 				skillPath = sk.Name
 			}
@@ -224,7 +219,7 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, m *manifest.
 			st.RecordInstall(sk.Name, state.InstalledSkill{
 				Version:   src.Ref,
 				CommitSHA: latestSHA,
-				Source:    entry.Source,
+				Source:    sk.Entry.Source,
 				Targets:   targetNames,
 				Paths:     paths,
 			})

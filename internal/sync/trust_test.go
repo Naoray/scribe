@@ -20,14 +20,3 @@ func TestCommandHash(t *testing.T) {
 	}
 }
 
-func TestCommandHashChanged(t *testing.T) {
-	old := CommandHash("npm install", "npm update")
-	new := CommandHash("npm install --force", "npm update")
-
-	if !CommandHashChanged(old, new) {
-		t.Error("expected hash changed")
-	}
-	if CommandHashChanged(old, old) {
-		t.Error("expected hash unchanged")
-	}
-}

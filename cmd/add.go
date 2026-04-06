@@ -137,7 +137,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			}
 		}
 		m, err := manifest.Parse(raw)
-		if err != nil || !m.IsLoadout() {
+		if err != nil || !m.IsRegistry() {
 			continue
 		}
 		otherManifests[repo] = m

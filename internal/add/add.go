@@ -75,7 +75,6 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 func (a *Adder) DiscoverRemote(targetManifest *manifest.Manifest, otherManifests map[string]*manifest.Manifest) []Candidate {
 	var candidates []Candidate
 
-	// Build target names set from catalog entries.
 	targetNames := make(map[string]bool, len(targetManifest.Catalog))
 	for _, e := range targetManifest.Catalog {
 		targetNames[e.Name] = true
@@ -154,13 +153,13 @@ func ReadLocalSkillFiles(c Candidate) (map[string]string, error) {
 // in a single atomic commit. For each candidate: adds a source reference or
 // uploads files + self-reference. Emits events throughout.
 func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candidate) error {
-	owner, repo, err := splitRepo(targetRepo)
+	owner, repo, err := manifest.ParseOwnerRepo(targetRepo)
 	if err != nil {
 		return err
 	}
 
 	// Fetch the current manifest with fallback.
-	raw, _, err := a.fetchManifest(ctx, owner, repo)
+	raw, err := a.fetchManifest(ctx, owner, repo)
 	if err != nil {
 		return fmt.Errorf("fetch manifest: %w", err)
 	}
@@ -227,24 +226,17 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 }
 
 // fetchManifest tries scribe.yaml first, falls back to scribe.toml.
-func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) ([]byte, string, error) {
+func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) ([]byte, error) {
 	raw, err := a.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
 	if err == nil {
-		return raw, manifest.ManifestFilename, nil
+		return raw, nil
 	}
 
 	raw, legacyErr := a.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
 	if legacyErr != nil {
-		return nil, "", fmt.Errorf("fetch manifest: %w", err)
+		return nil, fmt.Errorf("fetch manifest: %w", err)
 	}
 
-	return raw, manifest.LegacyManifestFilename, nil
+	return raw, nil
 }
 
-func splitRepo(teamRepo string) (owner, repo string, err error) {
-	parts := strings.SplitN(teamRepo, "/", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo", teamRepo)
-	}
-	return parts[0], parts[1], nil
-}

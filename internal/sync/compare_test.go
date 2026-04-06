@@ -12,7 +12,7 @@ func entry(source string) manifest.Entry {
 }
 
 func packageEntry(source string) manifest.Entry {
-	return manifest.Entry{Source: source, Type: "package"}
+	return manifest.Entry{Source: source, Type: manifest.EntryTypePackage}
 }
 
 func installed(version, sha string) *state.InstalledSkill {

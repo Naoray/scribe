@@ -69,7 +69,7 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 }
 
 func StepValidateManifest(_ context.Context, b *Bag) error {
-	if !b.manifest.IsLoadout() {
+	if !b.manifest.IsRegistry() {
 		return fmt.Errorf("%s manifest has no team section — is this a skill package?", b.RepoArg)
 	}
 	return nil
