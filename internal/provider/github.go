@@ -62,9 +62,15 @@ func (p *GitHubProvider) Discover(ctx context.Context, repo string) ([]manifest.
 		return entries, nil
 	}
 
-	// Steps 3-4 (marketplace.json and tree scan) will be wired by Tasks 5 and 6.
+	// Step 3: Try .claude-plugin/marketplace.json.
+	entries, err = p.discoverMarketplace(ctx, owner, repoName)
+	if err == nil {
+		return entries, nil
+	}
 
-	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml)", repo)
+	// Step 4: Tree scan for SKILL.md files (wired by Task 6).
+
+	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml, marketplace.json)", repo)
 }
 
 func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {
@@ -91,10 +97,19 @@ func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo str
 	return m.Catalog, nil
 }
 
-// discoverMarketplaceJSON discovers skills from a marketplace.json file.
-// Placeholder — will be wired in Task 5.
-func (p *GitHubProvider) discoverMarketplaceJSON(_ context.Context, _, _ string) ([]manifest.Entry, error) {
-	return nil, fmt.Errorf("marketplace.json discovery not yet implemented")
+func (p *GitHubProvider) discoverMarketplace(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {
+	raw, err := p.client.FetchFile(ctx, owner, repo, marketplacePath, "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	entries, err := ParseMarketplace(raw, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("marketplace.json has no skills")
+	}
+	return entries, nil
 }
 
 // discoverTreeScan discovers skills by scanning the repo tree for SKILL.md files.
