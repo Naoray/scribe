@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 
 	gh "github.com/Naoray/scribe/internal/github"
 )
@@ -35,4 +36,20 @@ func (a *ghAdapter) FetchDirectory(ctx context.Context, owner, repo, dirPath, re
 
 func (a *ghAdapter) LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error) {
 	return a.client.LatestCommitSHA(ctx, owner, repo, branch)
+}
+
+// NoopFetcher is a GitHubFetcher that returns errors for all operations.
+// Used when Provider handles all fetching.
+type NoopFetcher struct{}
+
+func (n *NoopFetcher) FetchFile(_ context.Context, _, _, _, _ string) ([]byte, error) {
+	return nil, fmt.Errorf("NoopFetcher: FetchFile not available (use Provider)")
+}
+
+func (n *NoopFetcher) FetchDirectory(_ context.Context, _, _, _, _ string) ([]SkillFile, error) {
+	return nil, fmt.Errorf("NoopFetcher: FetchDirectory not available (use Provider)")
+}
+
+func (n *NoopFetcher) LatestCommitSHA(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("NoopFetcher: LatestCommitSHA not available (use Provider)")
 }
