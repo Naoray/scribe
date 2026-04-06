@@ -342,20 +342,4 @@ func countStatuses(statuses []sync.SkillStatus) map[sync.Status]int {
 	return m
 }
 
-func formatCounts(counts map[sync.Status]int) string {
-	var parts []string
-	if n := counts[sync.StatusCurrent]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d current", n))
-	}
-	if n := counts[sync.StatusOutdated]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d outdated", n))
-	}
-	if n := counts[sync.StatusMissing]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d missing", n))
-	}
-	if n := counts[sync.StatusExtra]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d extra", n))
-	}
-	return strings.Join(parts, " · ")
-}
 
