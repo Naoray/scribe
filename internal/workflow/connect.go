@@ -51,14 +51,18 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 		return err
 	}
 
-	raw, err := b.Client.FetchFile(ctx, owner, repo, "scribe.toml", "HEAD")
+	// Try scribe.yaml first, fall back to scribe.toml.
+	raw, err := b.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
 	if err != nil {
-		return fmt.Errorf("could not access %s: %w", b.RepoArg, err)
+		raw, err = b.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
+		if err != nil {
+			return fmt.Errorf("could not access %s: %w", b.RepoArg, err)
+		}
 	}
 
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid scribe.toml in %s: %w", b.RepoArg, err)
+		return fmt.Errorf("invalid manifest in %s: %w", b.RepoArg, err)
 	}
 	b.manifest = m
 	return nil
@@ -66,7 +70,7 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 
 func StepValidateManifest(_ context.Context, b *Bag) error {
 	if !b.manifest.IsLoadout() {
-		return fmt.Errorf("%s/scribe.toml has no [team] section — is this a skill package?", b.RepoArg)
+		return fmt.Errorf("%s manifest has no team section — is this a skill package?", b.RepoArg)
 	}
 	return nil
 }

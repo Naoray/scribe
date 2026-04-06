@@ -32,7 +32,7 @@ type addResult struct {
 var addCmd = &cobra.Command{
 	Use:   "add [name]",
 	Short: "Add a skill to a team registry",
-	Long: `Add a skill to a team registry's scribe.toml on GitHub.
+	Long: `Add a skill to a team registry on GitHub.
 
 If the skill has a known source (synced from another registry), adds a
 source reference. If it's a local-only skill, uploads the files to the
@@ -107,9 +107,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid target registry: %w", err)
 	}
-	targetRaw, err := client.FetchFile(ctx, targetOwner, targetRepoName, "scribe.toml", "HEAD")
+	targetRaw, err := client.FetchFile(ctx, targetOwner, targetRepoName, manifest.ManifestFilename, "HEAD")
 	if err != nil {
-		return fmt.Errorf("fetch target registry: %w", err)
+		targetRaw, err = client.FetchFile(ctx, targetOwner, targetRepoName, manifest.LegacyManifestFilename, "HEAD")
+		if err != nil {
+			return fmt.Errorf("fetch target registry: %w", err)
+		}
 	}
 	targetManifest, err := manifest.Parse(targetRaw)
 	if err != nil {
@@ -126,9 +129,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			continue // skip malformed registry entries
 		}
-		raw, err := client.FetchFile(ctx, o, r, "scribe.toml", "HEAD")
+		raw, err := client.FetchFile(ctx, o, r, manifest.ManifestFilename, "HEAD")
 		if err != nil {
-			continue // skip unreachable registries
+			raw, err = client.FetchFile(ctx, o, r, manifest.LegacyManifestFilename, "HEAD")
+			if err != nil {
+				continue // skip unreachable registries
+			}
 		}
 		m, err := manifest.Parse(raw)
 		if err != nil || !m.IsLoadout() {
@@ -336,7 +342,7 @@ func filterAlreadyInTarget(candidates []add.Candidate, targetManifest *manifest.
 		if seen[c.Name] {
 			continue
 		}
-		if _, exists := targetManifest.Skills[c.Name]; exists {
+		if targetManifest.FindByName(c.Name) != nil {
 			continue
 		}
 		seen[c.Name] = true
