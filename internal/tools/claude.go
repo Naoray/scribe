@@ -6,15 +6,15 @@ import (
 	"path/filepath"
 )
 
-// ToolClaude is the identifier for the Claude Code tool.
-const ToolClaude = "claude"
+// toolClaude is the identifier for the Claude Code tool.
+const toolClaude = "claude"
 
 // ClaudeTool symlinks ~/.claude/skills/<name> → ~/.scribe/skills/<name>.
 // The whole skill directory is linked, so Claude Code sees all files
 // (SKILL.md, scripts/, references/, etc.) without duplication.
 type ClaudeTool struct{}
 
-func (t ClaudeTool) Name() string { return ToolClaude }
+func (t ClaudeTool) Name() string { return toolClaude }
 
 func (t ClaudeTool) Detect() bool {
 	home, err := os.UserHomeDir()
