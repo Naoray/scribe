@@ -94,9 +94,9 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 
 	out := make([]localSkillJSON, 0, len(skills))
 	for _, sk := range skills {
-		tgts := sk.Targets
-		if tgts == nil {
-			tgts = []string{}
+		targets := sk.Targets
+		if targets == nil {
+			targets = []string{}
 		}
 
 		_, managed := st.Installed[sk.Name]
@@ -108,7 +108,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 			Version:     sk.Version,
 			ContentHash: sk.ContentHash,
 			Source:      sk.Source,
-			Targets:     tgts,
+			Targets:     targets,
 			Managed:     managed,
 			Path:        sk.LocalPath,
 		})

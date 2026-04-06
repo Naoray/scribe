@@ -82,8 +82,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}
 
-	tgts := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
-	adder := &add.Adder{Client: client, Tools: tgts}
+	targets := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
+	adder := &add.Adder{Client: client, Tools: targets}
 
 	// Resolve target registry.
 	targetRepo, err := resolveTargetRegistry(addRegistry, cfg.TeamRepos(), isTTY)
@@ -139,11 +139,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	)
 
 	if len(args) == 1 {
-		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, isTTY, addYes)
+		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, isTTY, addYes)
 	}
 
 	// Mode 2: interactive browse (TTY, no args) — Task 7.
-	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, addYes)
+	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, addYes)
 }
 
 func runAddByName(
@@ -155,7 +155,7 @@ func runAddByName(
 	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
-	tgts []tools.Tool,
+	targets []tools.Tool,
 	useJSON bool,
 	isTTY bool,
 	skipConfirm bool,
@@ -197,7 +197,7 @@ func runAddByName(
 		return err
 	}
 
-	return finishAdd(ctx, *results, targetRepo, st, client, tgts, useJSON)
+	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
 }
 
 func runAddInteractive(
@@ -208,7 +208,7 @@ func runAddInteractive(
 	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
-	tgts []tools.Tool,
+	targets []tools.Tool,
 	useJSON bool,
 	skipConfirm bool,
 ) error {
@@ -264,7 +264,7 @@ func runAddInteractive(
 		return err
 	}
 
-	return finishAdd(ctx, *results, targetRepo, st, client, tgts, useJSON)
+	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
 }
 
 // sortCandidates groups by origin (local first, then remote), then by package,
@@ -277,15 +277,15 @@ func sortCandidates(candidates []add.Candidate) {
 			return iLocal
 		}
 		// Within local: standalone first, then by package name.
-		pi, pj := candidates[i].Package, candidates[j].Package
-		if pi != pj {
-			if pi == "" {
+		pkgI, pkgJ := candidates[i].Package, candidates[j].Package
+		if pkgI != pkgJ {
+			if pkgI == "" {
 				return true
 			}
-			if pj == "" {
+			if pkgJ == "" {
 				return false
 			}
-			return pi < pj
+			return pkgI < pkgJ
 		}
 		return candidates[i].Name < candidates[j].Name
 	})
@@ -372,8 +372,8 @@ func wireAddEmit(adder *add.Adder, targetRepo string, useJSON bool) *[]addResult
 }
 
 // finishAdd runs auto-sync and optionally outputs JSON after add completes.
-func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *state.State, client *gh.Client, tgts []tools.Tool, useJSON bool) error {
-	synced := autoSync(ctx, targetRepo, st, client, tgts, useJSON)
+func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) error {
+	synced := autoSync(ctx, targetRepo, st, client, targets, useJSON)
 	if useJSON {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"added":  results,
@@ -384,10 +384,10 @@ func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *
 }
 
 // autoSync runs a sync for the target registry after adding skills.
-func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, tgts []tools.Tool, useJSON bool) bool {
+func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) bool {
 	syncer := &sync.Syncer{
 		Client:  sync.WrapGitHubClient(client),
-		Tools: tgts,
+		Tools: targets,
 		Emit: func(msg any) {
 			if useJSON {
 				return
