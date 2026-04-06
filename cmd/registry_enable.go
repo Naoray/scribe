@@ -8,23 +8,22 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 )
 
-var registryEnableCmd = &cobra.Command{
-	Use:   "enable <owner/repo>",
-	Short: "Enable a connected registry",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRegistryEnable,
+func newRegistryEnableCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "enable <owner/repo>",
+		Short: "Enable a connected registry",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRegistryEnable,
+	}
 }
 
-var registryDisableCmd = &cobra.Command{
-	Use:   "disable <owner/repo>",
-	Short: "Disable a connected registry (keeps config, skips during sync)",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRegistryDisable,
-}
-
-func init() {
-	registryCmd.AddCommand(registryEnableCmd)
-	registryCmd.AddCommand(registryDisableCmd)
+func newRegistryDisableCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "disable <owner/repo>",
+		Short: "Disable a connected registry (keeps config, skips during sync)",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRegistryDisable,
+	}
 }
 
 func runRegistryEnable(cmd *cobra.Command, args []string) error {

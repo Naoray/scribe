@@ -3,13 +3,9 @@ package workflow
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
-	"strings"
 
-	"charm.land/lipgloss/v2"
-	"github.com/mattn/go-runewidth"
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/discovery"
@@ -35,7 +31,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 
 	// Local view: explicit --local flag or no registries connected.
 	if b.LocalFlag || len(b.Config.TeamRepos()) == 0 {
-		return listLocal(w, b.State, useJSON, b.ListTUI)
+		return listLocal(w, b, useJSON)
 	}
 
 	// Reuse shared steps for filtering.
@@ -48,127 +44,38 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 		Provider: b.Provider,
 		Tools:    []tools.Tool{},
 	}
-	multiRegistry := len(b.Repos) > 1
 
 	if useJSON {
 		return printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
 	}
-	return printMultiListTable(ctx, w, b.Repos, syncer, b.State, multiRegistry)
+
+	// Populate results on Bag for cmd/ to render.
+	b.MultiRegistry = len(b.Repos) > 1
+	b.RegistryDiffs = make(map[string][]sync.SkillStatus, len(b.Repos))
+	for _, teamRepo := range b.Repos {
+		statuses, _, err := syncer.Diff(ctx, teamRepo, b.State)
+		if err != nil {
+			return err
+		}
+		b.RegistryDiffs[teamRepo] = statuses
+	}
+	return nil
 }
 
-func listLocal(w io.Writer, st *state.State, useJSON bool, tuiFn func([]discovery.Skill) error) error {
-	skills, err := discovery.OnDisk(st)
+func listLocal(w io.Writer, b *Bag, useJSON bool) error {
+	skills, err := discovery.OnDisk(b.State)
 	if err != nil {
 		return err
 	}
 
 	if useJSON {
-		return printLocalJSON(w, skills, st)
+		return printLocalJSON(w, skills, b.State)
 	}
-	if tuiFn != nil {
-		return tuiFn(skills)
+	if b.ListTUI != nil {
+		return b.ListTUI(skills)
 	}
-	return printLocalTable(w, skills)
-}
-
-// list styles — scoped to avoid polluting the package namespace.
-var (
-	listHeaderStyle = lipgloss.NewStyle().Bold(true)
-	listCountStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	listNameStyle   = lipgloss.NewStyle().Bold(true)
-	listDescStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
-	listDivStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	listTotalStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	listDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	listAuthorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF"))
-	listRegStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
-
-	// statusStyles maps each sync status to its lipgloss style.
-	statusStyles = map[sync.Status]lipgloss.Style{
-		sync.StatusCurrent:  lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
-		sync.StatusOutdated: lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
-		sync.StatusMissing:  lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")),
-		sync.StatusExtra:    lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3")),
-	}
-)
-
-// renderStatus returns a styled "icon label" string for a sync status, padded to consistent width.
-func renderStatus(s sync.Status) string {
-	d := s.Display()
-	raw := d.Icon + " " + d.Label
-	return statusStyles[s].Render(runewidth.FillRight(raw, 10))
-}
-
-// renderStatusCount returns a styled "N label" string, or "" if count is zero.
-func renderStatusCount(s sync.Status, n int) string {
-	if n == 0 {
-		return ""
-	}
-	return statusStyles[s].Render(fmt.Sprintf("%d %s", n, s.Display().Label))
-}
-
-func printLocalTable(w io.Writer, skills []discovery.Skill) error {
-	if len(skills) == 0 {
-		fmt.Fprintln(w, "No skills installed.")
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "  Install skills from a registry:  scribe connect <owner/repo>")
-		return nil
-	}
-
-	// Bucket skills by group.
-	type group struct {
-		name   string
-		skills []discovery.Skill
-	}
-	var groups []group
-	groupIdx := map[string]int{}
-
-	for _, sk := range skills {
-		pkg := sk.Package
-		if idx, ok := groupIdx[pkg]; ok {
-			groups[idx].skills = append(groups[idx].skills, sk)
-		} else {
-			groupIdx[pkg] = len(groups)
-			groups = append(groups, group{name: pkg, skills: []discovery.Skill{sk}})
-		}
-	}
-
-	for i, g := range groups {
-		if i > 0 {
-			fmt.Fprintln(w)
-		}
-
-		label := g.name
-		if label == "" {
-			label = "standalone"
-		}
-		count := listCountStyle.Render(fmt.Sprintf("(%d skills)", len(g.skills)))
-		fmt.Fprintf(w, "%s %s\n", listRegStyle.Render(label), count)
-		fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(label)+15)))
-
-		// Compute column widths.
-		maxName, maxVer := 4, 7
-		for _, sk := range g.skills {
-			maxName = max(maxName, runewidth.StringWidth(sk.Name))
-			maxVer = max(maxVer, runewidth.StringWidth(sk.Version))
-		}
-
-		for _, sk := range g.skills {
-			ver := sk.Version
-			if ver == "" {
-				ver = "—"
-			}
-			agents := listDimStyle.Render(strings.Join(sk.Targets, ", "))
-
-			name := listNameStyle.Render(runewidth.FillRight(sk.Name, maxName))
-			verStr := listDimStyle.Render(runewidth.FillRight(ver, maxVer))
-
-			fmt.Fprintf(w, "  %s  %s  %s\n", name, verStr, agents)
-		}
-	}
-
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, listTotalStyle.Render(fmt.Sprintf("%d skills total", len(skills))))
+	// Populate results on Bag for cmd/ to render.
+	b.LocalSkills = skills
 	return nil
 }
 
@@ -187,9 +94,9 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 
 	out := make([]localSkillJSON, 0, len(skills))
 	for _, sk := range skills {
-		tgts := sk.Targets
-		if tgts == nil {
-			tgts = []string{}
+		targets := sk.Targets
+		if targets == nil {
+			targets = []string{}
 		}
 
 		_, managed := st.Installed[sk.Name]
@@ -201,7 +108,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 			Version:     sk.Version,
 			ContentHash: sk.ContentHash,
 			Source:      sk.Source,
-			Targets:     tgts,
+			Targets:     targets,
 			Managed:     managed,
 			Path:        sk.LocalPath,
 		})
@@ -210,82 +117,6 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
-}
-
-func printMultiListTable(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
-	var allCounts []map[sync.Status]int
-
-	for i, teamRepo := range repos {
-		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
-		if err != nil {
-			return err
-		}
-
-		if i > 0 {
-			fmt.Fprintln(w)
-		}
-
-		renderSkillTable(w, teamRepo, statuses)
-		allCounts = append(allCounts, countStatuses(statuses))
-	}
-
-	// Summary footer.
-	fmt.Fprintln(w)
-	printStatusSummary(w, allCounts, repos)
-
-	if !st.LastSync.IsZero() {
-		fmt.Fprintln(w, listDimStyle.Render("Last sync: "+st.LastSync.Local().Format("2006-01-02 15:04")))
-	}
-	return nil
-}
-
-// renderSkillTable renders a single registry's skills as a styled table.
-func renderSkillTable(w io.Writer, repo string, statuses []sync.SkillStatus) {
-	// Header.
-	count := listCountStyle.Render(fmt.Sprintf("(%d skills)", len(statuses)))
-	fmt.Fprintf(w, "%s %s\n", listRegStyle.Render(repo), count)
-	fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(repo)+15)))
-
-	// Compute column widths in one pass.
-	maxName, maxVer, maxAuthor := 4, 7, 6
-	for _, sk := range statuses {
-		maxName = max(maxName, runewidth.StringWidth(sk.Name))
-		maxVer = max(maxVer, runewidth.StringWidth(sk.DisplayVersion()))
-		maxAuthor = max(maxAuthor, runewidth.StringWidth(sk.DisplayAuthor()))
-	}
-
-	// Rows.
-	for _, sk := range statuses {
-		name := listNameStyle.Render(runewidth.FillRight(sk.Name, maxName))
-		ver := listDimStyle.Render(runewidth.FillRight(sk.DisplayVersion(), maxVer))
-		author := listAuthorStyle.Render(runewidth.FillRight(sk.DisplayAuthor(), maxAuthor))
-		status := renderStatus(sk.Status)
-		agents := listDimStyle.Render(sk.DisplayAgents())
-
-		fmt.Fprintf(w, "  %s  %s  %s  %s  %s\n", name, ver, author, status, agents)
-	}
-}
-
-// printStatusSummary renders the colored status count footer.
-func printStatusSummary(w io.Writer, allCounts []map[sync.Status]int, repos []string) {
-	// Merge all counts.
-	merged := map[sync.Status]int{}
-	for _, c := range allCounts {
-		for s, n := range c {
-			merged[s] += n
-		}
-	}
-
-	order := []sync.Status{sync.StatusCurrent, sync.StatusOutdated, sync.StatusMissing, sync.StatusExtra}
-	var parts []string
-	for _, s := range order {
-		if part := renderStatusCount(s, merged[s]); part != "" {
-			parts = append(parts, part)
-		}
-	}
-	if len(parts) > 0 {
-		fmt.Fprintln(w, strings.Join(parts, listDimStyle.Render(" · ")))
-	}
 }
 
 func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) error {
@@ -340,12 +171,10 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 	})
 }
 
-func countStatuses(statuses []sync.SkillStatus) map[sync.Status]int {
+func CountStatuses(statuses []sync.SkillStatus) map[sync.Status]int {
 	m := map[sync.Status]int{}
 	for _, sk := range statuses {
 		m[sk.Status]++
 	}
 	return m
 }
-
-

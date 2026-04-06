@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,7 +108,7 @@ func Load() (*Config, error) {
 		}
 		return &cfg, nil
 	}
-	if !os.IsNotExist(err) {
+	if !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("read config.yaml: %w", err)
 	}
 
@@ -118,7 +120,7 @@ func Load() (*Config, error) {
 
 	var raw legacyTOML
 	if _, err := toml.DecodeFile(tomlPath, &raw); err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return &Config{}, nil
 		}
 		return nil, fmt.Errorf("read config.toml: %w", err)

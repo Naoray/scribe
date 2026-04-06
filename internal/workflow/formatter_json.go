@@ -29,7 +29,7 @@ type registryResult struct {
 }
 
 func newJSONFormatter(out io.Writer) *jsonFormatter {
-	return &jsonFormatter{out: out}
+	return &jsonFormatter{out: out, registries: []registryResult{}}
 }
 
 func (f *jsonFormatter) OnRegistryStart(repo string) {
@@ -97,6 +97,24 @@ func (f *jsonFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 		f.current = nil
 	}
 }
+
+func (f *jsonFormatter) OnConnectDuplicate(_ string) {
+	// JSON mode: handled by caller via exit code / structured output.
+}
+
+func (f *jsonFormatter) OnConnectSaved(_ string) {
+	// JSON mode: connection status is implicit in the response.
+}
+
+func (f *jsonFormatter) OnConnectSyncing() {
+	// JSON mode: no progress output.
+}
+
+func (f *jsonFormatter) OnConnectSyncWarning(_ string, _ error) {
+	// JSON mode: sync warnings are not emitted as JSON yet.
+}
+
+func (f *jsonFormatter) OnLegacyFormat(_ string) {}
 
 func (f *jsonFormatter) Flush() error {
 	return json.NewEncoder(f.out).Encode(map[string]any{

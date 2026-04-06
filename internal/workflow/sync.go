@@ -40,7 +40,7 @@ func SyncTail() []Step {
 func StepLoadConfig(ctx context.Context, b *Bag) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 	b.Config = cfg
 	b.Client = gh.NewClient(ctx, cfg.Token)
@@ -54,7 +54,7 @@ func StepLoadConfig(ctx context.Context, b *Bag) error {
 func StepLoadState(_ context.Context, b *Bag) error {
 	st, err := state.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load state: %w", err)
 	}
 	b.State = st
 	return nil
@@ -120,6 +120,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 				b.Formatter.OnSkillInstalled(m.Name, m.Version, m.Updated)
 			case sync.SkillErrorMsg:
 				b.Formatter.OnSkillError(m.Name, m.Err)
+			case sync.LegacyFormatMsg:
+				b.Formatter.OnLegacyFormat(m.Repo)
 			case sync.SyncCompleteMsg:
 				b.Formatter.OnSyncComplete(m)
 			}

@@ -55,7 +55,7 @@
                          │                  │ syncer.Diff()        │
                          │                  │                      │
                          │                  │ GitHub API →         │
-                         │                  │ fetch scribe.toml →  │
+                         │                  │ fetch scribe.yaml →  │
                          │                  │ compare each skill   │
                          │                  │ → []SkillStatus      │
                          │                  └──────────┬───────────┘

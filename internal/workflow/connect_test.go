@@ -6,20 +6,19 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-func TestConnectSteps_EndsWithSyncTail(t *testing.T) {
+func TestConnectSteps_EndsWithSyncSkills(t *testing.T) {
 	connect := workflow.ConnectSteps()
-	tail := workflow.SyncTail()
 
-	if len(connect) < len(tail) {
-		t.Fatal("ConnectSteps shorter than SyncTail")
+	// Connect should end with ResolveTools → SyncSkills (the sync execution
+	// steps). ResolveFormatter is promoted earlier in connect so the formatter
+	// is available for connect-specific output before sync begins.
+	last := connect[len(connect)-1]
+	if last.Name != "SyncSkills" {
+		t.Errorf("expected last step SyncSkills, got %s", last.Name)
 	}
-
-	// The last steps should match the sync tail names.
-	offset := len(connect) - len(tail)
-	for i, step := range tail {
-		if connect[offset+i].Name != step.Name {
-			t.Errorf("connect[%d] = %q, want %q (from SyncTail)", offset+i, connect[offset+i].Name, step.Name)
-		}
+	secondLast := connect[len(connect)-2]
+	if secondLast.Name != "ResolveTools" {
+		t.Errorf("expected second-to-last step ResolveTools, got %s", secondLast.Name)
 	}
 }
 
@@ -35,8 +34,8 @@ func TestConnectTail_SkipsLoadConfig(t *testing.T) {
 	if tail[0].Name == "LoadConfig" {
 		t.Error("ConnectTail should not start with LoadConfig")
 	}
-	if tail[0].Name != "DedupCheck" {
-		t.Errorf("expected ConnectTail to start with DedupCheck, got %s", tail[0].Name)
+	if tail[0].Name != "ResolveFormatter" {
+		t.Errorf("expected ConnectTail to start with ResolveFormatter, got %s", tail[0].Name)
 	}
 }
 

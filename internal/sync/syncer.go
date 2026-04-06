@@ -53,18 +53,14 @@ func (s *Syncer) FetchManifest(ctx context.Context, owner, repo string) (*manife
 	}
 
 	// Legacy path: direct file fetch.
-	raw, err := s.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
-	if err == nil {
-		return manifest.Parse(raw)
+	m, isLegacy, err := manifest.FetchWithFallback(ctx, s.Client, owner, repo, migrate.Convert)
+	if err != nil {
+		return nil, err
 	}
-
-	raw, legacyErr := s.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
-	if legacyErr != nil {
-		return nil, fmt.Errorf("fetch manifest: %w", err)
+	if isLegacy {
+		s.emit(LegacyFormatMsg{Repo: owner + "/" + repo})
 	}
-
-	s.emit(LegacyFormatMsg{Repo: owner + "/" + repo})
-	return migrate.Convert(raw)
+	return m, nil
 }
 
 // Diff fetches the team loadout and computes status for every skill
@@ -158,7 +154,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) error {
 	statuses, _, err := s.Diff(ctx, teamRepo, st)
 	if err != nil {
-		return err
+		return fmt.Errorf("sync %s: %w", teamRepo, err)
 	}
 	return s.apply(ctx, teamRepo, statuses, st)
 }

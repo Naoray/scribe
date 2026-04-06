@@ -1,6 +1,8 @@
 package firstrun
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -35,14 +37,14 @@ func IsFirstRun() bool {
 		return true
 	}
 	_, err = os.Stat(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		// Also check legacy TOML path.
 		tomlPath, tomlErr := paths.ConfigPath()
 		if tomlErr != nil {
 			return true
 		}
 		_, tomlErr = os.Stat(tomlPath)
-		return os.IsNotExist(tomlErr)
+		return errors.Is(tomlErr, fs.ErrNotExist)
 	}
 	return false
 }

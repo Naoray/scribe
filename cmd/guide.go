@@ -15,33 +15,33 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var guideCmd = &cobra.Command{
-	Use:   "guide",
-	Short: "Interactive setup guide for Scribe",
-	Long: `Walk through Scribe setup step by step.
+func newGuideCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "guide",
+		Short: "Interactive setup guide for Scribe",
+		Long: `Walk through Scribe setup step by step.
 
 Run with --json or pipe to get machine-readable steps for agents.
 
 Examples:
   scribe guide          # interactive setup
   scribe guide --json   # agent-friendly step list`,
-	Args: cobra.NoArgs,
-	RunE: runGuide,
-}
-
-func init() {
-	guideCmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
+		Args: cobra.NoArgs,
+		RunE: runGuide,
+	}
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
+	return cmd
 }
 
 // Styles for guide output — kept local to cmd/ per architecture.
 var (
-	guideTitle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Padding(0, 1)
-	guideCheckOK     = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
-	guideCheckFail   = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
-	guideCheckPend   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
-	guideSubtle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
-	guideBold        = lipgloss.NewStyle().Bold(true)
-	guideSummaryBox  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).BorderForeground(lipgloss.Color("#7C3AED"))
+	guideTitleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Padding(0, 1)
+	guideCheckOKStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	guideCheckFailStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+	guideCheckPendStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
+	guideSubtleStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
+	guideBoldStyle       = lipgloss.NewStyle().Bold(true)
+	guideSummaryBoxStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).BorderForeground(lipgloss.Color("#7C3AED"))
 )
 
 func runGuide(cmd *cobra.Command, _ []string) error {
@@ -111,19 +111,19 @@ func runGuideJSON(w io.Writer) error {
 // displayPrereqs shows prereq status with styled icons.
 func displayPrereqs(result prereq.Result) {
 	fmt.Println()
-	fmt.Println(guideTitle.Render("Scribe Guide"))
+	fmt.Println(guideTitleStyle.Render("Scribe Guide"))
 	fmt.Println()
 
 	if result.GitHubAuth.OK {
-		fmt.Printf("  %s GitHub authenticated (%s)\n", guideCheckOK.Render("✓"), result.GitHubAuth.Method)
+		fmt.Printf("  %s GitHub authenticated (%s)\n", guideCheckOKStyle.Render("✓"), result.GitHubAuth.Method)
 	} else {
-		fmt.Printf("  %s GitHub not authenticated\n", guideCheckFail.Render("✗"))
+		fmt.Printf("  %s GitHub not authenticated\n", guideCheckFailStyle.Render("✗"))
 	}
 
 	if result.ScribeDir.OK {
-		fmt.Printf("  %s Scribe directory exists\n", guideCheckOK.Render("✓"))
+		fmt.Printf("  %s Scribe directory exists\n", guideCheckOKStyle.Render("✓"))
 	} else {
-		fmt.Printf("  %s Scribe directory will be created\n", guideCheckPend.Render("○"))
+		fmt.Printf("  %s Scribe directory will be created\n", guideCheckPendStyle.Render("○"))
 	}
 
 	if n := len(result.Connections.Repos); n > 0 {
@@ -131,9 +131,9 @@ func displayPrereqs(result prereq.Result) {
 		if n != 1 {
 			suffix = "ies"
 		}
-		fmt.Printf("  %s Connected to %d registr%s\n", guideCheckOK.Render("✓"), n, suffix)
+		fmt.Printf("  %s Connected to %d registr%s\n", guideCheckOKStyle.Render("✓"), n, suffix)
 	} else {
-		fmt.Printf("  %s No team registries connected\n", guideCheckPend.Render("○"))
+		fmt.Printf("  %s No team registries connected\n", guideCheckPendStyle.Render("○"))
 	}
 
 	fmt.Println()
@@ -142,9 +142,9 @@ func displayPrereqs(result prereq.Result) {
 // waitForAuth loops until the user authenticates with GitHub.
 func waitForAuth() error {
 	for {
-		fmt.Println(guideSubtle.Render("  To authenticate, run one of:"))
-		fmt.Println(guideSubtle.Render("    • gh auth login"))
-		fmt.Println(guideSubtle.Render("    • export GITHUB_TOKEN=<your-token>"))
+		fmt.Println(guideSubtleStyle.Render("  To authenticate, run one of:"))
+		fmt.Println(guideSubtleStyle.Render("    • gh auth login"))
+		fmt.Println(guideSubtleStyle.Render("    • export GITHUB_TOKEN=<your-token>"))
 		fmt.Println()
 
 		var retry bool
@@ -157,23 +157,23 @@ func waitForAuth() error {
 
 		result := prereq.Check()
 		if result.GitHubAuth.OK {
-			fmt.Printf("  %s GitHub authenticated (%s)\n\n", guideCheckOK.Render("✓"), result.GitHubAuth.Method)
+			fmt.Printf("  %s GitHub authenticated (%s)\n\n", guideCheckOKStyle.Render("✓"), result.GitHubAuth.Method)
 			return nil
 		}
-		fmt.Printf("  %s Still not authenticated\n\n", guideCheckFail.Render("✗"))
+		fmt.Printf("  %s Still not authenticated\n\n", guideCheckFailStyle.Render("✗"))
 	}
 }
 
 // displayGuideSummary renders the final summary box with next steps.
-func displayGuideSummary(repo, path string) {
+func displayGuideSummary(repo, chosenFlow string) {
 	var content string
 
-	content += guideBold.Render("All set!") + "\n\n"
+	content += guideBoldStyle.Render("All set!") + "\n\n"
 	content += fmt.Sprintf("  Registry    %s\n", repo)
 	content += "\n"
-	content += guideBold.Render("  What's next:") + "\n"
+	content += guideBoldStyle.Render("  What's next:") + "\n"
 
-	switch path {
+	switch chosenFlow {
 	case "join":
 		content += "  • scribe sync       Keep skills up to date\n"
 		content += "  • scribe list       See installed skills and status\n"
@@ -184,7 +184,7 @@ func displayGuideSummary(repo, path string) {
 
 	content += "  • scribe guide      Run this guide again anytime\n"
 
-	fmt.Println(guideSummaryBox.Render(content))
+	fmt.Println(guideSummaryBoxStyle.Render(content))
 }
 
 // runGuideInteractive runs the full interactive guide flow.
@@ -236,8 +236,9 @@ func runGuideInteractive(cmd *cobra.Command) error {
 		displayGuideSummary(repo, "join")
 
 	case "create":
-		createRegistryCmd.SetContext(cmd.Context())
-		if err := runCreateRegistry(createRegistryCmd, nil); err != nil {
+		createCmd := newCreateRegistryCommand()
+		createCmd.SetContext(cmd.Context())
+		if err := runCreateRegistry(createCmd, nil); err != nil {
 			return err
 		}
 		// Show summary with the last connected repo.
@@ -248,6 +249,7 @@ func runGuideInteractive(cmd *cobra.Command) error {
 		}
 
 	case "view":
+		listCmd := newListCommand()
 		listCmd.SetContext(cmd.Context())
 		return runList(listCmd, nil)
 	}

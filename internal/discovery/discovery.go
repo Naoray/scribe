@@ -2,7 +2,9 @@ package discovery
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -69,7 +71,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir.path)
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
@@ -145,15 +147,15 @@ func OnDisk(st *state.State) ([]Skill, error) {
 
 	sort.Slice(skills, func(i, j int) bool {
 		// Group by package (standalone first, then by package name), alpha within.
-		pi, pj := skills[i].Package, skills[j].Package
-		if pi != pj {
-			if pi == "" {
+		pkgI, pkgJ := skills[i].Package, skills[j].Package
+		if pkgI != pkgJ {
+			if pkgI == "" {
 				return true // standalone before packages
 			}
-			if pj == "" {
+			if pkgJ == "" {
 				return false
 			}
-			return pi < pj
+			return pkgI < pkgJ
 		}
 		return skills[i].Name < skills[j].Name
 	})

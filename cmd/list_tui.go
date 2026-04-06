@@ -169,7 +169,7 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.ensureCursorVisible()
+		m = m.ensureCursorVisible()
 	case tea.InterruptMsg:
 		m.quitting = true
 		return m, tea.Quit
@@ -250,19 +250,19 @@ func (m listModel) updateSkills(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
-			m.ensureCursorVisible()
+			m = m.ensureCursorVisible()
 		}
 	case "down", "j":
 		if m.cursor < len(m.filtered)-1 {
 			m.cursor++
-			m.ensureCursorVisible()
+			m = m.ensureCursorVisible()
 		}
 	case "home":
 		m.cursor = 0
-		m.ensureCursorVisible()
+		m = m.ensureCursorVisible()
 	case "end":
 		m.cursor = len(m.filtered) - 1
-		m.ensureCursorVisible()
+		m = m.ensureCursorVisible()
 	case "enter":
 		if len(m.filtered) > 0 {
 			m.phase = listPhaseActions
@@ -686,7 +686,7 @@ func (m listModel) contentHeight() int {
 	return h
 }
 
-func (m *listModel) ensureCursorVisible() {
+func (m listModel) ensureCursorVisible() listModel {
 	visible := m.contentHeight()
 	if visible < 5 {
 		visible = 5
@@ -697,6 +697,7 @@ func (m *listModel) ensureCursorVisible() {
 	if m.cursor >= m.offset+visible {
 		m.offset = m.cursor - visible + 1
 	}
+	return m
 }
 
 func (m listModel) paneWidths() (int, int) {
@@ -741,7 +742,7 @@ func (m listModel) renderDetail(sk discovery.Skill, width int) string {
 
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
 
-	type kv struct{ key, val string }
+	type kv struct{ key, value string }
 	var pairs []kv
 
 	if sk.Version != "" {
@@ -768,10 +769,10 @@ func (m listModel) renderDetail(sk discovery.Skill, width int) string {
 	}
 
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Width(10)
-	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
+	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
 
 	for _, p := range pairs {
-		b.WriteString(keyStyle.Render(p.key) + valStyle.Render(p.val) + "\n")
+		b.WriteString(keyStyle.Render(p.key) + valueStyle.Render(p.value) + "\n")
 	}
 
 	return b.String()

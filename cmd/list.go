@@ -13,20 +13,20 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "Show installed skills and their status vs team loadout",
-	RunE:  runList,
-}
-
-func init() {
-	listCmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	listCmd.Flags().Bool("local", false, "Show locally installed skills (offline, no registry needed)")
-	listCmd.Flags().String("registry", "", "Show only this registry (owner/repo or repo name)")
-	listCmd.Flags().String("group", "", "Jump directly to a group (e.g. gstack, standalone)")
-	listCmd.Flags().Bool("all", false, "List all registries (default behavior)")
-	listCmd.Flags().MarkHidden("all")
-	listCmd.MarkFlagsMutuallyExclusive("local", "registry")
+func newListCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "Show installed skills and their status vs team loadout",
+		RunE:  runList,
+	}
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	cmd.Flags().Bool("local", false, "Show locally installed skills (offline, no registry needed)")
+	cmd.Flags().String("registry", "", "Show only this registry (owner/repo or repo name)")
+	cmd.Flags().String("group", "", "Jump directly to a group (e.g. gstack, standalone)")
+	cmd.Flags().Bool("all", false, "List all registries (default behavior)")
+	cmd.Flags().MarkHidden("all")
+	cmd.MarkFlagsMutuallyExclusive("local", "registry")
+	return cmd
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -61,5 +61,16 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return workflow.Run(cmd.Context(), workflow.ListSteps(), bag)
+	if err := workflow.Run(cmd.Context(), workflow.ListSteps(), bag); err != nil {
+		return err
+	}
+
+	// Render results populated by the workflow step.
+	if bag.LocalSkills != nil {
+		return printLocalTable(os.Stdout, bag.LocalSkills)
+	}
+	if bag.RegistryDiffs != nil {
+		return printMultiListTable(os.Stdout, bag.Repos, bag.RegistryDiffs, bag.State, bag.MultiRegistry)
+	}
+	return nil
 }

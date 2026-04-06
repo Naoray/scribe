@@ -1,3 +1,6 @@
+// Package tools manages AI agent install targets (e.g., Claude, Cursor).
+// Each Tool implementation links skills from the canonical store into
+// the agent's expected directory structure.
 package tools
 
 // SkillFile represents a file to be written to the skill store.
