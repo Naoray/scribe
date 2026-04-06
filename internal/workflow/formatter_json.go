@@ -29,7 +29,7 @@ type registryResult struct {
 }
 
 func newJSONFormatter(out io.Writer) *jsonFormatter {
-	return &jsonFormatter{out: out}
+	return &jsonFormatter{out: out, registries: []registryResult{}}
 }
 
 func (f *jsonFormatter) OnRegistryStart(repo string) {
