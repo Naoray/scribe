@@ -152,13 +152,10 @@ func showActionMenu(cmd *cobra.Command) error {
 		return err
 	}
 
-	// Look up and execute the subcommand directly to avoid recursive rootCmd.Execute().
-	sub, _, err := rootCmd.Find([]string{action})
-	if err != nil {
-		return fmt.Errorf("unknown action: %s", action)
-	}
-	sub.SetArgs(nil)
-	return sub.Execute()
+	// Dispatch to the selected subcommand via SetArgs so Cobra parses the
+	// action name instead of falling back to os.Args (which would re-enter runHub).
+	rootCmd.SetArgs([]string{action})
+	return rootCmd.Execute()
 }
 
 func formatRelativeTime(t time.Time) string {
