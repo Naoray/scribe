@@ -1,9 +1,14 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+
+	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/firstrun"
 )
 
 // Version is set at build time via ldflags.
@@ -14,6 +19,35 @@ var rootCmd = &cobra.Command{
 	Short:   "Team skill sync for AI coding agents",
 	Long:    "Scribe syncs AI coding agent skills across your team via a shared GitHub loadout.",
 	Version: Version,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Skip first-run for meta commands.
+		if cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "migrate" {
+			return nil
+		}
+
+		if !firstrun.IsFirstRun() {
+			return nil
+		}
+
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+
+		firstrun.ApplyBuiltins(cfg)
+
+		if isatty.IsTerminal(os.Stdout.Fd()) {
+			fmt.Println("Welcome to Scribe! Adding built-in community registries...")
+			for _, r := range cfg.EnabledRegistries() {
+				if r.Builtin {
+					fmt.Printf("  + %s\n", r.Repo)
+				}
+			}
+			fmt.Println()
+		}
+
+		return cfg.Save()
+	},
 }
 
 func Execute() {
