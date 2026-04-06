@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,5 +86,59 @@ func TestHubJSONNoState(t *testing.T) {
 	}
 	if got.InstalledCount != 0 {
 		t.Errorf("installed_count: got %d, want 0", got.InstalledCount)
+	}
+}
+
+func TestWriteStatusPlain(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "team/skills", Enabled: true},
+		},
+	}
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{"a": {}, "b": {}},
+	}
+
+	var buf bytes.Buffer
+	writeStatusPlain(&buf, cfg, st)
+
+	out := buf.String()
+	if !strings.Contains(out, "1 connected") {
+		t.Errorf("expected '1 connected', got: %s", out)
+	}
+	if !strings.Contains(out, "2 installed") {
+		t.Errorf("expected '2 installed', got: %s", out)
+	}
+	if !strings.Contains(out, "never") {
+		t.Errorf("expected 'never' for zero LastSync, got: %s", out)
+	}
+}
+
+func TestWriteStatusStyled(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "team/skills", Enabled: true},
+			{Repo: "org/more", Enabled: true},
+		},
+	}
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{"x": {}},
+	}
+
+	var buf bytes.Buffer
+	writeStatusStyled(&buf, cfg, st)
+
+	out := buf.String()
+	if !strings.Contains(out, "2 connected") {
+		t.Errorf("expected '2 connected', got: %s", out)
+	}
+	if !strings.Contains(out, "team/skills") {
+		t.Errorf("expected 'team/skills' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "org/more") {
+		t.Errorf("expected 'org/more' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "1 installed") {
+		t.Errorf("expected '1 installed', got: %s", out)
 	}
 }

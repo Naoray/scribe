@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +20,7 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-const labelWidth = 9
+const labelWidth = 10 // "Registries" is the longest label at 10 chars
 
 func runHub(cmd *cobra.Command, args []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
@@ -87,11 +88,21 @@ func writeHubJSON(w io.Writer, version string, cfg *config.Config, st *state.Sta
 	return enc.Encode(status)
 }
 
+// syncTime returns a human-readable last-sync string. Uses "never" for the
+// zero value rather than workflow.TimeAgo's "never synced" to avoid
+// redundancy when shown beside the "Last sync" label.
+func syncTime(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return workflow.TimeAgo(t)
+}
+
 func writeStatusPlain(w io.Writer, cfg *config.Config, st *state.State) {
 	repos := cfg.TeamRepos()
 	fmt.Fprintf(w, "Registries: %d connected\n", len(repos))
 	fmt.Fprintf(w, "Skills:     %d installed\n", len(st.Installed))
-	fmt.Fprintf(w, "Last sync:  %s\n", workflow.TimeAgo(st.LastSync))
+	fmt.Fprintf(w, "Last sync:  %s\n", syncTime(st.LastSync))
 }
 
 func writeStatusStyled(w io.Writer, cfg *config.Config, st *state.State) {
@@ -103,7 +114,7 @@ func writeStatusStyled(w io.Writer, cfg *config.Config, st *state.State) {
 	lines := []struct{ label, value string }{
 		{"Registries", fmt.Sprintf("%d connected", len(repos))},
 		{"Skills", fmt.Sprintf("%d installed", len(st.Installed))},
-		{"Last sync", workflow.TimeAgo(st.LastSync)},
+		{"Last sync", syncTime(st.LastSync)},
 	}
 
 	if len(repos) > 0 {
@@ -141,7 +152,7 @@ func showActionMenu() error {
 
 	if err != nil {
 		// Ctrl+C or other interrupt — exit cleanly.
-		if err == huh.ErrUserAborted {
+		if errors.Is(err, huh.ErrUserAborted) {
 			os.Exit(130)
 		}
 		return err
