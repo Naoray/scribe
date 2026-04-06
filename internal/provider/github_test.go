@@ -160,3 +160,96 @@ func TestGitHubProviderSatisfiesInterface(t *testing.T) {
 	p := provider.NewGitHubProvider(client)
 	var _ provider.Provider = p
 }
+
+func TestDiscoverChainOrder(t *testing.T) {
+	// When scribe.yaml exists, it takes priority even if marketplace.json also exists.
+	yamlContent := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test
+catalog:
+  - name: from-yaml
+    source: "github:acme/repo@main"
+`
+	client := &stubClient{
+		files: map[string][]byte{
+			"acme/repo/scribe.yaml":                     []byte(yamlContent),
+			"acme/repo/.claude-plugin/marketplace.json": []byte(`{"name":"mp","plugins":[]}`),
+		},
+		treeFiles: []provider.TreeEntry{
+			{Path: "skills/from-tree/SKILL.md", Type: "blob"},
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	entries, err := p.Discover(context.Background(), "acme/repo")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if len(entries) != 1 || entries[0].Name != "from-yaml" {
+		t.Errorf("expected scribe.yaml to win, got %v", entries)
+	}
+}
+
+func TestDiscoverMarketplaceBeforeTreeScan(t *testing.T) {
+	// When no manifest exists but marketplace.json does, use it before tree scan.
+	mpJSON := `{
+		"name": "test",
+		"plugins": [{
+			"name": "plug1",
+			"source": "./plugins/plug1",
+			"skills": ["skills/deploy"]
+		}]
+	}`
+	client := &stubClient{
+		files: map[string][]byte{
+			"acme/repo/.claude-plugin/marketplace.json": []byte(mpJSON),
+		},
+		treeFiles: []provider.TreeEntry{
+			{Path: "other/SKILL.md", Type: "blob"},
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	entries, err := p.Discover(context.Background(), "acme/repo")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if len(entries) != 1 || entries[0].Name != "deploy" {
+		t.Errorf("expected marketplace entry, got %v", entries)
+	}
+	if entries[0].Group != "plug1" {
+		t.Errorf("expected Group=plug1, got %q", entries[0].Group)
+	}
+}
+
+func TestDiscoverTreeScanAsLastResort(t *testing.T) {
+	// When nothing else works, tree scan kicks in.
+	client := &stubClient{
+		treeFiles: []provider.TreeEntry{
+			{Path: "skills/deploy/SKILL.md", Type: "blob"},
+			{Path: "skills/lint/SKILL.md", Type: "blob"},
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	entries, err := p.Discover(context.Background(), "acme/community-skills")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("entries: got %d, want 2", len(entries))
+	}
+
+	names := map[string]bool{}
+	for _, e := range entries {
+		names[e.Name] = true
+	}
+	if !names["deploy"] || !names["lint"] {
+		t.Errorf("expected deploy and lint, got %v", names)
+	}
+}
