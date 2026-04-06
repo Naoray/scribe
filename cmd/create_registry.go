@@ -21,23 +21,23 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var createRegistryCmd = &cobra.Command{
-	Use:   "registry",
-	Short: "Scaffold a new team skills registry on GitHub",
-	Long: `Create a new GitHub repository with a scribe.yaml manifest and connect to it.
+func newCreateRegistryCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "registry",
+		Short: "Scaffold a new team skills registry on GitHub",
+		Long: `Create a new GitHub repository with a scribe.yaml manifest and connect to it.
 
 Examples:
   scribe create registry                                    # interactive
   scribe create registry -t myteam -o MyOrg                 # flags
   scribe create registry -t myteam -o MyOrg -r skills-repo  # custom repo name`,
-	RunE: runCreateRegistry,
-}
-
-func init() {
-	createRegistryCmd.Flags().StringP("team", "t", "", "Team name")
-	createRegistryCmd.Flags().StringP("owner", "o", "", "GitHub org or username")
-	createRegistryCmd.Flags().StringP("repo", "r", "team-registry", "Repository name")
-	createRegistryCmd.Flags().Bool("private", true, "Create a private repository")
+		RunE: runCreateRegistry,
+	}
+	cmd.Flags().StringP("team", "t", "", "Team name")
+	cmd.Flags().StringP("owner", "o", "", "GitHub org or username")
+	cmd.Flags().StringP("repo", "r", "team-registry", "Repository name")
+	cmd.Flags().Bool("private", true, "Create a private repository")
+	return cmd
 }
 
 func runCreateRegistry(cmd *cobra.Command, args []string) error {

@@ -29,14 +29,16 @@ var (
 	migBoxStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 2).BorderForeground(lipgloss.Color("#7C3AED"))
 )
 
-var migrateCmd = &cobra.Command{
-	Use:   "migrate [owner/repo]",
-	Short: "Convert a scribe.toml registry to scribe.yaml",
-	Long: `Fetches the existing scribe.toml from a registry, converts it to the
+func newMigrateCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate [owner/repo]",
+		Short: "Convert a scribe.toml registry to scribe.yaml",
+		Long: `Fetches the existing scribe.toml from a registry, converts it to the
 new scribe.yaml format, and pushes the change as a single commit
 (deleting scribe.toml and creating scribe.yaml).`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runMigrate,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runMigrate,
+	}
 }
 
 func runMigrate(cmd *cobra.Command, args []string) error {

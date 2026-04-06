@@ -30,10 +30,11 @@ type addResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
-var addCmd = &cobra.Command{
-	Use:   "add [name]",
-	Short: "Add a skill to a team registry",
-	Long: `Add a skill to a team registry on GitHub.
+func newAddCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add [name]",
+		Short: "Add a skill to a team registry",
+		Long: `Add a skill to a team registry on GitHub.
 
 If the skill has a known source (synced from another registry), adds a
 source reference. If it's a local-only skill, uploads the files to the
@@ -46,14 +47,13 @@ Examples:
   scribe add cleanup
   scribe add gstack --registry ArtistfyHQ/team-skills
   scribe add --yes cleanup`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runAdd,
-}
-
-func init() {
-	addCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
-	addCmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	addCmd.Flags().String("registry", "", "Target registry (owner/repo)")
+		Args: cobra.MaximumNArgs(1),
+		RunE: runAdd,
+	}
+	cmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	cmd.Flags().String("registry", "", "Target registry (owner/repo)")
+	return cmd
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
@@ -386,8 +386,8 @@ func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *
 // autoSync runs a sync for the target registry after adding skills.
 func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) bool {
 	syncer := &sync.Syncer{
-		Client:  sync.WrapGitHubClient(client),
-		Tools: targets,
+		Client: sync.WrapGitHubClient(client),
+		Tools:  targets,
 		Emit: func(msg any) {
 			if useJSON {
 				return

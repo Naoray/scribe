@@ -12,18 +12,20 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var connectCmd = &cobra.Command{
-	Use:   "connect [owner/repo]",
-	Short: "Connect to a team skills repo",
-	Long: `Connect to a team skills repo so Scribe can sync your local skills.
+func newConnectCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "connect [owner/repo]",
+		Short: "Connect to a team skills repo",
+		Long: `Connect to a team skills repo so Scribe can sync your local skills.
 
 The repo must contain a scribe.toml with a [team] section.
 
 Examples:
   scribe connect ArtistfyHQ/team-skills
   scribe connect                          # interactive prompt`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runConnect,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runConnect,
+	}
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
@@ -63,4 +65,3 @@ func resolveRepo(args []string) (string, error) {
 	}
 	return repo, nil
 }
-
