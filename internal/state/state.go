@@ -2,7 +2,9 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,7 +103,7 @@ func Load() (*State, error) {
 	defer unlockFile(lf)
 
 	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return &State{Installed: make(map[string]InstalledSkill)}, nil
 	}
 	if err != nil {
