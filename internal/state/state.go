@@ -238,8 +238,3 @@ func statePath() (string, error) {
 	return paths.StatePath()
 }
 
-// Dir returns the path to the ~/.scribe directory.
-func Dir() (string, error) {
-	return paths.ScribeDir()
-}
-
