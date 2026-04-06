@@ -98,7 +98,10 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
-		if err == nil && (src.IsBranch() || entry.IsPackage()) {
+		// Only resolve the latest SHA when using the real GitHub client.
+		// When Provider is set, the Client may be a NoopFetcher that cannot make
+		// API calls — silently skipping SHA resolution is correct here.
+		if err == nil && (src.IsBranch() || entry.IsPackage()) && s.Provider == nil {
 			sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
 			if err == nil {
 				latestSHA = sha
@@ -196,7 +199,12 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 					summary.Failed++
 					continue
 				}
-				tFiles = files
+				// Apply the same infrastructure-file filter as the legacy path.
+				for _, f := range files {
+					if shouldInclude(f.Path) {
+						tFiles = append(tFiles, f)
+					}
+				}
 			} else {
 				// Legacy path: direct FetchDirectory.
 				src, err := manifest.ParseSource(sk.Entry.Source)
@@ -266,7 +274,8 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			latestSHA := ""
 			if err == nil {
 				version = src.Ref
-				if src.IsBranch() {
+				// Only resolve SHA when using the real GitHub client (not NoopFetcher).
+				if src.IsBranch() && s.Provider == nil {
 					sha, shaErr := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
 					if shaErr == nil {
 						latestSHA = sha
