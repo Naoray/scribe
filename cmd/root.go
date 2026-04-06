@@ -10,10 +10,12 @@ import (
 var Version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:     "scribe",
-	Short:   "Team skill sync for AI coding agents",
-	Long:    "Scribe syncs AI coding agent skills across your team via a shared GitHub loadout.",
-	Version: Version,
+	Use:          "scribe",
+	Short:        "Team skill sync for AI coding agents",
+	Long:         "Scribe syncs AI coding agent skills across your team via a shared GitHub loadout.",
+	Version:      Version,
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
 }
 
 func Execute() {
@@ -24,6 +26,9 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.RunE = runHub
+	rootCmd.Flags().Bool("json", false, "Output machine-readable JSON")
+
 	rootCmd.AddCommand(connectCmd)
 	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(listCmd)
