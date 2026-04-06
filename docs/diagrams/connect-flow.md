@@ -66,14 +66,14 @@
                            │ FetchFile()         │
                            │                     │
                            │ GitHub Contents API │
-                           │ → scribe.toml       │
+                           │ → scribe.yaml       │
                            └──────────┬──────────┘
                                       │
                                       ▼
                            ┌─────────────────────┐
                            │ manifest.Parse()    │
                            │                     │
-                           │ TOML → Manifest     │
+                           │ YAML → Manifest     │
                            └──────────┬──────────┘
                                       │
                                       ▼

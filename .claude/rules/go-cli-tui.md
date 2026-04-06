@@ -9,17 +9,16 @@ Best practices for Go CLI tools that combine Cobra commands with Bubble Tea v2 (
 ## Architecture: Three-Tier Separation
 
 ```
-cmd/                    # Cobra commands — wire flags, detect TTY, bridge to core
+cmd/                    # Cobra commands + TUI models — wire flags, detect TTY, bridge to core
 internal/
   <domain>/             # UI-agnostic core — emits events, returns errors, never prints
-  ui/                   # Bubble Tea models — pure presentation consuming events
   state/                # Persistent state — atomic file ops
-  targets/              # Output writers — file/symlink strategies
+  tools/                # Install target writers — file/symlink strategies
 ```
 
 ### Rules
 - Core packages (`sync/`, `state/`, `github/`, etc.) MUST NOT import `fmt.Print*`, `os.Stdout`, `bubbletea`, `huh`, or `lipgloss`
-- All output decisions live in `cmd/` or `internal/ui/`
+- All output decisions live in `cmd/`
 - No arrows point upward — core never imports cmd or ui
 - The `cmd/` layer is the bridge: it prepares inputs, wires callbacks, and converts errors to exit codes
 

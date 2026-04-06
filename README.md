@@ -87,27 +87,29 @@ scribe create registry
 **Option B — Manual setup:**
 
 1. Create a GitHub repo (e.g., `ArtistfyHQ/team-skills`) — can be private
-2. Create `scribe.toml` at the root:
+2. Create `scribe.yaml` at the root:
 
-```toml
-[team]
-name = "artistfy"
-description = "Artistfy dev team skill stack"
-
-[skills]
-# External skills from other GitHub repos
-"gstack" = { source = "github:garrytan/gstack@v0.12.9.0" }
-
-# Skills you maintain directly in this repo
-# Path format: github-username/skill-name
-"deploy" = { source = "github:ArtistfyHQ/team-skills@main", path = "krishan/deploy" }
+```yaml
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: artistfy
+  description: Artistfy dev team skill stack
+catalog:
+  - name: gstack
+    source: "github:garrytan/gstack@v0.12.9.0"
+    author: garrytan
+  - name: deploy
+    source: "github:ArtistfyHQ/team-skills@main"
+    path: krishan/deploy
+    author: krishan
 ```
 
 3. Add your skill files at the matching paths:
 
 ```
 ArtistfyHQ/team-skills/
-  scribe.toml
+  scribe.yaml
   krishan/
     deploy/
       SKILL.md       ← your skill file
@@ -124,8 +126,10 @@ ArtistfyHQ/team-skills/
 | `scribe list` | Show all skills: what's installed, what's outdated, what's missing |
 | `scribe add [name]` | Add a skill to the team registry (interactive picker or by name) |
 | `scribe create registry` | Scaffold a new team skills registry on GitHub and connect to it |
+| `scribe explain <skill>` | AI-powered skill explanation (or `--raw` for rendered SKILL.md) |
 | `scribe guide` | Interactive onboarding — walks through connect, sync, and add |
 | `scribe registry list` | Show connected registries with skill counts |
+| `scribe registry enable/disable` | Enable or disable a connected registry |
 | `scribe migrate [registry]` | Convert a `scribe.toml` registry to `scribe.yaml` |
 
 ### scribe list output

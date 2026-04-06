@@ -102,7 +102,7 @@
                                │
                                ▼
                     ┌─────────────────────┐
-                    │ scribe.toml exists? │
+                    │ scribe.yaml exists? │
                     │ (client.FileExists) │
                     └───────┬─────────┬───┘
                            YES        NO
@@ -112,14 +112,14 @@
                             │  │ client.PushFiles()   │
                             │  │                      │
                             │  │ ┌──────────────────┐ │
-                            │  │ │ scribe.toml      │ │
+                            │  │ │ scribe.yaml      │ │
                             │  │ │                  │ │
-                            │  │ │ [team]           │ │
-                            │  │ │ name = "..."     │ │
-                            │  │ │ description = "" │ │
-                            │  │ │                  │ │
-                            │  │ │ [skills]         │ │
-                            │  │ │ # examples...    │ │
+                            │  │ │ apiVersion:      │ │
+                            │  │ │  scribe/v1       │ │
+                            │  │ │ kind: Registry   │ │
+                            │  │ │ team:            │ │
+                            │  │ │  name: "..."     │ │
+                            │  │ │ catalog: []      │ │
                             │  │ └──────────────────┘ │
                             │  │ ┌──────────────────┐ │
                             │  │ │ README.md        │ │

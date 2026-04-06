@@ -67,14 +67,14 @@
              │ FetchFile()         │
              │                     │
              │ GitHub Contents API │
-             │ → scribe.toml      │
+             │ → scribe.yaml      │
              └──────────┬──────────┘
                         │
                         ▼
              ┌─────────────────────┐
              │ manifest.Parse()    │
              │                     │
-             │ TOML unmarshal →    │
+             │ YAML unmarshal →    │
              │ Manifest {          │
              │   Team,             │
              │   Skills map,       │
