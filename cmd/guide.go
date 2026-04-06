@@ -165,7 +165,7 @@ func waitForAuth() error {
 }
 
 // displayGuideSummary renders the final summary box with next steps.
-func displayGuideSummary(repo, path string) {
+func displayGuideSummary(repo, chosenFlow string) {
 	var content string
 
 	content += guideBold.Render("All set!") + "\n\n"
@@ -173,7 +173,7 @@ func displayGuideSummary(repo, path string) {
 	content += "\n"
 	content += guideBold.Render("  What's next:") + "\n"
 
-	switch path {
+	switch chosenFlow {
 	case "join":
 		content += "  • scribe sync       Keep skills up to date\n"
 		content += "  • scribe list       See installed skills and status\n"
