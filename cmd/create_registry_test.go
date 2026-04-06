@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestScaffoldTOML(t *testing.T) {
+func TestScaffoldYAML(t *testing.T) {
 	cases := []struct {
 		name     string
 		team     string
@@ -15,34 +15,40 @@ func TestScaffoldTOML(t *testing.T) {
 		{
 			name:     "simple name",
 			team:     "artistfy",
-			wantTeam: `name = "artistfy"`,
-			wantDesc: `description = "Artistfy dev team skill stack"`,
+			wantTeam: "name: artistfy",
+			wantDesc: `description: "Artistfy dev team skill stack"`,
 		},
 		{
 			name:     "hyphenated name",
 			team:     "my-team",
-			wantTeam: `name = "my-team"`,
-			wantDesc: `description = "My-Team dev team skill stack"`,
+			wantTeam: "name: my-team",
+			wantDesc: `description: "My-Team dev team skill stack"`,
 		},
 		{
 			name:     "already capitalized",
 			team:     "DevOps",
-			wantTeam: `name = "DevOps"`,
-			wantDesc: `description = "DevOps dev team skill stack"`,
+			wantTeam: "name: DevOps",
+			wantDesc: `description: "DevOps dev team skill stack"`,
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := scaffoldTOML(c.team)
+			got := scaffoldYAML(c.team)
 			if !strings.Contains(got, c.wantTeam) {
 				t.Errorf("missing team name line %q in:\n%s", c.wantTeam, got)
 			}
 			if !strings.Contains(got, c.wantDesc) {
 				t.Errorf("missing description line %q in:\n%s", c.wantDesc, got)
 			}
-			if !strings.Contains(got, "[skills]") {
-				t.Error("missing [skills] section")
+			if !strings.Contains(got, "apiVersion: scribe/v1") {
+				t.Error("missing apiVersion")
+			}
+			if !strings.Contains(got, "kind: Registry") {
+				t.Error("missing kind")
+			}
+			if !strings.Contains(got, "catalog:") {
+				t.Error("missing catalog section")
 			}
 		})
 	}
