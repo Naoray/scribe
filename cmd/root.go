@@ -31,4 +31,5 @@ func init() {
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(guideCmd)
 	rootCmd.AddCommand(registryCmd)
+	rootCmd.AddCommand(migrateCmd)
 }
