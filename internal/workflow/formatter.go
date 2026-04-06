@@ -19,6 +19,18 @@ type Formatter interface {
 	OnSkillError(name string, err error)
 	OnSyncComplete(summary sync.SyncCompleteMsg)
 
+	// Package lifecycle
+	OnPackageInstallPrompt(name, command, source string)
+	OnPackageApproved(name string)
+	OnPackageDenied(name string)
+	OnPackageSkipped(name, reason string)
+	OnPackageInstalling(name string)
+	OnPackageInstalled(name string)
+	OnPackageUpdating(name string)
+	OnPackageUpdated(name string)
+	OnPackageError(name string, err error, stderr string)
+	OnPackageHashMismatch(name, oldCmd, newCmd, source string)
+
 	// Flush writes any buffered output (JSON mode). Text mode is a no-op.
 	Flush() error
 }
