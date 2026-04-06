@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
@@ -18,6 +16,7 @@ import (
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/scaffold"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
@@ -61,19 +60,19 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if !cmd.Flags().Changed("private") {
-		if err := confirmOrRequire(&private, "private", "Private repository?", isTTY); err != nil {
+		if err := confirmOrRequire(&private, "Private repository?", isTTY); err != nil {
 			return err
 		}
 	}
 
 	// Validate inputs (#1, #2).
-	if err := validateGitHubName(team, "team name"); err != nil {
+	if err := scaffold.ValidateGitHubName(team, "team name"); err != nil {
 		return err
 	}
-	if err := validateGitHubName(owner, "owner"); err != nil {
+	if err := scaffold.ValidateGitHubName(owner, "owner"); err != nil {
 		return err
 	}
-	if err := validateGitHubName(repo, "repo name"); err != nil {
+	if err := scaffold.ValidateGitHubName(repo, "repo name"); err != nil {
 		return err
 	}
 
@@ -91,7 +90,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 	defer cancel()
 
-	desc := teamDescription(team)
+	desc := scaffold.TeamDescription(team)
 	created, err := client.CreateRepo(ctx, owner, repo, desc, private)
 	if err != nil {
 		if !errors.Is(err, gh.ErrRepoExists) {
@@ -131,8 +130,8 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	if !hasManifest {
 		fmt.Fprintf(os.Stderr, "Pushing initial %s and README.md...\n", manifest.ManifestFilename)
 		files := map[string]string{
-			manifest.ManifestFilename: scaffoldYAML(team),
-			"README.md":              scaffoldREADME(team, repoSlug),
+			manifest.ManifestFilename: scaffold.ScaffoldYAML(team),
+			"README.md":              scaffold.ScaffoldREADME(team, repoSlug),
 		}
 		if err := client.PushFiles(ctx, owner, repo, files, "Initialize skill registry"); err != nil {
 			fmt.Fprintf(os.Stderr, "\nRepo %s was created but the initial commit failed: %v\n", repoSlug, err)
@@ -173,22 +172,11 @@ func promptOrRequire(value *string, flag, title string, isTTY bool) error {
 
 // confirmOrRequire prompts for a bool value in TTY mode. In non-TTY mode it's
 // a no-op (the flag default is used).
-func confirmOrRequire(value *bool, flag, title string, isTTY bool) error {
+func confirmOrRequire(value *bool, title string, isTTY bool) error {
 	if !isTTY {
 		return nil
 	}
 	return huh.NewConfirm().Title(title).Value(value).Run()
-}
-
-// ghNameRe matches valid GitHub owner and repo names (alphanumeric, hyphens, dots, underscores).
-var ghNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
-
-// validateGitHubName checks that s is a valid GitHub owner/repo/team name.
-func validateGitHubName(s, label string) error {
-	if !ghNameRe.MatchString(s) {
-		return fmt.Errorf("%s %q is invalid: use only letters, numbers, hyphens, dots, or underscores", label, s)
-	}
-	return nil
 }
 
 // notEmpty returns a huh validation function that rejects empty strings.
@@ -199,66 +187,4 @@ func notEmpty(field string) func(string) error {
 		}
 		return nil
 	}
-}
-
-func teamDescription(team string) string {
-	return fmt.Sprintf("%s dev team skill stack", titleCase(team))
-}
-
-// scaffoldYAML generates the initial scribe.yaml content for a new registry.
-func scaffoldYAML(team string) string {
-	return fmt.Sprintf(`apiVersion: scribe/v1
-kind: Registry
-team:
-  name: %q
-  description: %q
-
-# Add skills here. Example:
-# catalog:
-#   - name: my-skill
-#     source: "github:owner/repo@version"
-#     author: username
-
-catalog: []
-`, team, teamDescription(team))
-}
-
-// scaffoldREADME generates the initial README.md content for a new registry.
-func scaffoldREADME(team, repo string) string {
-	title := titleCase(team)
-	return fmt.Sprintf(`# %s — Skill Registry
-
-Shared skill registry managed by [Scribe](https://github.com/Naoray/scribe).
-
-## Setup
-
-Install scribe, then connect:
-
-    scribe connect %s
-
-## Sync
-
-Pull the latest skills to your machine:
-
-    scribe sync
-
-## Adding skills
-
-Edit `+"`scribe.yaml`"+` to add or update skills, then push to this repo.
-Teammates run `+"`scribe sync`"+` to pick up changes.
-`, title, repo)
-}
-
-// titleCase capitalises the first letter of each segment separated by hyphens.
-func titleCase(s string) string {
-	parts := strings.Split(s, "-")
-	for i, p := range parts {
-		if len(p) == 0 {
-			continue
-		}
-		runes := []rune(p)
-		runes[0] = unicode.ToUpper(runes[0])
-		parts[i] = string(runes)
-	}
-	return strings.Join(parts, "-")
 }

@@ -1,4 +1,4 @@
-package cmd
+package scaffold
 
 import (
 	"strings"
@@ -34,7 +34,7 @@ func TestScaffoldYAML(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := scaffoldYAML(c.team)
+			got := ScaffoldYAML(c.team)
 			if !strings.Contains(got, c.wantTeam) {
 				t.Errorf("missing team name line %q in:\n%s", c.wantTeam, got)
 			}
@@ -55,7 +55,7 @@ func TestScaffoldYAML(t *testing.T) {
 }
 
 func TestScaffoldREADME(t *testing.T) {
-	got := scaffoldREADME("artistfy", "ArtistfyHQ/team-skills")
+	got := ScaffoldREADME("artistfy", "ArtistfyHQ/team-skills")
 	if !strings.Contains(got, "# Artistfy — Skill Registry") {
 		t.Errorf("missing title in:\n%s", got)
 	}
@@ -67,14 +67,14 @@ func TestScaffoldREADME(t *testing.T) {
 func TestValidateGitHubName(t *testing.T) {
 	valid := []string{"artistfy", "my-team", "DevOps", "user.name", "a123", "my_org"}
 	for _, name := range valid {
-		if err := validateGitHubName(name, "test"); err != nil {
-			t.Errorf("validateGitHubName(%q) = %v, want nil", name, err)
+		if err := ValidateGitHubName(name, "test"); err != nil {
+			t.Errorf("ValidateGitHubName(%q) = %v, want nil", name, err)
 		}
 	}
 	invalid := []string{"", "-start", ".start", "has space", "foo/bar", "new\nline", "tab\there"}
 	for _, name := range invalid {
-		if err := validateGitHubName(name, "test"); err == nil {
-			t.Errorf("validateGitHubName(%q) = nil, want error", name)
+		if err := ValidateGitHubName(name, "test"); err == nil {
+			t.Errorf("ValidateGitHubName(%q) = nil, want error", name)
 		}
 	}
 }
@@ -92,9 +92,9 @@ func TestTitleCase(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			got := titleCase(c.input)
+			got := TitleCase(c.input)
 			if got != c.want {
-				t.Errorf("titleCase(%q) = %q, want %q", c.input, got, c.want)
+				t.Errorf("TitleCase(%q) = %q, want %q", c.input, got, c.want)
 			}
 		})
 	}
