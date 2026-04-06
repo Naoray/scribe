@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
@@ -218,6 +221,43 @@ Rules:
 - If the skill has specific triggers or flags, mention them briefly
 - End with a one-liner on when NOT to use it (if applicable)`
 
+// spinState drives a braille spinner on an io.Writer until stop() is called.
+type spinState struct {
+	once   sync.Once
+	stopCh chan struct{}
+	done   chan struct{}
+}
+
+func startSpinner(w io.Writer, label string) *spinState {
+	s := &spinState{stopCh: make(chan struct{}), done: make(chan struct{})}
+	go func() {
+		defer close(s.done)
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		i := 0
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		fmt.Fprintf(w, "  %s  %s", frames[0], label)
+		for {
+			select {
+			case <-s.stopCh:
+				fmt.Fprintf(w, "\r\033[K") // erase spinner line
+				return
+			case <-ticker.C:
+				i++
+				fmt.Fprintf(w, "\r  %s  %s", frames[i%len(frames)], label)
+			}
+		}
+	}()
+	return s
+}
+
+func (s *spinState) stop() {
+	s.once.Do(func() {
+		close(s.stopCh)
+		<-s.done
+	})
+}
+
 func explainWithAI(w io.Writer, ctx context.Context, skill discovery.Skill, content string) error {
 	prompt := fmt.Sprintf(
 		"%s\n\nHere's the skill file:\n\n---\n%s",
@@ -226,7 +266,8 @@ func explainWithAI(w io.Writer, ctx context.Context, skill discovery.Skill, cont
 	)
 
 	c := buildLLMCmd(ctx, prompt)
-	c.Stdout = w
+	var buf bytes.Buffer
+	c.Stdout = &buf
 	c.Stderr = os.Stderr
 
 	fmt.Fprintln(w)
@@ -236,12 +277,21 @@ func explainWithAI(w io.Writer, ctx context.Context, skill discovery.Skill, cont
 	}
 	fmt.Fprintln(w)
 
-	if err := c.Run(); err != nil {
-		fmt.Fprintln(os.Stderr)
+	spin := startSpinner(os.Stderr, "Thinking...")
+	err := c.Run()
+	spin.stop()
+
+	if err != nil {
 		fmt.Fprintln(os.Stderr, explDimStyle.Render("LLM unavailable, showing skill file instead..."))
 		fmt.Fprintln(os.Stderr)
 		return renderSkillBody(w, content)
 	}
-	fmt.Fprintln(w)
+
+	rendered, renderErr := glamour.Render(buf.String(), "auto")
+	if renderErr != nil {
+		fmt.Fprint(w, buf.String())
+	} else {
+		fmt.Fprint(w, rendered)
+	}
 	return nil
 }
