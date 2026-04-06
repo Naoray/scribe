@@ -8,7 +8,7 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // SkillFile is a single file within a downloaded skill directory.
@@ -25,12 +25,12 @@ type GitHubFetcher interface {
 	LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error)
 }
 
-// Syncer wires manifest, github, targets, and state together.
+// Syncer wires manifest, github, tools, and state together.
 // It emits events via the Emit callback — the caller decides whether
 // to forward them to a Bubbletea program or log them to stdout.
 type Syncer struct {
 	Client  GitHubFetcher
-	Targets []targets.Target
+	Tools []tools.Tool
 	Emit    func(any) // receives events defined in events.go
 }
 
@@ -178,13 +178,13 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.St
 			}
 
 			// Convert sync.SkillFile → targets.SkillFile for the store writer.
-			tFiles := make([]targets.SkillFile, len(files))
+			tFiles := make([]tools.SkillFile, len(files))
 			for i, f := range files {
-				tFiles[i] = targets.SkillFile{Path: f.Path, Content: f.Content}
+				tFiles[i] = tools.SkillFile{Path: f.Path, Content: f.Content}
 			}
 
 			// Write files to canonical store once, then symlink per target.
-			canonicalDir, err := targets.WriteToStore(sk.Name, tFiles)
+			canonicalDir, err := tools.WriteToStore(sk.Name, tFiles)
 			if err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("write store: %w", err)})
 				summary.Failed++
@@ -194,7 +194,7 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.St
 			var paths []string
 			var targetNames []string
 			targetFailed := false
-			for _, t := range s.Targets {
+			for _, t := range s.Tools {
 				links, err := t.Install(sk.Name, canonicalDir)
 				if err != nil {
 					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})

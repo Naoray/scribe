@@ -11,7 +11,7 @@ import (
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // SyncSteps returns the step list for the sync command.
@@ -22,7 +22,7 @@ func SyncSteps() []Step {
 		{"CheckConnected", StepCheckConnected},
 		{"FilterRegistries", StepFilterRegistries},
 		{"ResolveFormatter", StepResolveFormatter},
-		{"ResolveTargets", StepResolveTargets},
+		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepSyncSkills},
 	}
 }
@@ -31,7 +31,7 @@ func SyncSteps() []Step {
 func SyncTail() []Step {
 	return []Step{
 		{"ResolveFormatter", StepResolveFormatter},
-		{"ResolveTargets", StepResolveTargets},
+		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepSyncSkills},
 	}
 }
@@ -88,9 +88,9 @@ func StepResolveFormatter(_ context.Context, b *Bag) error {
 	return nil
 }
 
-func StepResolveTargets(_ context.Context, b *Bag) error {
-	if b.Targets == nil {
-		b.Targets = targets.DefaultTargets()
+func StepResolveTools(_ context.Context, b *Bag) error {
+	if b.Tools == nil {
+		b.Tools = tools.DetectTools()
 	}
 	return nil
 }
@@ -100,7 +100,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 
 	syncer := &sync.Syncer{
 		Client:  sync.WrapGitHubClient(b.Client),
-		Targets: b.Targets,
+		Tools: b.Tools,
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:

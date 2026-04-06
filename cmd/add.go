@@ -19,7 +19,7 @@ import (
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 type addResult struct {
@@ -82,8 +82,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}
 
-	tgts := []targets.Target{targets.ClaudeTarget{}, targets.CursorTarget{}}
-	adder := &add.Adder{Client: client, Targets: tgts}
+	tgts := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
+	adder := &add.Adder{Client: client, Tools: tgts}
 
 	// Resolve target registry.
 	targetRepo, err := resolveTargetRegistry(addRegistry, cfg.TeamRepos(), isTTY)
@@ -155,7 +155,7 @@ func runAddByName(
 	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
-	tgts []targets.Target,
+	tgts []tools.Tool,
 	useJSON bool,
 	isTTY bool,
 	skipConfirm bool,
@@ -208,7 +208,7 @@ func runAddInteractive(
 	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
-	tgts []targets.Target,
+	tgts []tools.Tool,
 	useJSON bool,
 	skipConfirm bool,
 ) error {
@@ -372,7 +372,7 @@ func wireAddEmit(adder *add.Adder, targetRepo string, useJSON bool) *[]addResult
 }
 
 // finishAdd runs auto-sync and optionally outputs JSON after add completes.
-func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *state.State, client *gh.Client, tgts []targets.Target, useJSON bool) error {
+func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *state.State, client *gh.Client, tgts []tools.Tool, useJSON bool) error {
 	synced := autoSync(ctx, targetRepo, st, client, tgts, useJSON)
 	if useJSON {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
@@ -384,10 +384,10 @@ func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *
 }
 
 // autoSync runs a sync for the target registry after adding skills.
-func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, tgts []targets.Target, useJSON bool) bool {
+func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, tgts []tools.Tool, useJSON bool) bool {
 	syncer := &sync.Syncer{
 		Client:  sync.WrapGitHubClient(client),
-		Targets: tgts,
+		Tools: tgts,
 		Emit: func(msg any) {
 			if useJSON {
 				return

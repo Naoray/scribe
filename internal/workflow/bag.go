@@ -6,7 +6,7 @@ import (
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // Bag carries all intermediate state across workflow steps.
@@ -22,7 +22,7 @@ type Bag struct {
 	Config    *config.Config
 	State     *state.State
 	Client    *gh.Client
-	Targets   []targets.Target
+	Tools     []tools.Tool
 	Repos     []string // filtered registries to process
 	Formatter Formatter
 

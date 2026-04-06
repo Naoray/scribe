@@ -25,7 +25,7 @@ func ConnectSteps() []Step {
 		{"LoadState", StepLoadState},
 		{"SetSingleRepo", StepSetSingleRepo},
 		{"ResolveFormatter", StepResolveFormatter},
-		{"ResolveTargets", StepResolveTargets},
+		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepConnectSyncError},
 	}
 }

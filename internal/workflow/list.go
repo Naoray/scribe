@@ -14,7 +14,7 @@ import (
 	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // ListSteps returns the step list for the list command.
@@ -42,7 +42,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 		return err
 	}
 
-	syncer := &sync.Syncer{Client: sync.WrapGitHubClient(b.Client), Targets: []targets.Target{}}
+	syncer := &sync.Syncer{Client: sync.WrapGitHubClient(b.Client), Tools: []tools.Tool{}}
 	multiRegistry := len(b.Repos) > 1
 
 	if useJSON {
