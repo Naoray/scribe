@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
@@ -96,14 +97,18 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		})
 	}
 
-	// Extra skills (installed but not in catalog).
+	// Extra skills (installed but not in catalog) — scoped to this registry only.
 	catalogNames := make(map[string]bool, len(m.Catalog))
 	for _, e := range m.Catalog {
-		catalogNames[registrySlug+"/"+e.Name] = true
+		catalogNames[e.Name] = true
 	}
 	extraNames := make([]string, 0)
 	for name := range st.Installed {
-		if !catalogNames[name] {
+		if !strings.HasPrefix(name, registrySlug+"/") {
+			continue // belongs to a different registry
+		}
+		baseName := strings.TrimPrefix(name, registrySlug+"/")
+		if !catalogNames[baseName] {
 			extraNames = append(extraNames, name)
 		}
 	}
@@ -204,20 +209,20 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 			qualifiedName := registrySlug + "/" + sk.Name
 			var paths []string
-			var targetNames []string
-			targetFailed := false
+			var toolNames []string
+			toolFailed := false
 			for _, t := range s.Tools {
 				links, err := t.Install(qualifiedName, canonicalDir)
 				if err != nil {
 					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
 					summary.Failed++
-					targetFailed = true
+					toolFailed = true
 					break
 				}
 				paths = append(paths, links...)
-				targetNames = append(targetNames, t.Name())
+				toolNames = append(toolNames, t.Name())
 			}
-			if targetFailed {
+			if toolFailed {
 				continue
 			}
 
@@ -233,7 +238,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				Version:   src.Ref,
 				CommitSHA: latestSHA,
 				Source:    sk.Entry.Source,
-				Tools:     targetNames,
+				Tools:     toolNames,
 				Paths:     paths,
 			})
 			// Save after each successful install — partial sync is safe.

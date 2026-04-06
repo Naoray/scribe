@@ -165,18 +165,21 @@ func parseAndMigrate(data []byte) (*State, error) {
 	return s, nil
 }
 
-// namespaceKey ensures every skill key contains an owner prefix.
+// LocalNamespace is the namespace prefix for skills without a registry.
+const LocalNamespace = "local"
+
+// namespaceKey ensures every skill key contains a namespace prefix.
 // Already-namespaced keys (containing "/") pass through unchanged.
-// Bare keys get prefixed with the first registry's owner or "local/".
+// Bare keys get prefixed with the slugified registry or "local/".
 func namespaceKey(name string, registries []string) string {
 	if strings.Contains(name, "/") {
 		return name
 	}
 	if len(registries) > 0 {
-		owner, _, _ := strings.Cut(registries[0], "/")
-		return owner + "/" + name
+		slug := strings.ReplaceAll(registries[0], "/", "-")
+		return slug + "/" + name
 	}
-	return "local/" + name
+	return LocalNamespace + "/" + name
 }
 
 // Save writes state to disk atomically (write temp file, rename).
@@ -207,6 +210,7 @@ func (s *State) Save() error {
 		return fmt.Errorf("write state: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("save state: %w", err)
 	}
 	return nil

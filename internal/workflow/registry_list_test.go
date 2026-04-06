@@ -11,14 +11,14 @@ import (
 )
 
 func TestCountSkillsPerRegistry(t *testing.T) {
-	// Keys are namespaced: owner/skill. CountSkillsPerRegistry matches
-	// the owner prefix against each repo's owner.
+	// Keys are namespaced: slugified-registry/skill. CountSkillsPerRegistry matches
+	// the slugified registry prefix against each repo.
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"ArtistfyHQ/browse": {},
-			"ArtistfyHQ/deploy": {},
-			"Naoray/lint":       {},
-			"local/orphan":      {},
+			"ArtistfyHQ-skills/browse": {},
+			"ArtistfyHQ-skills/deploy": {},
+			"Naoray-my-skills/lint":    {},
+			"local/orphan":             {},
 		},
 	}
 
@@ -31,11 +31,6 @@ func TestCountSkillsPerRegistry(t *testing.T) {
 			"multi-registry counts",
 			[]string{"ArtistfyHQ/skills", "Naoray/my-skills"},
 			map[string]int{"ArtistfyHQ/skills": 2, "Naoray/my-skills": 1},
-		},
-		{
-			"case-insensitive match",
-			[]string{"artistfyhq/skills"},
-			map[string]int{"artistfyhq/skills": 2},
 		},
 		{
 			"no matching skills",
@@ -67,8 +62,8 @@ func TestPrintRegistryJSON_Shape(t *testing.T) {
 	st := &state.State{
 		LastSync: syncTime,
 		Installed: map[string]state.InstalledSkill{
-			"Foo/browse": {},
-			"Foo/deploy": {},
+			"Foo-bar/browse": {},
+			"Foo-bar/deploy": {},
 		},
 	}
 

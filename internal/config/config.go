@@ -48,7 +48,7 @@ func (c *Config) TeamRepos() []string {
 	return repos
 }
 
-// AddRegistry appends a registry if not already present (case-insensitive).
+// AddRegistry appends a registry if not already present.
 func (c *Config) AddRegistry(repo string) {
 	for _, r := range c.Registries {
 		if r.Repo == repo {

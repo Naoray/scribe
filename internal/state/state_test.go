@@ -203,16 +203,16 @@ func TestMigrationNamespacesKeys(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Bare key "gstack" should be namespaced to "ArtistfyHQ/gstack" using Registries[0].
-	if _, ok := s.Installed["ArtistfyHQ/gstack"]; !ok {
-		t.Errorf("expected namespaced key ArtistfyHQ/gstack, got keys: %v", installedKeys(s))
+	// Bare key "gstack" should be namespaced to "ArtistfyHQ-team-skills/gstack" using slugified Registries[0].
+	if _, ok := s.Installed["ArtistfyHQ-team-skills/gstack"]; !ok {
+		t.Errorf("expected namespaced key ArtistfyHQ-team-skills/gstack, got keys: %v", installedKeys(s))
 	}
 	if _, ok := s.Installed["gstack"]; ok {
 		t.Error("bare key 'gstack' should have been removed after namespacing")
 	}
 
 	// Targets should be migrated to Tools.
-	skill := s.Installed["ArtistfyHQ/gstack"]
+	skill := s.Installed["ArtistfyHQ-team-skills/gstack"]
 	if len(skill.Tools) != 1 || skill.Tools[0] != "claude" {
 		t.Errorf("expected Tools=[claude], got %v", skill.Tools)
 	}
@@ -311,12 +311,12 @@ func TestStateNamespaceKeys(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Bare keys should be namespaced using Registries[0].
-	if _, ok := s.Installed["ArtistfyHQ/deploy"]; !ok {
-		t.Errorf("expected namespaced key ArtistfyHQ/deploy, got keys: %v", installedKeys(s))
+	// Bare keys should be namespaced using slugified Registries[0].
+	if _, ok := s.Installed["ArtistfyHQ-team-skills/deploy"]; !ok {
+		t.Errorf("expected namespaced key ArtistfyHQ-team-skills/deploy, got keys: %v", installedKeys(s))
 	}
-	if _, ok := s.Installed["ArtistfyHQ/recap"]; !ok {
-		t.Errorf("expected namespaced key ArtistfyHQ/recap, got keys: %v", installedKeys(s))
+	if _, ok := s.Installed["ArtistfyHQ-team-skills/recap"]; !ok {
+		t.Errorf("expected namespaced key ArtistfyHQ-team-skills/recap, got keys: %v", installedKeys(s))
 	}
 
 	// Bare keys should be gone.
@@ -365,7 +365,7 @@ func TestStateMigrateIdempotent(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
 		"last_sync": "2026-03-15T10:00:00Z",
 		"installed": {
-			"ArtistfyHQ/deploy": {
+			"ArtistfyHQ-team-skills/deploy": {
 				"version": "v1.0.0",
 				"source": "github:ArtistfyHQ/team-skills@v1.0.0",
 				"installed_at": "2026-03-10T12:00:00Z",
@@ -381,8 +381,8 @@ func TestStateMigrateIdempotent(t *testing.T) {
 	}
 
 	// Should not double-namespace.
-	if _, ok := s.Installed["ArtistfyHQ/deploy"]; !ok {
-		t.Errorf("expected key to remain ArtistfyHQ/deploy, got keys: %v", installedKeys(s))
+	if _, ok := s.Installed["ArtistfyHQ-team-skills/deploy"]; !ok {
+		t.Errorf("expected key to remain ArtistfyHQ-team-skills/deploy, got keys: %v", installedKeys(s))
 	}
 	if len(s.Installed) != 1 {
 		t.Errorf("expected 1 installed skill, got %d", len(s.Installed))

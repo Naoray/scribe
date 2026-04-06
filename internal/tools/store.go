@@ -18,6 +18,14 @@ func SlugifyRegistry(repo string) string {
 // Returns the canonical directory path.
 // Called once per skill before any target links are created.
 func WriteToStore(registrySlug, skillName string, files []SkillFile) (string, error) {
+	// Validate inputs don't escape the store directory.
+	if strings.Contains(registrySlug, "..") {
+		return "", fmt.Errorf("invalid registry slug %q: contains path traversal", registrySlug)
+	}
+	if strings.Contains(skillName, "..") {
+		return "", fmt.Errorf("invalid skill name %q: contains path traversal", skillName)
+	}
+
 	base, err := StoreDir()
 	if err != nil {
 		return "", err
@@ -34,7 +42,11 @@ func WriteToStore(registrySlug, skillName string, files []SkillFile) (string, er
 	}
 
 	for _, f := range files {
+		// Validate file path doesn't escape the skill directory.
 		dest := filepath.Join(skillDir, f.Path)
+		if !strings.HasPrefix(filepath.Clean(dest), filepath.Clean(skillDir)+string(filepath.Separator)) && filepath.Clean(dest) != filepath.Clean(skillDir) {
+			return "", fmt.Errorf("invalid file path %q: escapes skill directory", f.Path)
+		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return "", fmt.Errorf("create dir for %s: %w", f.Path, err)
 		}
