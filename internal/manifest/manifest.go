@@ -53,6 +53,7 @@ type Entry struct {
 	Author      string `yaml:"author,omitempty"`
 	Description string `yaml:"description,omitempty"`
 	Timeout     int    `yaml:"timeout,omitempty"`
+	Group       string `yaml:"-"` // display-only, set by marketplace discovery
 }
 
 // Maintainer returns the entry's author.
