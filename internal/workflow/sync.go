@@ -9,6 +9,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -43,6 +44,10 @@ func StepLoadConfig(ctx context.Context, b *Bag) error {
 	}
 	b.Config = cfg
 	b.Client = gh.NewClient(ctx, cfg.Token)
+
+	// Wrap the GitHub client into a Provider for discovery/fetch.
+	b.Provider = provider.NewGitHubProvider(provider.WrapGitHubClient(b.Client))
+
 	return nil
 }
 
@@ -99,8 +104,9 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	resolved := map[string]sync.SkillStatus{}
 
 	syncer := &sync.Syncer{
-		Client:  sync.WrapGitHubClient(b.Client),
-		Tools: b.Tools,
+		Client:   sync.WrapGitHubClient(b.Client),
+		Provider: b.Provider,
+		Tools:    b.Tools,
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:

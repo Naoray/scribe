@@ -1,6 +1,7 @@
 package manifest_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/manifest"
@@ -392,6 +393,38 @@ team:
 	}
 	if len(m.Catalog) != 0 {
 		t.Errorf("expected empty Catalog, got %d entries", len(m.Catalog))
+	}
+}
+
+func TestEntryGroupField(t *testing.T) {
+	// Group is display-only and not serialized to YAML.
+	const input = `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test
+catalog:
+  - name: my-skill
+    source: "github:owner/repo@main"
+`
+	m, err := manifest.Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// Set Group programmatically (not from YAML).
+	m.Catalog[0].Group = "my-plugin"
+	if m.Catalog[0].Group != "my-plugin" {
+		t.Errorf("Group: got %q", m.Catalog[0].Group)
+	}
+
+	// Verify Group is not serialized.
+	out, err := m.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if strings.Contains(string(out), "group") {
+		t.Errorf("Group should not be serialized, got:\n%s", out)
 	}
 }
 

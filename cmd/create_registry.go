@@ -17,6 +17,7 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
@@ -143,9 +144,10 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	// Connect to the newly created registry via the connect workflow tail.
 	// Config and Client are already loaded — skip LoadConfig.
 	bag := &workflow.Bag{
-		RepoArg: repoSlug,
-		Config:  cfg,
-		Client:  client,
+		RepoArg:  repoSlug,
+		Config:   cfg,
+		Client:   client,
+		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
 	}
 	if err := workflow.Run(ctx, workflow.ConnectTail(), bag); err != nil {
 		fmt.Fprintf(os.Stderr, "\nRepo %s was created but connecting failed: %v\n", repoSlug, err)

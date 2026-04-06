@@ -267,6 +267,46 @@ func (c *Client) FileExists(ctx context.Context, owner, repo, path, ref string) 
 	return true, nil
 }
 
+// TreeEntry represents a single entry from a recursive Git tree listing.
+type TreeEntry struct {
+	Path string // full path from repo root (e.g. "skills/deploy/SKILL.md")
+	Type string // "blob" or "tree"
+	SHA  string
+}
+
+// GetTree returns a recursive tree listing for the given ref.
+// Uses the GitHub Trees API with recursive=true for a single API call.
+func (c *Client) GetTree(ctx context.Context, owner, repo, ref string) ([]TreeEntry, error) {
+	tree, _, err := c.gh.Git.GetTree(ctx, owner, repo, ref, true)
+	if err != nil {
+		return nil, wrapErr(err, fmt.Sprintf("%s/%s tree@%s", owner, repo, ref))
+	}
+
+	entries := make([]TreeEntry, 0, len(tree.Entries))
+	for _, e := range tree.Entries {
+		entries = append(entries, TreeEntry{
+			Path: e.GetPath(),
+			Type: e.GetType(),
+			SHA:  e.GetSHA(),
+		})
+	}
+	return entries, nil
+}
+
+// HasPushAccess checks whether the authenticated user has push (write) access
+// to the given repository. Returns false if unauthenticated or access denied.
+func (c *Client) HasPushAccess(ctx context.Context, owner, repo string) (bool, error) {
+	if !c.authenticated {
+		return false, nil
+	}
+	r, _, err := c.gh.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return false, wrapErr(err, fmt.Sprintf("check access %s/%s", owner, repo))
+	}
+	perms := r.GetPermissions()
+	return perms["push"] || perms["admin"], nil
+}
+
 // wrapErr produces user-friendly errors for common GitHub API failures.
 func wrapErr(err error, context string) error {
 	if err == nil {

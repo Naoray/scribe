@@ -114,7 +114,7 @@ func TestSave(t *testing.T) {
 
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: "github"},
+			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: config.RegistryTypeGitHub},
 		},
 		Token: "ghp_test",
 	}
@@ -156,8 +156,8 @@ func TestSaveRoundTrip(t *testing.T) {
 
 	original := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "a/b", Enabled: true, Type: "github"},
-			{Repo: "c/d", Enabled: true, Type: "github"},
+			{Repo: "a/b", Enabled: true, Type: config.RegistryTypeGitHub},
+			{Repo: "c/d", Enabled: true, Type: config.RegistryTypeGitHub},
 		},
 		Token: "tok",
 	}
@@ -334,7 +334,7 @@ func TestSaveYAML(t *testing.T) {
 
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: "github", Writable: true},
+			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: config.RegistryTypeGitHub, Writable: true},
 		},
 		Tools: []config.ToolConfig{
 			{Name: "claude", Enabled: true},
@@ -370,6 +370,115 @@ func TestSaveYAML(t *testing.T) {
 	}
 	if loaded.Token != "ghp_save_test" {
 		t.Errorf("Token round-trip: got %q", loaded.Token)
+	}
+}
+
+// --- Registry helper tests (Task 8) ---
+
+func TestRegistryConfigDefaults(t *testing.T) {
+	rc := config.RegistryConfig{
+		Repo:    "acme/team-skills",
+		Enabled: true,
+	}
+	if !rc.Enabled {
+		t.Error("expected enabled")
+	}
+	if rc.Builtin {
+		t.Error("expected not builtin by default")
+	}
+}
+
+func TestRegistryType(t *testing.T) {
+	cases := []struct {
+		name     string
+		regType  string
+		wantTeam bool
+	}{
+		{"team registry", config.RegistryTypeTeam, true},
+		{"community registry", config.RegistryTypeCommunity, false},
+		{"marketplace", "marketplace", false},
+		{"package", "package", false},
+		{"github default", config.RegistryTypeGitHub, false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rc := config.RegistryConfig{
+				Repo: "owner/repo",
+				Type: c.regType,
+			}
+			if rc.IsTeam() != c.wantTeam {
+				t.Errorf("IsTeam: got %v, want %v", rc.IsTeam(), c.wantTeam)
+			}
+		})
+	}
+}
+
+func TestFindRegistry(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "acme/team-skills", Enabled: true},
+			{Repo: "acme/community", Enabled: false},
+		},
+	}
+
+	found := cfg.FindRegistry("acme/team-skills")
+	if found == nil {
+		t.Fatal("expected to find registry")
+	}
+	if found.Repo != "acme/team-skills" {
+		t.Errorf("repo: got %q", found.Repo)
+	}
+
+	// Case-insensitive.
+	found = cfg.FindRegistry("ACME/Team-Skills")
+	if found == nil {
+		t.Fatal("expected case-insensitive match")
+	}
+
+	// Not found.
+	if cfg.FindRegistry("nonexistent/repo") != nil {
+		t.Error("expected nil for nonexistent repo")
+	}
+}
+
+func TestAddRegistryUpdatesExisting(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "acme/skills", Enabled: true, Type: config.RegistryTypeGitHub},
+		},
+	}
+
+	cfg.AddRegistry(config.RegistryConfig{
+		Repo:     "acme/skills",
+		Enabled:  true,
+		Type:     config.RegistryTypeTeam,
+		Writable: true,
+	})
+
+	if len(cfg.Registries) != 1 {
+		t.Fatalf("expected 1 registry, got %d", len(cfg.Registries))
+	}
+	if cfg.Registries[0].Type != config.RegistryTypeTeam {
+		t.Errorf("type: got %q, want %q", cfg.Registries[0].Type, config.RegistryTypeTeam)
+	}
+	if !cfg.Registries[0].Writable {
+		t.Error("expected writable to be updated")
+	}
+}
+
+func TestEnabledRegistries(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "acme/enabled", Enabled: true},
+			{Repo: "acme/disabled", Enabled: false},
+			{Repo: "acme/also-enabled", Enabled: true},
+		},
+	}
+
+	enabled := cfg.EnabledRegistries()
+	if len(enabled) != 2 {
+		t.Fatalf("expected 2 enabled, got %d", len(enabled))
 	}
 }
 

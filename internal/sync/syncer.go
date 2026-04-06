@@ -8,16 +8,13 @@ import (
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
 // SkillFile is a single file within a downloaded skill directory.
-// Mirrors github.SkillFile so the sync package does not import github directly.
-type SkillFile struct {
-	Path    string
-	Content []byte
-}
+type SkillFile = tools.SkillFile
 
 // GitHubFetcher abstracts GitHub API operations needed by the sync engine.
 type GitHubFetcher interface {
@@ -30,13 +27,32 @@ type GitHubFetcher interface {
 // It emits events via the Emit callback — the caller decides whether
 // to forward them to a Bubbletea program or log them to stdout.
 type Syncer struct {
-	Client  GitHubFetcher
-	Tools []tools.Tool
-	Emit    func(any) // receives events defined in events.go
+	Client   GitHubFetcher
+	Provider provider.Provider // optional — if set, used for discovery and fetch
+	Tools    []tools.Tool
+	Emit     func(any) // receives events defined in events.go
 }
 
-// FetchManifest tries scribe.yaml first, falls back to scribe.toml with warning.
+// FetchManifest tries Provider.Discover first (if set), then falls back to
+// direct file fetch with scribe.yaml → scribe.toml fallback.
 func (s *Syncer) FetchManifest(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
+	if s.Provider != nil {
+		result, err := s.Provider.Discover(ctx, owner+"/"+repo)
+		if err != nil {
+			return nil, err
+		}
+		m := &manifest.Manifest{
+			APIVersion: "scribe/v1",
+			Kind:       "Registry",
+			Catalog:    result.Entries,
+		}
+		if result.IsTeam {
+			m.Team = &manifest.Team{Name: owner + "/" + repo}
+		}
+		return m, nil
+	}
+
+	// Legacy path: direct file fetch.
 	raw, err := s.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
 	if err == nil {
 		return manifest.Parse(raw)
@@ -70,6 +86,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 
 	registrySlug := tools.SlugifyRegistry(teamRepo)
 	var statuses []SkillStatus
+	shaCache := map[string]string{}
 
 	for i := range m.Catalog {
 		entry := &m.Catalog[i]
@@ -78,10 +95,19 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
+		// Resolve the latest SHA for branch-pinned and package entries.
+		// If Client is a NoopFetcher (or the API is unavailable), LatestCommitSHA
+		// returns an error and latestSHA stays ""; compareEntry handles that gracefully.
 		if err == nil && (src.IsBranch() || entry.IsPackage()) {
-			sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
-			if err == nil {
-				latestSHA = sha
+			key := src.Owner + "/" + src.Repo + "/" + src.Ref
+			if cached, ok := shaCache[key]; ok {
+				latestSHA = cached
+			} else {
+				sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
+				if err == nil {
+					shaCache[key] = sha
+					latestSHA = sha
+				}
 			}
 		}
 
@@ -94,6 +120,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 			LoadoutRef: loadoutRef(*entry),
 			Maintainer: entry.Maintainer(),
 			IsPackage:  entry.IsPackage(),
+			LatestSHA:  latestSHA,
 		})
 	}
 
@@ -166,37 +193,48 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 			s.emit(SkillDownloadingMsg{Name: sk.Name})
 
-			src, err := manifest.ParseSource(sk.Entry.Source)
-			if err != nil {
-				s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
-				summary.Failed++
-				continue
-			}
+			var tFiles []tools.SkillFile
 
-			skillPath := sk.Entry.Path
-			if skillPath == "" {
-				skillPath = sk.Name
-			}
-
-			files, err := s.Client.FetchDirectory(ctx, src.Owner, src.Repo, skillPath, src.Ref)
-			if err != nil {
-				s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
-				summary.Failed++
-				continue
-			}
-
-			// Filter out repo infrastructure files that leak when skill path == repo root.
-			var filtered []SkillFile
-			for _, f := range files {
-				if shouldInclude(f.Path) {
-					filtered = append(filtered, f)
+			if s.Provider != nil {
+				// Use Provider.Fetch — returns []tools.SkillFile directly.
+				files, err := s.Provider.Fetch(ctx, *sk.Entry)
+				if err != nil {
+					s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
+					summary.Failed++
+					continue
 				}
-			}
+				// Apply the same infrastructure-file filter as the legacy path.
+				for _, f := range files {
+					if shouldInclude(f.Path) {
+						tFiles = append(tFiles, f)
+					}
+				}
+			} else {
+				// Legacy path: direct FetchDirectory.
+				src, err := manifest.ParseSource(sk.Entry.Source)
+				if err != nil {
+					s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
+					summary.Failed++
+					continue
+				}
 
-			// Convert sync.SkillFile → tools.SkillFile for the store writer.
-			tFiles := make([]tools.SkillFile, len(filtered))
-			for i, f := range filtered {
-				tFiles[i] = tools.SkillFile{Path: f.Path, Content: f.Content}
+				skillPath := sk.Entry.Path
+				if skillPath == "" {
+					skillPath = sk.Name
+				}
+
+				files, err := s.Client.FetchDirectory(ctx, src.Owner, src.Repo, skillPath, src.Ref)
+				if err != nil {
+					s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
+					summary.Failed++
+					continue
+				}
+
+				for _, f := range files {
+					if shouldInclude(f.Path) {
+						tFiles = append(tFiles, f)
+					}
+				}
 			}
 
 			// Write files to canonical store once, then symlink per target.
@@ -226,17 +264,16 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				continue
 			}
 
-			latestSHA := ""
-			if src.IsBranch() {
-				sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
-				if err == nil {
-					latestSHA = sha
-				}
+			// Parse source for version display.
+			src, err := manifest.ParseSource(sk.Entry.Source)
+			version := "unknown"
+			if err == nil {
+				version = src.Ref
 			}
 
 			st.RecordInstall(qualifiedName, state.InstalledSkill{
-				Version:   src.Ref,
-				CommitSHA: latestSHA,
+				Version:   version,
+				CommitSHA: sk.LatestSHA,
 				Source:    sk.Entry.Source,
 				Tools:     toolNames,
 				Paths:     paths,
@@ -248,7 +285,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 			s.emit(SkillInstalledMsg{
 				Name:    sk.Name,
-				Version: src.Ref,
+				Version: version,
 				Updated: sk.Status == StatusOutdated,
 			})
 			if sk.Status == StatusOutdated {

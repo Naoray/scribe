@@ -5,6 +5,7 @@ import (
 	"github.com/Naoray/scribe/internal/discovery"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -25,6 +26,9 @@ type Bag struct {
 	Tools     []tools.Tool
 	Repos     []string // filtered registries to process
 	Formatter Formatter
+
+	// Provider is the skill discovery/fetch backend. Set by StepLoadConfig.
+	Provider provider.Provider
 
 	// Connect-specific
 	RepoArg string // resolved owner/repo from args or prompt

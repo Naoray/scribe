@@ -43,7 +43,11 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 		return err
 	}
 
-	syncer := &sync.Syncer{Client: sync.WrapGitHubClient(b.Client), Tools: []tools.Tool{}}
+	syncer := &sync.Syncer{
+		Client:   sync.WrapGitHubClient(b.Client),
+		Provider: b.Provider,
+		Tools:    []tools.Tool{},
+	}
 	multiRegistry := len(b.Repos) > 1
 
 	if useJSON {
