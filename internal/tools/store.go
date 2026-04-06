@@ -19,10 +19,10 @@ func SlugifyRegistry(repo string) string {
 // Called once per skill before any target links are created.
 func WriteToStore(registrySlug, skillName string, files []SkillFile) (string, error) {
 	// Validate inputs don't escape the store directory.
-	if strings.Contains(registrySlug, "..") {
+	if strings.Contains(registrySlug, "..") || filepath.IsAbs(registrySlug) {
 		return "", fmt.Errorf("invalid registry slug %q: contains path traversal", registrySlug)
 	}
-	if strings.Contains(skillName, "..") {
+	if strings.Contains(skillName, "..") || filepath.IsAbs(skillName) {
 		return "", fmt.Errorf("invalid skill name %q: contains path traversal", skillName)
 	}
 
