@@ -26,7 +26,7 @@ func TestTimeAgo(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := timeAgo(c.t)
+			got := TimeAgo(c.t)
 			if got != c.want {
 				t.Errorf("timeAgo(%v) = %q, want %q", c.t, got, c.want)
 			}
