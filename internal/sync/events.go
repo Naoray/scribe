@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"strings"
+
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
 )
@@ -39,6 +41,55 @@ type SkillStatus struct {
 	LoadoutRef string                 // the ref from the manifest (e.g. "v1.0.0", "main")
 	Maintainer string
 	IsPackage  bool
+}
+
+// DisplayVersion returns the best human-readable version for this skill.
+func (sk SkillStatus) DisplayVersion() string {
+	if sk.LoadoutRef != "" {
+		return sk.LoadoutRef
+	}
+	if sk.Installed != nil {
+		return sk.Installed.DisplayVersion()
+	}
+	return ""
+}
+
+// DisplayAuthor returns the author or "—" if unknown.
+func (sk SkillStatus) DisplayAuthor() string {
+	if sk.Maintainer != "" {
+		return sk.Maintainer
+	}
+	return "—"
+}
+
+// DisplayAgents returns the comma-separated list of installed targets.
+func (sk SkillStatus) DisplayAgents() string {
+	if sk.Installed != nil && len(sk.Installed.Targets) > 0 {
+		return strings.Join(sk.Installed.Targets, ", ")
+	}
+	return ""
+}
+
+// StatusDisplay holds the icon and label for a status value.
+type StatusDisplay struct {
+	Icon  string
+	Label string
+}
+
+// Display returns the icon and label for rendering this status.
+func (s Status) Display() StatusDisplay {
+	switch s {
+	case StatusCurrent:
+		return StatusDisplay{"✓", "current"}
+	case StatusOutdated:
+		return StatusDisplay{"↑", "update"}
+	case StatusMissing:
+		return StatusDisplay{"○", "missing"}
+	case StatusExtra:
+		return StatusDisplay{"?", "extra"}
+	default:
+		return StatusDisplay{"?", "unknown"}
+	}
 }
 
 // --- Events (tea.Msg) emitted during sync ---
