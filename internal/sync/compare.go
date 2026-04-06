@@ -31,8 +31,12 @@ func compareEntry(entry manifest.Entry, installed *state.InstalledSkill, latestS
 	}
 
 	// Packages always use SHA comparison.
+	// If latestSHA is empty (API unreachable), assume current to avoid spurious re-installs.
 	if entry.IsPackage() {
-		if latestSHA != "" && installed.CommitSHA == latestSHA {
+		if latestSHA == "" {
+			return StatusCurrent
+		}
+		if installed.CommitSHA == latestSHA {
 			return StatusCurrent
 		}
 		return StatusOutdated

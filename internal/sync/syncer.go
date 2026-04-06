@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
 )
@@ -46,7 +47,7 @@ func (s *Syncer) FetchManifest(ctx context.Context, owner, repo string) (*manife
 	}
 
 	s.emit(LegacyFormatMsg{Repo: owner + "/" + repo})
-	return manifest.Parse(raw)
+	return migrate.Convert(raw)
 }
 
 // Diff fetches the team loadout and computes status for every skill

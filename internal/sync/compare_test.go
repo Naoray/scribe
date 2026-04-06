@@ -65,6 +65,7 @@ func TestComparePackage(t *testing.T) {
 		{"package missing", packageEntry("github:a/b@main"), nil, "", StatusMissing},
 		{"package current", packageEntry("github:a/b@main"), installed("main", "abc123"), "abc123", StatusCurrent},
 		{"package outdated", packageEntry("github:a/b@main"), installed("main", "abc123"), "def456", StatusOutdated},
+		{"package empty sha assumes current", packageEntry("github:a/b@main"), installed("main", "abc123"), "", StatusCurrent},
 	}
 
 	for _, c := range cases {

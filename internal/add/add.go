@@ -12,6 +12,7 @@ import (
 	"github.com/Naoray/scribe/internal/discovery"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
 )
@@ -159,13 +160,9 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	}
 
 	// Fetch the current manifest with fallback.
-	raw, err := a.fetchManifest(ctx, owner, repo)
+	m, err := a.fetchManifest(ctx, owner, repo)
 	if err != nil {
 		return fmt.Errorf("fetch manifest: %w", err)
-	}
-	m, err := manifest.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("parse manifest: %w", err)
 	}
 
 	// Accumulate all files to push in one commit.
@@ -230,11 +227,11 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	return a.Client.PushFiles(ctx, owner, repo, pushFiles, msg)
 }
 
-// fetchManifest tries scribe.yaml first, falls back to scribe.toml.
-func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) ([]byte, error) {
+// fetchManifest tries scribe.yaml first, falls back to scribe.toml (converting via migrate).
+func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
 	raw, err := a.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
 	if err == nil {
-		return raw, nil
+		return manifest.Parse(raw)
 	}
 
 	raw, legacyErr := a.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
@@ -242,6 +239,6 @@ func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) ([]byte, 
 		return nil, fmt.Errorf("fetch manifest: %w", err)
 	}
 
-	return raw, nil
+	return migrate.Convert(raw)
 }
 
