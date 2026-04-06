@@ -17,7 +17,8 @@ type Bag struct {
 	Args      []string
 	JSONFlag  bool
 	LocalFlag bool   // --local: show local inventory only
-	RepoFlag  string // --registry filter
+	RepoFlag     string // --registry filter
+	TrustAllFlag bool   // --trust-all: approve all package commands without prompting
 
 	// Populated by steps
 	Config    *config.Config
