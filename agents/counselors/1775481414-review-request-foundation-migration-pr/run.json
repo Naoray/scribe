@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-04-06T13:20:28.395Z",
+  "slug": "1775481419-1775481414-review-request-foundation-mig",
+  "prompt": "file:prompt.md",
+  "promptSource": "file",
+  "readOnlyPolicy": "bestEffort",
+  "tools": [
+    {
+      "toolId": "claude-opus",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 160576,
+      "wordCount": 1041,
+      "outputFile": "/Users/krishankonig/.anvil/worktrees/krishankoenig/feat-foundation-migration/agents/counselors/1775481414-review-request-foundation-migration-pr/claude-opus.md",
+      "stderrFile": "/Users/krishankonig/.anvil/worktrees/krishankoenig/feat-foundation-migration/agents/counselors/1775481414-review-request-foundation-migration-pr/claude-opus.stderr"
+    },
+    {
+      "toolId": "gemini-3-flash",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 208537,
+      "wordCount": 694,
+      "outputFile": "/Users/krishankonig/.anvil/worktrees/krishankoenig/feat-foundation-migration/agents/counselors/1775481414-review-request-foundation-migration-pr/gemini-3-flash.md",
+      "stderrFile": "/Users/krishankonig/.anvil/worktrees/krishankoenig/feat-foundation-migration/agents/counselors/1775481414-review-request-foundation-migration-pr/gemini-3-flash.stderr"
+    },
+    {
+      "toolId": "cursor",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 141297,
+      "wordCount": 636,
+      "outputFile": "/Users/krishankonig/.anvil/worktrees/krishankoenig/feat-foundation-migration/agents/counselors/1775481414-review-request-foundation-migration-pr/cursor.md",
+      "stderrFile": "/Users/krishankonig/.anvil/worktrees/krishankoenig/feat-foundation-migration/agents/counselors/1775481414-review-request-foundation-migration-pr/cursor.stderr"
+    }
+  ]
+}

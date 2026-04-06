@@ -1,0 +1,3 @@
+# Legacy Scribe config used as migration fixture.
+team_repos = ["ArtistfyHQ/team-skills", "vercel/skills"]
+token = "ghp_fixture_token"

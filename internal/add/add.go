@@ -14,7 +14,7 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 
@@ -38,7 +38,7 @@ func (c Candidate) NeedsUpload() bool {
 // Emits events via the Emit callback — the caller decides output format.
 type Adder struct {
 	Client  *gh.Client
-	Targets []targets.Target
+	Tools []tools.Tool
 	Emit    func(any)
 }
 

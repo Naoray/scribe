@@ -15,7 +15,7 @@ import (
 	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // ListSteps returns the step list for the list command.
@@ -34,19 +34,16 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 	w := os.Stdout
 
 	// Local view: explicit --local flag or no registries connected.
-	if b.LocalFlag || len(b.Config.TeamRepos) == 0 {
+	if b.LocalFlag || len(b.Config.TeamRepos()) == 0 {
 		return listLocal(w, b.State, useJSON, b.ListTUI)
 	}
 
-	// Reuse shared steps for migration and filtering.
-	if err := StepMigrateRegistries(ctx, b); err != nil {
-		return err
-	}
+	// Reuse shared steps for filtering.
 	if err := StepFilterRegistries(ctx, b); err != nil {
 		return err
 	}
 
-	syncer := &sync.Syncer{Client: sync.WrapGitHubClient(b.Client), Targets: []targets.Target{}}
+	syncer := &sync.Syncer{Client: sync.WrapGitHubClient(b.Client), Tools: []tools.Tool{}}
 	multiRegistry := len(b.Repos) > 1
 
 	if useJSON {
@@ -232,8 +229,8 @@ func printMultiListTable(ctx context.Context, w io.Writer, repos []string, synce
 	fmt.Fprintln(w)
 	printStatusSummary(w, allCounts, repos)
 
-	if !st.Team.LastSync.IsZero() {
-		fmt.Fprintln(w, listDimStyle.Render("Last sync: "+st.Team.LastSync.Local().Format("2006-01-02 15:04")))
+	if !st.LastSync.IsZero() {
+		fmt.Fprintln(w, listDimStyle.Render("Last sync: "+st.LastSync.Local().Format("2006-01-02 15:04")))
 	}
 	return nil
 }
@@ -316,7 +313,7 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 			var agents []string
 			if sk.Installed != nil {
 				ver = sk.Installed.DisplayVersion()
-				agents = sk.Installed.Targets
+				agents = sk.Installed.Tools
 			}
 			skills = append(skills, skillJSON{
 				Name:       sk.Name,

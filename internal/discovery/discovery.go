@@ -81,46 +81,52 @@ func OnDisk(st *state.State) ([]Skill, error) {
 				continue
 			}
 			name := entry.Name()
-			if seen[name] || !validSkillName.MatchString(name) {
-				continue
-			}
 
 			skillDir := filepath.Join(dir.path, name)
-			empty, err := isDirEmpty(skillDir)
-			if err != nil || empty {
-				continue
+
+			// Check if this is a skill directory (contains files like SKILL.md)
+			// or a registry-slug directory (contains sub-skill directories).
+			if isSkillDir(skillDir) {
+				// Direct skill: ~/.scribe/skills/<name>/
+				if seen[name] || !validSkillName.MatchString(name) {
+					continue
+				}
+
+				empty, err := isDirEmpty(skillDir)
+				if err != nil || empty {
+					continue
+				}
+
+				seen[name] = true
+				sk := buildSkill(name, skillDir, dir.path, dir.target, st)
+				skills = append(skills, sk)
+			} else {
+				// Registry-slug directory: scan sub-entries as skills.
+				subEntries, err := os.ReadDir(skillDir)
+				if err != nil {
+					continue
+				}
+				for _, subEntry := range subEntries {
+					if !subEntry.IsDir() {
+						continue
+					}
+					subName := subEntry.Name()
+					qualifiedName := name + "/" + subName
+					if seen[qualifiedName] || !validSkillName.MatchString(subName) {
+						continue
+					}
+
+					subDir := filepath.Join(skillDir, subName)
+					empty, err := isDirEmpty(subDir)
+					if err != nil || empty {
+						continue
+					}
+
+					seen[qualifiedName] = true
+					sk := buildSkill(qualifiedName, subDir, dir.path, dir.target, st)
+					skills = append(skills, sk)
+				}
 			}
-
-			seen[name] = true
-
-			meta := readSkillMetadata(skillDir)
-			hash, _ := contentHash(skillDir)
-
-			sk := Skill{
-				Name:        name,
-				Description: meta.Description,
-				LocalPath:   skillDir,
-				Package:     detectPackage(skillDir, dir.path),
-				ContentHash: hash,
-			}
-
-			if installed, ok := st.Installed[name]; ok {
-				sk.Source = installed.Source
-				sk.Version = installed.DisplayVersion()
-				sk.Targets = installed.Targets
-			} else if dir.target != "" {
-				sk.Targets = []string{dir.target}
-			}
-
-			// Version resolution: frontmatter → state → content hash.
-			if meta.Version != "" {
-				sk.Version = meta.Version
-			}
-			if sk.Version == "" && hash != "" {
-				sk.Version = "#" + hash
-			}
-
-			skills = append(skills, sk)
 		}
 	}
 
@@ -133,7 +139,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 			Name:    name,
 			Source:  installed.Source,
 			Version: installed.DisplayVersion(),
-			Targets: installed.Targets,
+			Targets: installed.Tools,
 		})
 	}
 
@@ -153,6 +159,45 @@ func OnDisk(st *state.State) ([]Skill, error) {
 	})
 
 	return skills, nil
+}
+
+// isSkillDir checks if a directory is a skill directory (has a SKILL.md file)
+// as opposed to a registry-slug directory containing sub-skill directories.
+func isSkillDir(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "SKILL.md"))
+	return err == nil
+}
+
+// buildSkill creates a Skill from a directory, enriching with state info.
+func buildSkill(name, skillDir, scanBase, target string, st *state.State) Skill {
+	meta := readSkillMetadata(skillDir)
+	hash, _ := contentHash(skillDir)
+
+	sk := Skill{
+		Name:        name,
+		Description: meta.Description,
+		LocalPath:   skillDir,
+		Package:     detectPackage(skillDir, scanBase),
+		ContentHash: hash,
+	}
+
+	if installed, ok := st.Installed[name]; ok {
+		sk.Source = installed.Source
+		sk.Version = installed.DisplayVersion()
+		sk.Targets = installed.Tools
+	} else if target != "" {
+		sk.Targets = []string{target}
+	}
+
+	// Version resolution: frontmatter → state → content hash.
+	if meta.Version != "" {
+		sk.Version = meta.Version
+	}
+	if sk.Version == "" && hash != "" {
+		sk.Version = "#" + hash
+	}
+
+	return sk
 }
 
 // detectPackage determines if a skill directory is a sub-skill of a parent
@@ -181,10 +226,7 @@ func detectPackage(skillDir, scanBase string) string {
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(skillDir, target)
 	}
-	target, err = filepath.Clean(target), nil
-	if err != nil {
-		return ""
-	}
+	target = filepath.Clean(target)
 
 	// Check if the target is inside a sibling dir in the same scan base.
 	// Pattern: <scanBase>/<package>/<subdir>/SKILL.md

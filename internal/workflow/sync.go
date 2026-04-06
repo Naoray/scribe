@@ -11,7 +11,7 @@ import (
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // SyncSteps returns the step list for the sync command.
@@ -20,10 +20,9 @@ func SyncSteps() []Step {
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
 		{"CheckConnected", StepCheckConnected},
-		{"MigrateRegistries", StepMigrateRegistries},
 		{"FilterRegistries", StepFilterRegistries},
 		{"ResolveFormatter", StepResolveFormatter},
-		{"ResolveTargets", StepResolveTargets},
+		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepSyncSkills},
 	}
 }
@@ -32,7 +31,7 @@ func SyncSteps() []Step {
 func SyncTail() []Step {
 	return []Step{
 		{"ResolveFormatter", StepResolveFormatter},
-		{"ResolveTargets", StepResolveTargets},
+		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepSyncSkills},
 	}
 }
@@ -57,26 +56,21 @@ func StepLoadState(_ context.Context, b *Bag) error {
 }
 
 func StepCheckConnected(_ context.Context, b *Bag) error {
-	if len(b.Config.TeamRepos) == 0 {
+	if len(b.Config.TeamRepos()) == 0 {
 		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
 	return nil
 }
 
-func StepMigrateRegistries(_ context.Context, b *Bag) error {
-	b.State.MigrateRegistries(b.Config.TeamRepos[0])
-	return nil
-}
-
 func StepFilterRegistries(_ context.Context, b *Bag) error {
 	if b.FilterRegistries != nil {
-		repos, err := b.FilterRegistries(b.RepoFlag, b.Config.TeamRepos)
+		repos, err := b.FilterRegistries(b.RepoFlag, b.Config.TeamRepos())
 		if err != nil {
 			return err
 		}
 		b.Repos = repos
 	} else {
-		b.Repos = b.Config.TeamRepos
+		b.Repos = b.Config.TeamRepos()
 	}
 	return nil
 }
@@ -94,9 +88,9 @@ func StepResolveFormatter(_ context.Context, b *Bag) error {
 	return nil
 }
 
-func StepResolveTargets(_ context.Context, b *Bag) error {
-	if b.Targets == nil {
-		b.Targets = targets.DefaultTargets()
+func StepResolveTools(_ context.Context, b *Bag) error {
+	if b.Tools == nil {
+		b.Tools = tools.DetectTools()
 	}
 	return nil
 }
@@ -106,7 +100,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 
 	syncer := &sync.Syncer{
 		Client:  sync.WrapGitHubClient(b.Client),
-		Targets: b.Targets,
+		Tools: b.Tools,
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:
@@ -134,10 +128,6 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 			return err
 		}
 
-		// Track which registry each synced skill belongs to.
-		for name := range resolved {
-			b.State.AddRegistry(name, teamRepo)
-		}
 		if err := b.State.Save(); err != nil {
 			return fmt.Errorf("save state: %w", err)
 		}

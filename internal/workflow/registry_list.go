@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // RegistryListSteps returns the step list for the registry list command.
@@ -19,33 +20,20 @@ func RegistryListSteps() []Step {
 	return []Step{
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
-		{"MigrateRegistries", stepMigrateRegistriesSafe},
 		{"PrintRegistryList", StepPrintRegistryList},
 	}
 }
 
-// stepMigrateRegistriesSafe wraps StepMigrateRegistries with a guard
-// for empty TeamRepos (avoids index-out-of-range on TeamRepos[0]).
-func stepMigrateRegistriesSafe(_ context.Context, b *Bag) error {
-	if len(b.Config.TeamRepos) == 0 {
-		return nil
-	}
-	return StepMigrateRegistries(nil, b)
-}
-
-// CountSkillsPerRegistry counts installed skills per registry.
+// CountSkillsPerRegistry counts installed skills per registry by matching
+// the slugified registry prefix in namespaced skill keys (e.g. "ArtistfyHQ-team-skills/deploy" matches "ArtistfyHQ/team-skills").
 func CountSkillsPerRegistry(repos []string, st *state.State) map[string]int {
 	counts := make(map[string]int, len(repos))
 	for _, repo := range repos {
 		counts[repo] = 0
-	}
-	for _, skill := range st.Installed {
-		for _, repo := range repos {
-			for _, r := range skill.Registries {
-				if strings.EqualFold(r, repo) {
-					counts[repo]++
-					break
-				}
+		slug := tools.SlugifyRegistry(repo)
+		for name := range st.Installed {
+			if strings.HasPrefix(name, slug+"/") {
+				counts[repo]++
 			}
 		}
 	}
@@ -64,7 +52,7 @@ func StepPrintRegistryList(_ context.Context, b *Bag) error {
 	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	w := os.Stdout
 
-	repos := b.Config.TeamRepos
+	repos := b.Config.TeamRepos()
 
 	if len(repos) == 0 {
 		if useJSON {
@@ -96,10 +84,10 @@ func printRegistryTable(w io.Writer, repos []string, counts map[string]int, st *
 	if len(repos) == 1 {
 		footer = "1 registry connected"
 	}
-	if st.Team.LastSync.IsZero() {
+	if st.LastSync.IsZero() {
 		footer += " · never synced"
 	} else {
-		footer += " · last sync " + timeAgo(st.Team.LastSync)
+		footer += " · last sync " + timeAgo(st.LastSync)
 	}
 
 	fmt.Fprintln(w, regFootStyle.Render(footer))
@@ -129,8 +117,8 @@ func PrintRegistryJSON(w io.Writer, repos []string, st *state.State) error {
 	}
 
 	var lastSync *string
-	if !st.Team.LastSync.IsZero() {
-		s := st.Team.LastSync.UTC().Format("2006-01-02T15:04:05Z")
+	if !st.LastSync.IsZero() {
+		s := st.LastSync.UTC().Format("2006-01-02T15:04:05Z")
 		lastSync = &s
 	}
 

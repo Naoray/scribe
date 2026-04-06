@@ -25,7 +25,7 @@ func ConnectSteps() []Step {
 		{"LoadState", StepLoadState},
 		{"SetSingleRepo", StepSetSingleRepo},
 		{"ResolveFormatter", StepResolveFormatter},
-		{"ResolveTargets", StepResolveTargets},
+		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepConnectSyncError},
 	}
 }
@@ -37,7 +37,7 @@ func ConnectTail() []Step {
 }
 
 func StepDedupCheck(_ context.Context, b *Bag) error {
-	for _, existing := range b.Config.TeamRepos {
+	for _, existing := range b.Config.TeamRepos() {
 		if strings.EqualFold(existing, b.RepoArg) {
 			fmt.Printf("Already connected to %s\n", existing)
 			return errSkip
@@ -79,7 +79,7 @@ func StepValidateManifest(_ context.Context, b *Bag) error {
 }
 
 func StepSaveConfig(_ context.Context, b *Bag) error {
-	b.Config.TeamRepos = append(b.Config.TeamRepos, b.RepoArg)
+	b.Config.AddRegistry(b.RepoArg)
 	if err := b.Config.Save(); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}

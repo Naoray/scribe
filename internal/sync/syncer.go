@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
-	"github.com/Naoray/scribe/internal/targets"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // SkillFile is a single file within a downloaded skill directory.
@@ -25,12 +26,12 @@ type GitHubFetcher interface {
 	LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error)
 }
 
-// Syncer wires manifest, github, targets, and state together.
+// Syncer wires manifest, github, tools, and state together.
 // It emits events via the Emit callback — the caller decides whether
 // to forward them to a Bubbletea program or log them to stdout.
 type Syncer struct {
 	Client  GitHubFetcher
-	Targets []targets.Target
+	Tools []tools.Tool
 	Emit    func(any) // receives events defined in events.go
 }
 
@@ -67,11 +68,13 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		return nil, nil, fmt.Errorf("%s has no team section", teamRepo)
 	}
 
+	registrySlug := tools.SlugifyRegistry(teamRepo)
 	var statuses []SkillStatus
 
 	for i := range m.Catalog {
 		entry := &m.Catalog[i]
-		installedPtr := lookupInstalled(st, entry.Name)
+		qualifiedName := registrySlug + "/" + entry.Name
+		installedPtr := lookupInstalled(st, qualifiedName)
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
@@ -94,14 +97,18 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		})
 	}
 
-	// Extra skills (installed but not in catalog).
+	// Extra skills (installed but not in catalog) — scoped to this registry only.
 	catalogNames := make(map[string]bool, len(m.Catalog))
 	for _, e := range m.Catalog {
 		catalogNames[e.Name] = true
 	}
 	extraNames := make([]string, 0)
 	for name := range st.Installed {
-		if !catalogNames[name] {
+		if !strings.HasPrefix(name, registrySlug+"/") {
+			continue // belongs to a different registry
+		}
+		baseName := strings.TrimPrefix(name, registrySlug+"/")
+		if !catalogNames[baseName] {
 			extraNames = append(extraNames, name)
 		}
 	}
@@ -126,22 +133,23 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	if err != nil {
 		return err
 	}
-	return s.apply(ctx, statuses, st)
+	return s.apply(ctx, teamRepo, statuses, st)
 }
 
 // RunWithDiff is like Run but uses pre-computed diff results, avoiding a
 // redundant manifest fetch when the caller already called Diff.
-func (s *Syncer) RunWithDiff(ctx context.Context, statuses []SkillStatus, st *state.State) error {
-	return s.apply(ctx, statuses, st)
+func (s *Syncer) RunWithDiff(ctx context.Context, teamRepo string, statuses []SkillStatus, st *state.State) error {
+	return s.apply(ctx, teamRepo, statuses, st)
 }
 
-func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.State) error {
+func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillStatus, st *state.State) error {
 	// Emit resolved status for each skill (populates list view before downloads start).
 	for _, sk := range statuses {
 		s.emit(SkillResolvedMsg{sk})
 	}
 
 	summary := SyncCompleteMsg{}
+	registrySlug := tools.SlugifyRegistry(teamRepo)
 
 	for _, sk := range statuses {
 		switch sk.Status {
@@ -177,35 +185,44 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.St
 				continue
 			}
 
-			// Convert sync.SkillFile → targets.SkillFile for the store writer.
-			tFiles := make([]targets.SkillFile, len(files))
-			for i, f := range files {
-				tFiles[i] = targets.SkillFile{Path: f.Path, Content: f.Content}
+			// Filter out repo infrastructure files that leak when skill path == repo root.
+			var filtered []SkillFile
+			for _, f := range files {
+				if shouldInclude(f.Path) {
+					filtered = append(filtered, f)
+				}
+			}
+
+			// Convert sync.SkillFile → tools.SkillFile for the store writer.
+			tFiles := make([]tools.SkillFile, len(filtered))
+			for i, f := range filtered {
+				tFiles[i] = tools.SkillFile{Path: f.Path, Content: f.Content}
 			}
 
 			// Write files to canonical store once, then symlink per target.
-			canonicalDir, err := targets.WriteToStore(sk.Name, tFiles)
+			canonicalDir, err := tools.WriteToStore(registrySlug, sk.Name, tFiles)
 			if err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("write store: %w", err)})
 				summary.Failed++
 				continue
 			}
 
+			qualifiedName := registrySlug + "/" + sk.Name
 			var paths []string
-			var targetNames []string
-			targetFailed := false
-			for _, t := range s.Targets {
-				links, err := t.Install(sk.Name, canonicalDir)
+			var toolNames []string
+			toolFailed := false
+			for _, t := range s.Tools {
+				links, err := t.Install(qualifiedName, canonicalDir)
 				if err != nil {
 					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
 					summary.Failed++
-					targetFailed = true
+					toolFailed = true
 					break
 				}
 				paths = append(paths, links...)
-				targetNames = append(targetNames, t.Name())
+				toolNames = append(toolNames, t.Name())
 			}
-			if targetFailed {
+			if toolFailed {
 				continue
 			}
 
@@ -217,11 +234,11 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.St
 				}
 			}
 
-			st.RecordInstall(sk.Name, state.InstalledSkill{
+			st.RecordInstall(qualifiedName, state.InstalledSkill{
 				Version:   src.Ref,
 				CommitSHA: latestSHA,
 				Source:    sk.Entry.Source,
-				Targets:   targetNames,
+				Tools:     toolNames,
 				Paths:     paths,
 			})
 			// Save after each successful install — partial sync is safe.

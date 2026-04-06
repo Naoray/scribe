@@ -11,13 +11,14 @@ import (
 )
 
 func TestCountSkillsPerRegistry(t *testing.T) {
+	// Keys are namespaced: slugified-registry/skill. CountSkillsPerRegistry matches
+	// the slugified registry prefix against each repo.
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"browse": {Registries: []string{"ArtistfyHQ/skills"}},
-			"deploy": {Registries: []string{"ArtistfyHQ/skills", "Naoray/my-skills"}},
-			"lint":   {Registries: []string{"Naoray/my-skills"}},
-			"orphan": {Registries: nil},
-			"empty":  {Registries: []string{}},
+			"ArtistfyHQ-skills/browse": {},
+			"ArtistfyHQ-skills/deploy": {},
+			"Naoray-my-skills/lint":    {},
+			"local/orphan":             {},
 		},
 	}
 
@@ -29,12 +30,7 @@ func TestCountSkillsPerRegistry(t *testing.T) {
 		{
 			"multi-registry counts",
 			[]string{"ArtistfyHQ/skills", "Naoray/my-skills"},
-			map[string]int{"ArtistfyHQ/skills": 2, "Naoray/my-skills": 2},
-		},
-		{
-			"case-insensitive match",
-			[]string{"artistfyhq/skills"},
-			map[string]int{"artistfyhq/skills": 2},
+			map[string]int{"ArtistfyHQ/skills": 2, "Naoray/my-skills": 1},
 		},
 		{
 			"no matching skills",
@@ -64,10 +60,10 @@ func TestPrintRegistryJSON_Shape(t *testing.T) {
 	syncTime := time.Date(2026, 4, 3, 10, 0, 0, 0, time.UTC)
 
 	st := &state.State{
-		Team: state.TeamState{LastSync: syncTime},
+		LastSync: syncTime,
 		Installed: map[string]state.InstalledSkill{
-			"browse": {Registries: []string{"Foo/bar"}},
-			"deploy": {Registries: []string{"Foo/bar"}},
+			"Foo-bar/browse": {},
+			"Foo-bar/deploy": {},
 		},
 	}
 

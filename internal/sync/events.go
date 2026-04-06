@@ -64,8 +64,8 @@ func (sk SkillStatus) DisplayAuthor() string {
 
 // DisplayAgents returns the comma-separated list of installed targets.
 func (sk SkillStatus) DisplayAgents() string {
-	if sk.Installed != nil && len(sk.Installed.Targets) > 0 {
-		return strings.Join(sk.Installed.Targets, ", ")
+	if sk.Installed != nil && len(sk.Installed.Tools) > 0 {
+		return strings.Join(sk.Installed.Tools, ", ")
 	}
 	return ""
 }
