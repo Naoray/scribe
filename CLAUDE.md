@@ -33,6 +33,8 @@ internal/
 
 **The best-designed CLI tool.** Every output should be visually pleasing, intuitively structured, and delightful to use. Color-coded status indicators, styled headers, aligned columns, helpful summaries. If a user screenshots our output, it should look good enough to share. Aim for the most adorable, polished CLI experience in the ecosystem.
 
+**Show exactly what's useful, nothing more.** Every line of output should earn its place. Default to the minimum information needed to understand what happened and what to do next. Hide details behind flags (`--verbose`, `--json`) for users who want them. When in doubt, leave it out. An overwhelmed user is a lost user.
+
 ## Key Conventions
 
 - Core packages (`sync/`, `add/`, `state/`, `github/`) are **UI-agnostic** — they emit events, never print
