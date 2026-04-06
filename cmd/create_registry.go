@@ -16,13 +16,14 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
 var createRegistryCmd = &cobra.Command{
 	Use:   "registry",
 	Short: "Scaffold a new team skills registry on GitHub",
-	Long: `Create a new GitHub repository with a scribe.toml manifest and connect to it.
+	Long: `Create a new GitHub repository with a scribe.yaml manifest and connect to it.
 
 Examples:
   scribe create registry                                    # interactive
@@ -114,18 +115,21 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	}
 	repoSlug := owner + "/" + repo
 
-	hasManifest, err := client.FileExists(ctx, owner, repo, "scribe.toml", "HEAD")
+	hasManifest, err := client.FileExists(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
 	if err != nil {
-		// Surface real errors; FileExists already converts 404 → (false, nil).
-		fmt.Fprintf(os.Stderr, "warning: could not check for scribe.toml: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: could not check for manifest: %v\n", err)
 		hasManifest = false
+	}
+	if !hasManifest {
+		// Also check for legacy format.
+		hasManifest, _ = client.FileExists(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
 	}
 
 	if !hasManifest {
-		fmt.Fprintf(os.Stderr, "Pushing initial scribe.toml and README.md...\n")
+		fmt.Fprintf(os.Stderr, "Pushing initial %s and README.md...\n", manifest.ManifestFilename)
 		files := map[string]string{
-			"scribe.toml": scaffoldTOML(team),
-			"README.md":   scaffoldREADME(team, repoSlug),
+			manifest.ManifestFilename: scaffoldYAML(team),
+			"README.md":              scaffoldREADME(team, repoSlug),
 		}
 		if err := client.PushFiles(ctx, owner, repo, files, "Initialize skill registry"); err != nil {
 			fmt.Fprintf(os.Stderr, "\nRepo %s was created but the initial commit failed: %v\n", repoSlug, err)
@@ -197,17 +201,21 @@ func teamDescription(team string) string {
 	return fmt.Sprintf("%s dev team skill stack", titleCase(team))
 }
 
-// scaffoldTOML generates the initial scribe.toml content for a new registry.
-func scaffoldTOML(team string) string {
-	return fmt.Sprintf(`[team]
-name = %q
-description = %q
+// scaffoldYAML generates the initial scribe.yaml content for a new registry.
+func scaffoldYAML(team string) string {
+	return fmt.Sprintf(`apiVersion: scribe/v1
+kind: Registry
+team:
+  name: %q
+  description: %q
 
-# Add skills here. Format:
-# "skill-name" = { source = "github:owner/repo@version" }
-# "my-skill"   = { source = "github:Owner/repo@main", path = "username/my-skill" }
+# Add skills here. Example:
+# catalog:
+#   - name: my-skill
+#     source: "github:owner/repo@version"
+#     author: username
 
-[skills]
+catalog: []
 `, team, teamDescription(team))
 }
 
@@ -232,7 +240,7 @@ Pull the latest skills to your machine:
 
 ## Adding skills
 
-Edit `+"`scribe.toml`"+` to add or update skills, then push to this repo.
+Edit `+"`scribe.yaml`"+` to add or update skills, then push to this repo.
 Teammates run `+"`scribe sync`"+` to pick up changes.
 `, title, repo)
 }

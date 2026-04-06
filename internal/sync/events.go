@@ -1,6 +1,9 @@
 package sync
 
-import "github.com/Naoray/scribe/internal/state"
+import (
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/state"
+)
 
 // Status describes how a skill compares against the team loadout.
 type Status int
@@ -31,9 +34,11 @@ func (s Status) String() string {
 type SkillStatus struct {
 	Name       string
 	Status     Status
-	Installed  *state.InstalledSkill // nil if not installed
-	LoadoutRef string                // the ref from scribe.toml (e.g. "v1.0.0", "main")
+	Installed  *state.InstalledSkill  // nil if not installed
+	Entry      *manifest.Entry        // catalog entry, nil for StatusExtra
+	LoadoutRef string                 // the ref from the manifest (e.g. "v1.0.0", "main")
 	Maintainer string
+	IsPackage  bool
 }
 
 // --- Events (tea.Msg) emitted during sync ---
@@ -67,4 +72,41 @@ type SyncCompleteMsg struct {
 	Updated   int
 	Skipped   int
 	Failed    int
+}
+
+// LegacyFormatMsg is sent when a registry still uses scribe.toml (TOML format).
+type LegacyFormatMsg struct{ Repo string }
+
+// --- Package events ---
+
+// PackageInstallPromptMsg asks the user to approve a package's install command.
+type PackageInstallPromptMsg struct {
+	Name    string
+	Command string
+	Source  string
+}
+
+// PackageApprovedMsg is sent when the user approves a package install.
+type PackageApprovedMsg struct{ Name string }
+
+// PackageDeniedMsg is sent when the user denies a package install.
+type PackageDeniedMsg struct{ Name string }
+
+// PackageSkippedMsg is sent when a package is skipped (e.g. already approved).
+type PackageSkippedMsg struct {
+	Name   string
+	Reason string
+}
+
+// PackageInstallingMsg is sent when a package install command begins.
+type PackageInstallingMsg struct{ Name string }
+
+// PackageInstalledMsg is sent when a package is successfully installed.
+type PackageInstalledMsg struct{ Name string }
+
+// PackageErrorMsg is sent when a package install fails.
+type PackageErrorMsg struct {
+	Name   string
+	Err    error
+	Stderr string
 }

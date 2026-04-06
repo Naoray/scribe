@@ -180,15 +180,16 @@ func TestDiscoverLocalDeduplicates(t *testing.T) {
 }
 
 func TestAddBuildsPushFilesForReference(t *testing.T) {
-	// Test that Add correctly modifies scribe.toml for a source-reference candidate.
-	// We can't easily test the full GitHub flow without a mock, so we test the
-	// manifest modification logic instead.
+	// Test that Add correctly modifies manifest for a source-reference candidate.
+	// We test the manifest modification logic via Parse/Encode round-trip.
 
-	original := `[team]
-name = "my-team"
-
-[skills]
-deploy = {source = "github:owner/repo@v1.0.0"}
+	original := `apiVersion: scribe/v1
+kind: Registry
+team:
+  name: my-team
+catalog:
+  - name: deploy
+    source: "github:owner/repo@v1.0.0"
 `
 	m, err := manifest.Parse([]byte(original))
 	if err != nil {
@@ -196,7 +197,10 @@ deploy = {source = "github:owner/repo@v1.0.0"}
 	}
 
 	// Simulate adding a new source-reference skill.
-	m.Skills["gstack"] = manifest.Skill{Source: "github:garrytan/gstack@v0.12.9.0"}
+	m.Catalog = append(m.Catalog, manifest.Entry{
+		Name:   "gstack",
+		Source: "github:garrytan/gstack@v0.12.9.0",
+	})
 
 	encoded, err := m.Encode()
 	if err != nil {
@@ -208,11 +212,11 @@ deploy = {source = "github:owner/repo@v1.0.0"}
 	if err != nil {
 		t.Fatalf("re-Parse: %v", err)
 	}
-	if len(m2.Skills) != 2 {
-		t.Errorf("expected 2 skills, got %d", len(m2.Skills))
+	if len(m2.Catalog) != 2 {
+		t.Errorf("expected 2 catalog entries, got %d", len(m2.Catalog))
 	}
-	gstack, ok := m2.Skills["gstack"]
-	if !ok {
+	gstack := m2.FindByName("gstack")
+	if gstack == nil {
 		t.Fatal("gstack not found after round-trip")
 	}
 	if gstack.Source != "github:garrytan/gstack@v0.12.9.0" {
@@ -264,18 +268,22 @@ func TestDiscoverRemoteSkills(t *testing.T) {
 	// The cmd layer fetches manifests; the core just filters and converts.
 
 	targetManifest := &manifest.Manifest{
-		Team:   &manifest.Team{Name: "my-team"},
-		Skills: map[string]manifest.Skill{
-			"deploy": {Source: "github:owner/repo@v1.0.0"},
+		APIVersion: "scribe/v1",
+		Kind:       "Registry",
+		Team:       &manifest.Team{Name: "my-team"},
+		Catalog: []manifest.Entry{
+			{Name: "deploy", Source: "github:owner/repo@v1.0.0"},
 		},
 	}
 
 	otherManifests := map[string]*manifest.Manifest{
 		"vercel/skills": {
-			Team: &manifest.Team{Name: "vercel"},
-			Skills: map[string]manifest.Skill{
-				"nextjs":  {Source: "github:vercel/nextjs-skill@v2.0.0"},
-				"deploy":  {Source: "github:vercel/deploy@v1.0.0"}, // already in target — should be filtered
+			APIVersion: "scribe/v1",
+			Kind:       "Registry",
+			Team:       &manifest.Team{Name: "vercel"},
+			Catalog: []manifest.Entry{
+				{Name: "nextjs", Source: "github:vercel/nextjs-skill@v2.0.0"},
+				{Name: "deploy", Source: "github:vercel/deploy@v1.0.0"}, // already in target — should be filtered
 			},
 		},
 	}
@@ -302,9 +310,11 @@ func TestDiscoverRemoteSkills(t *testing.T) {
 
 func TestFilterAlreadyInTarget(t *testing.T) {
 	targetManifest := &manifest.Manifest{
-		Team: &manifest.Team{Name: "test"},
-		Skills: map[string]manifest.Skill{
-			"deploy": {Source: "github:owner/repo@v1.0.0"},
+		APIVersion: "scribe/v1",
+		Kind:       "Registry",
+		Team:       &manifest.Team{Name: "test"},
+		Catalog: []manifest.Entry{
+			{Name: "deploy", Source: "github:owner/repo@v1.0.0"},
 		},
 	}
 
@@ -316,7 +326,7 @@ func TestFilterAlreadyInTarget(t *testing.T) {
 	// filterAlreadyInTarget is in cmd/, so test the equivalent logic here.
 	var filtered []add.Candidate
 	for _, c := range candidates {
-		if _, exists := targetManifest.Skills[c.Name]; !exists {
+		if targetManifest.FindByName(c.Name) == nil {
 			filtered = append(filtered, c)
 		}
 	}

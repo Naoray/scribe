@@ -27,6 +27,15 @@ type Client struct {
 // IsAuthenticated returns true if the client has a GitHub token.
 func (c *Client) IsAuthenticated() bool { return c.authenticated }
 
+// AuthenticatedUser returns the login name of the authenticated GitHub user.
+func (c *Client) AuthenticatedUser(ctx context.Context) (string, error) {
+	user, _, err := c.gh.Users.Get(ctx, "")
+	if err != nil {
+		return "", wrapErr(err, "get authenticated user")
+	}
+	return user.GetLogin(), nil
+}
+
 // NewClient creates a GitHub client using the auth chain:
 //  1. gh auth token  (piggyback on gh CLI if installed)
 //  2. GITHUB_TOKEN   environment variable
@@ -181,6 +190,16 @@ func (c *Client) PushFiles(ctx context.Context, owner, repo string, files map[st
 	var entries []*github.TreeEntry
 	for _, path := range paths {
 		content := files[path]
+		if content == "" {
+			// Deletion: tree entry with nil SHA removes the file.
+			entries = append(entries, &github.TreeEntry{
+				Path: github.Ptr(path),
+				Mode: github.Ptr("100644"),
+				Type: github.Ptr("blob"),
+				// SHA intentionally nil — signals deletion to GitHub API.
+			})
+			continue
+		}
 		blob, _, err := c.gh.Git.CreateBlob(ctx, owner, repo, &github.Blob{
 			Content:  github.Ptr(content),
 			Encoding: github.Ptr("utf-8"),

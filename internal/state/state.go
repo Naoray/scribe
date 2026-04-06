@@ -31,6 +31,14 @@ type InstalledSkill struct {
 	Targets     []string  `json:"targets"`
 	Paths       []string  `json:"paths"`                 // absolute paths written on disk
 	Registries  []string  `json:"registries,omitempty"`
+
+	// Package-specific fields (omitted for regular skills).
+	Type       string    `json:"type,omitempty"`
+	InstallCmd string    `json:"install_cmd,omitempty"`
+	UpdateCmd  string    `json:"update_cmd,omitempty"`
+	CmdHash    string    `json:"cmd_hash,omitempty"`
+	Approval   string    `json:"approval,omitempty"`
+	ApprovedAt time.Time `json:"approved_at,omitempty"`
 }
 
 // shortSHA returns the first 7 chars of CommitSHA, or "" if not set.

@@ -7,7 +7,7 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 )
 
-// compareSkill determines the status of one skill by comparing
+// compareEntry determines the status of one catalog entry by comparing
 // the team loadout entry against what's recorded in state.json.
 //
 // Tag refs (e.g. "v1.0.0", "v0.12.9.0"):
@@ -18,14 +18,28 @@ import (
 // Branch refs (e.g. "main"):
 //   - latestSHA == installed.CommitSHA → StatusCurrent
 //   - any mismatch                     → StatusOutdated
-func compareSkill(skill manifest.Skill, installed *state.InstalledSkill, latestSHA string) Status {
+//
+// Packages always use SHA comparison (they track a branch).
+func compareEntry(entry manifest.Entry, installed *state.InstalledSkill, latestSHA string) Status {
 	if installed == nil {
 		return StatusMissing
 	}
 
-	src, err := manifest.ParseSource(skill.Source)
+	src, err := manifest.ParseSource(entry.Source)
 	if err != nil {
 		return StatusMissing
+	}
+
+	// Packages always use SHA comparison.
+	// If latestSHA is empty (API unreachable), assume current to avoid spurious re-installs.
+	if entry.IsPackage() {
+		if latestSHA == "" {
+			return StatusCurrent
+		}
+		if installed.CommitSHA == latestSHA {
+			return StatusCurrent
+		}
+		return StatusOutdated
 	}
 
 	if src.IsBranch() {
