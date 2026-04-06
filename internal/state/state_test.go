@@ -187,6 +187,54 @@ func TestRegistriesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPackageFieldsRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	st.RecordInstall("gstack", state.InstalledSkill{
+		Version:    "main",
+		CommitSHA:  "abc123",
+		Source:     "github:garrytan/gstack@main",
+		Targets:    []string{"claude"},
+		Paths:      []string{"/home/user/.claude/skills/gstack"},
+		Type:       "package",
+		InstallCmd: "git clone ...",
+		UpdateCmd:  "cd ~/.claude/skills/gstack && git pull",
+		CmdHash:    "deadbeef",
+		Approval:   "approved",
+	})
+
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	st2, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+
+	got := st2.Installed["gstack"]
+	if got.Type != "package" {
+		t.Errorf("Type: got %q, want package", got.Type)
+	}
+	if got.InstallCmd != "git clone ..." {
+		t.Errorf("InstallCmd: got %q", got.InstallCmd)
+	}
+	if got.UpdateCmd != "cd ~/.claude/skills/gstack && git pull" {
+		t.Errorf("UpdateCmd: got %q", got.UpdateCmd)
+	}
+	if got.CmdHash != "deadbeef" {
+		t.Errorf("CmdHash: got %q", got.CmdHash)
+	}
+	if got.Approval != "approved" {
+		t.Errorf("Approval: got %q", got.Approval)
+	}
+}
+
 func TestRemove(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
