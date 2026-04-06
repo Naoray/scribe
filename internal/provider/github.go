@@ -68,9 +68,13 @@ func (p *GitHubProvider) Discover(ctx context.Context, repo string) ([]manifest.
 		return entries, nil
 	}
 
-	// Step 4: Tree scan for SKILL.md files (wired by Task 6).
+	// Step 4: Tree scan for SKILL.md files.
+	entries, err = p.discoverTreeScan(ctx, owner, repoName)
+	if err == nil && len(entries) > 0 {
+		return entries, nil
+	}
 
-	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml, marketplace.json)", repo)
+	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml, marketplace.json, and SKILL.md files)", repo)
 }
 
 func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {
@@ -112,10 +116,16 @@ func (p *GitHubProvider) discoverMarketplace(ctx context.Context, owner, repo st
 	return entries, nil
 }
 
-// discoverTreeScan discovers skills by scanning the repo tree for SKILL.md files.
-// Placeholder — will be wired in Task 6.
-func (p *GitHubProvider) discoverTreeScan(_ context.Context, _, _ string) ([]manifest.Entry, error) {
-	return nil, fmt.Errorf("tree scan discovery not yet implemented")
+func (p *GitHubProvider) discoverTreeScan(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {
+	tree, err := p.client.GetTree(ctx, owner, repo, "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	entries := ScanTreeForSkills(tree, owner, repo)
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("no SKILL.md files found in %s/%s", owner, repo)
+	}
+	return entries, nil
 }
 
 // Fetch downloads all files for a catalog entry from the source repo.
