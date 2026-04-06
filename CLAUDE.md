@@ -11,21 +11,27 @@ Team skill sync CLI for AI coding agents. Go + Cobra + Charm (Bubble Tea).
 ## Architecture
 
 ```
-cmd/                    # Cobra commands (connect, sync, list, add, create)
+cmd/                    # Cobra commands (connect, sync, list, add, create, guide, registry, migrate)
 internal/
   add/                  # Add workflow — local/remote discovery, GitHub push
   config/               # config.toml loading (~/.scribe/config.toml)
-  manifest/             # scribe.toml parsing (BurntSushi/toml)
+  discovery/            # On-disk skill discovery, YAML frontmatter parsing, content hashing
   github/               # GitHub API client (go-github + oauth2)
-  targets/              # Install target writers (claude, cursor)
+  manifest/             # scribe.yaml parsing (gopkg.in/yaml.v3), legacy scribe.toml fallback
+  migrate/              # TOML → YAML manifest conversion
+  paths/                # XDG-style path helpers (~/.scribe/)
+  prereq/               # Prerequisite checks (gh CLI availability)
   state/                # ~/.scribe/state.json management
   sync/                 # Sync algorithm — UI-agnostic, emits tea.Msg events
+  targets/              # Install target writers (claude, cursor)
   workflow/             # Step-sequence engine: Runner, Bag, Formatter, per-command steps
 ```
 
 ## North Star
 
 **Convenience first, tech debt second.** When facing implementation choices, always ask: "which makes Scribe more convenient for the person running it?" Ship usable > ship perfect.
+
+**The best-designed CLI tool.** Every output should be visually pleasing, intuitively structured, and delightful to use. Color-coded status indicators, styled headers, aligned columns, helpful summaries. If a user screenshots our output, it should look good enough to share. Aim for the most adorable, polished CLI experience in the ecosystem.
 
 ## Key Conventions
 

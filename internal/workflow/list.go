@@ -7,9 +7,9 @@ import (
 	"io"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/discovery"
@@ -78,7 +78,33 @@ var (
 	listDescStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
 	listDivStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	listTotalStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	listDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	listAuthorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF"))
+	listRegStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
+
+	// statusStyles maps each sync status to its lipgloss style.
+	statusStyles = map[sync.Status]lipgloss.Style{
+		sync.StatusCurrent:  lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")),
+		sync.StatusOutdated: lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
+		sync.StatusMissing:  lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")),
+		sync.StatusExtra:    lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3")),
+	}
 )
+
+// renderStatus returns a styled "icon label" string for a sync status, padded to consistent width.
+func renderStatus(s sync.Status) string {
+	d := s.Display()
+	raw := d.Icon + " " + d.Label
+	return statusStyles[s].Render(runewidth.FillRight(raw, 10))
+}
+
+// renderStatusCount returns a styled "N label" string, or "" if count is zero.
+func renderStatusCount(s sync.Status, n int) string {
+	if n == 0 {
+		return ""
+	}
+	return statusStyles[s].Render(fmt.Sprintf("%d %s", n, s.Display().Label))
+}
 
 func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 	if len(skills) == 0 {
@@ -88,7 +114,7 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 		return nil
 	}
 
-	// Bucket skills by group for clean rendering.
+	// Bucket skills by group.
 	type group struct {
 		name   string
 		skills []discovery.Skill
@@ -106,61 +132,43 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 		}
 	}
 
-	// Check if any skill has version info — if so, use detailed table.
-	hasVersions := false
-	for _, sk := range skills {
-		if sk.Version != "" {
-			hasVersions = true
-			break
-		}
-	}
-
 	for i, g := range groups {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
 
-		// Group header with divider line.
 		label := g.name
 		if label == "" {
 			label = "standalone"
 		}
-		count := listCountStyle.Render(fmt.Sprintf("(%d)", len(g.skills)))
-		header := fmt.Sprintf("%s %s", listHeaderStyle.Render(label), count)
-		fmt.Fprintln(w, header)
-		fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(label)+5)))
+		count := listCountStyle.Render(fmt.Sprintf("(%d skills)", len(g.skills)))
+		fmt.Fprintf(w, "%s %s\n", listRegStyle.Render(label), count)
+		fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(label)+15)))
 
-		if hasVersions {
-			// Detailed table when managed skills exist.
-			tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-			for _, sk := range g.skills {
-				ver := sk.Version
-				if ver == "" {
-					ver = "-"
-				}
-				fmt.Fprintf(tw, "  %s\t%s\t%s\n",
-					sk.Name, ver, strings.Join(sk.Targets, ", "))
+		// Compute column widths.
+		maxName, maxVer := 4, 7
+		for _, sk := range g.skills {
+			maxName = max(maxName, runewidth.StringWidth(sk.Name))
+			maxVer = max(maxVer, runewidth.StringWidth(sk.Version))
+		}
+
+		for _, sk := range g.skills {
+			ver := sk.Version
+			if ver == "" {
+				ver = "—"
 			}
-			tw.Flush()
-		} else {
-			printSkillList(w, g.skills)
+			agents := listDimStyle.Render(strings.Join(sk.Targets, ", "))
+
+			name := listNameStyle.Render(runewidth.FillRight(sk.Name, maxName))
+			verStr := listDimStyle.Render(runewidth.FillRight(ver, maxVer))
+
+			fmt.Fprintf(w, "  %s  %s  %s\n", name, verStr, agents)
 		}
 	}
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, listTotalStyle.Render(fmt.Sprintf("%d skills total", len(skills))))
 	return nil
-}
-
-// printSkillList renders skills with name and description on two lines.
-func printSkillList(w io.Writer, skills []discovery.Skill) {
-	for _, sk := range skills {
-		name := listNameStyle.Render(sk.Name)
-		fmt.Fprintf(w, "  %s\n", name)
-		if sk.Description != "" {
-			fmt.Fprintf(w, "  %s\n", listDescStyle.Render(sk.Description))
-		}
-	}
 }
 
 func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) error {
@@ -204,7 +212,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 }
 
 func printMultiListTable(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State, grouped bool) error {
-	var footerParts []string
+	var allCounts []map[sync.Status]int
 
 	for i, teamRepo := range repos {
 		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
@@ -212,55 +220,71 @@ func printMultiListTable(ctx context.Context, w io.Writer, repos []string, synce
 			return err
 		}
 
-		if grouped {
-			if i > 0 {
-				fmt.Fprintln(w)
-			}
-			fmt.Fprintf(w, "── %s ──\n", teamRepo)
-		} else {
-			fmt.Fprintf(w, "team: %s\n\n", teamRepo)
+		if i > 0 {
+			fmt.Fprintln(w)
 		}
 
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "SKILL\tVERSION\tSTATUS\tAGENTS")
-
-		for _, sk := range statuses {
-			ver := sk.LoadoutRef
-			if ver == "" && sk.Installed != nil {
-				ver = sk.Installed.DisplayVersion()
-			}
-
-			agents := ""
-			if sk.Installed != nil {
-				agents = strings.Join(sk.Installed.Targets, ", ")
-			}
-
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", sk.Name, ver, sk.Status.String(), agents)
-		}
-
-		tw.Flush()
-
-		counts := countStatuses(statuses)
-		if grouped {
-			parts := formatCounts(counts)
-			if parts != "" {
-				footerParts = append(footerParts, fmt.Sprintf("%s: %s", teamRepo, parts))
-			}
-		} else {
-			fmt.Fprintf(w, "\n%d current · %d outdated · %d missing · %d extra\n",
-				counts[sync.StatusCurrent], counts[sync.StatusOutdated],
-				counts[sync.StatusMissing], counts[sync.StatusExtra])
-		}
+		renderSkillTable(w, teamRepo, statuses)
+		allCounts = append(allCounts, countStatuses(statuses))
 	}
 
-	if grouped && len(footerParts) > 0 {
-		fmt.Fprintf(w, "\n%s\n", strings.Join(footerParts, "  ·  "))
-	}
+	// Summary footer.
+	fmt.Fprintln(w)
+	printStatusSummary(w, allCounts, repos)
 
 	if !st.Team.LastSync.IsZero() {
-		fmt.Fprintf(w, "Last sync: %s\n", st.Team.LastSync.Local().Format("2006-01-02 15:04"))
+		fmt.Fprintln(w, listDimStyle.Render("Last sync: "+st.Team.LastSync.Local().Format("2006-01-02 15:04")))
 	}
 	return nil
+}
+
+// renderSkillTable renders a single registry's skills as a styled table.
+func renderSkillTable(w io.Writer, repo string, statuses []sync.SkillStatus) {
+	// Header.
+	count := listCountStyle.Render(fmt.Sprintf("(%d skills)", len(statuses)))
+	fmt.Fprintf(w, "%s %s\n", listRegStyle.Render(repo), count)
+	fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(repo)+15)))
+
+	// Compute column widths in one pass.
+	maxName, maxVer, maxAuthor := 4, 7, 6
+	for _, sk := range statuses {
+		maxName = max(maxName, runewidth.StringWidth(sk.Name))
+		maxVer = max(maxVer, runewidth.StringWidth(sk.DisplayVersion()))
+		maxAuthor = max(maxAuthor, runewidth.StringWidth(sk.DisplayAuthor()))
+	}
+
+	// Rows.
+	for _, sk := range statuses {
+		name := listNameStyle.Render(runewidth.FillRight(sk.Name, maxName))
+		ver := listDimStyle.Render(runewidth.FillRight(sk.DisplayVersion(), maxVer))
+		author := listAuthorStyle.Render(runewidth.FillRight(sk.DisplayAuthor(), maxAuthor))
+		status := renderStatus(sk.Status)
+		agents := listDimStyle.Render(sk.DisplayAgents())
+
+		fmt.Fprintf(w, "  %s  %s  %s  %s  %s\n", name, ver, author, status, agents)
+	}
+}
+
+// printStatusSummary renders the colored status count footer.
+func printStatusSummary(w io.Writer, allCounts []map[sync.Status]int, repos []string) {
+	// Merge all counts.
+	merged := map[sync.Status]int{}
+	for _, c := range allCounts {
+		for s, n := range c {
+			merged[s] += n
+		}
+	}
+
+	order := []sync.Status{sync.StatusCurrent, sync.StatusOutdated, sync.StatusMissing, sync.StatusExtra}
+	var parts []string
+	for _, s := range order {
+		if part := renderStatusCount(s, merged[s]); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) > 0 {
+		fmt.Fprintln(w, strings.Join(parts, listDimStyle.Render(" · ")))
+	}
 }
 
 func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) error {
@@ -323,20 +347,4 @@ func countStatuses(statuses []sync.SkillStatus) map[sync.Status]int {
 	return m
 }
 
-func formatCounts(counts map[sync.Status]int) string {
-	var parts []string
-	if n := counts[sync.StatusCurrent]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d current", n))
-	}
-	if n := counts[sync.StatusOutdated]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d outdated", n))
-	}
-	if n := counts[sync.StatusMissing]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d missing", n))
-	}
-	if n := counts[sync.StatusExtra]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d extra", n))
-	}
-	return strings.Join(parts, " · ")
-}
 
