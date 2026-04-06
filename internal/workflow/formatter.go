@@ -18,6 +18,7 @@ type Formatter interface {
 	OnSkillSkipped(name string, status sync.SkillStatus)
 	OnSkillError(name string, err error)
 	OnSyncComplete(summary sync.SyncCompleteMsg)
+	OnLegacyFormat(repo string)
 
 	// Flush writes any buffered output (JSON mode). Text mode is a no-op.
 	Flush() error

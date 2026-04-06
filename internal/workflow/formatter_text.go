@@ -70,6 +70,10 @@ func (f *textFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	}
 }
 
+func (f *textFormatter) OnLegacyFormat(repo string) {
+	fmt.Fprintf(f.errOut, "note: %s uses legacy scribe.toml — consider migrating to scribe.yaml\n", repo)
+}
+
 func (f *textFormatter) Flush() error {
 	fmt.Fprintf(f.out, "\ndone: %d installed, %d updated, %d current, %d failed\n",
 		f.totalSummary.Installed, f.totalSummary.Updated,

@@ -98,6 +98,8 @@ func (f *jsonFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	}
 }
 
+func (f *jsonFormatter) OnLegacyFormat(_ string) {}
+
 func (f *jsonFormatter) Flush() error {
 	return json.NewEncoder(f.out).Encode(map[string]any{
 		"registries": f.registries,
