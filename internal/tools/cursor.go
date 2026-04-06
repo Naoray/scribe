@@ -31,13 +31,9 @@ func (t CursorTool) Detect() bool {
 }
 
 func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
-	workDir := t.WorkDir
-	if workDir == "" {
-		var err error
-		workDir, err = os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("getwd: %w", err)
-		}
+	workDir, err := t.resolveWorkDir()
+	if err != nil {
+		return nil, err
 	}
 
 	// Generate .cursor.mdc from SKILL.md in the store.
@@ -60,7 +56,7 @@ func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
 
 	// For namespaced names like "ArtistfyHQ-team-skills/deploy",
 	// flatten to a single .mdc filename to avoid subdirectories in .cursor/rules.
-	mdcName := strings.ReplaceAll(skillName, "/", "-") + ".mdc"
+	mdcName := SlugifyRegistry(skillName) + ".mdc"
 
 	link := filepath.Join(rulesDir, mdcName)
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
@@ -73,15 +69,11 @@ func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
 }
 
 func (t CursorTool) Uninstall(skillName string) error {
-	workDir := t.WorkDir
-	if workDir == "" {
-		var err error
-		workDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("getwd: %w", err)
-		}
+	workDir, err := t.resolveWorkDir()
+	if err != nil {
+		return err
 	}
-	mdcName := strings.ReplaceAll(skillName, "/", "-") + ".mdc"
+	mdcName := SlugifyRegistry(skillName) + ".mdc"
 	link := filepath.Join(workDir, ".cursor", "rules", mdcName)
 	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove cursor/%s: %w", skillName, err)
@@ -133,6 +125,18 @@ func extractFrontmatterField(content []byte, key string) string {
 	return ""
 }
 
+// resolveWorkDir returns t.WorkDir if set, otherwise falls back to os.Getwd().
+func (t CursorTool) resolveWorkDir() (string, error) {
+	if t.WorkDir != "" {
+		return t.WorkDir, nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getwd: %w", err)
+	}
+	return wd, nil
+}
+
 func stripFrontmatter(content []byte) []byte {
 	s := string(content)
 	if !strings.HasPrefix(s, "---") {
@@ -144,8 +148,4 @@ func stripFrontmatter(content []byte) []byte {
 		return content
 	}
 	return []byte(strings.TrimLeft(rest[idx+4:], "\n"))
-}
-
-func isSkillMD(path string) bool {
-	return strings.EqualFold(filepath.Base(path), "SKILL.md")
 }

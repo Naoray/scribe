@@ -11,6 +11,9 @@ import (
 	"github.com/Naoray/scribe/internal/paths"
 )
 
+// RegistryTypeGitHub is the registry type for GitHub-hosted registries.
+const RegistryTypeGitHub = "github"
+
 // RegistryConfig describes a connected skill registry.
 type RegistryConfig struct {
 	Repo     string `yaml:"repo"`
@@ -55,7 +58,7 @@ func (c *Config) AddRegistry(repo string) {
 	c.Registries = append(c.Registries, RegistryConfig{
 		Repo:    repo,
 		Enabled: true,
-		Type:    "github",
+		Type:    RegistryTypeGitHub,
 	})
 }
 
@@ -124,7 +127,7 @@ func migrateFromTOML(raw legacyTOML) *Config {
 		cfg.Registries = append(cfg.Registries, RegistryConfig{
 			Repo:    repo,
 			Enabled: true,
-			Type:    "github",
+			Type:    RegistryTypeGitHub,
 		})
 	}
 	return cfg

@@ -144,6 +144,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 	}
 
 	summary := SyncCompleteMsg{}
+	registrySlug := tools.SlugifyRegistry(teamRepo)
 
 	for _, sk := range statuses {
 		switch sk.Status {
@@ -194,7 +195,6 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			// Write files to canonical store once, then symlink per target.
-			registrySlug := tools.SlugifyRegistry(teamRepo)
 			canonicalDir, err := tools.WriteToStore(registrySlug, sk.Name, tFiles)
 			if err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("write store: %w", err)})

@@ -162,9 +162,6 @@ func parseAndMigrate(data []byte) (*State, error) {
 		s.Installed[nsKey] = skill
 	}
 
-	if s.Installed == nil {
-		s.Installed = make(map[string]InstalledSkill)
-	}
 	return s, nil
 }
 

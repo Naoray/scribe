@@ -226,10 +226,7 @@ func detectPackage(skillDir, scanBase string) string {
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(skillDir, target)
 	}
-	target, err = filepath.Clean(target), nil
-	if err != nil {
-		return ""
-	}
+	target = filepath.Clean(target)
 
 	// Check if the target is inside a sibling dir in the same scan base.
 	// Pattern: <scanBase>/<package>/<subdir>/SKILL.md
