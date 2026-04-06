@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Naoray/scribe/internal/state"
+	"gopkg.in/yaml.v3"
 )
 
 // validSkillName matches safe skill names that work as TOML keys and filesystem paths.
@@ -20,6 +21,16 @@ type SkillMeta struct {
 	Name        string
 	Description string
 	Version     string
+	Author      string
+}
+
+// rawFrontmatter maps the YAML frontmatter structure in SKILL.md files.
+type rawFrontmatter struct {
+	Name        string         `yaml:"name"`
+	Description string         `yaml:"description"`
+	Version     string         `yaml:"version"`
+	Author      string         `yaml:"author"`
+	Metadata    map[string]any `yaml:"metadata"`
 }
 
 // Skill represents a skill found on disk, optionally enriched with state info.
@@ -193,8 +204,7 @@ func detectPackage(skillDir, scanBase string) string {
 }
 
 // readSkillMetadata extracts metadata from SKILL.md frontmatter.
-// Parses name:, version:, and description: fields using line-by-line scanning
-// (not a YAML library) to avoid type coercion issues.
+// Parses YAML frontmatter and falls back to first paragraph for description.
 func readSkillMetadata(skillDir string) SkillMeta {
 	path := filepath.Join(skillDir, "SKILL.md")
 
@@ -203,71 +213,76 @@ func readSkillMetadata(skillDir string) SkillMeta {
 		return SkillMeta{}
 	}
 
-	f, err := os.Open(resolved)
+	data, err := os.ReadFile(resolved)
 	if err != nil {
 		return SkillMeta{}
 	}
-	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	inFrontmatter := false
-	frontmatterDone := false
+	fm := extractFrontmatter(data)
+	if fm == "" {
+		return SkillMeta{Description: extractFirstParagraph(data)}
+	}
+
+	var raw rawFrontmatter
+	if err := yaml.Unmarshal([]byte(fm), &raw); err != nil {
+		return SkillMeta{}
+	}
+
+	meta := SkillMeta{
+		Name:        raw.Name,
+		Description: truncateDescription(raw.Description),
+		Version:     raw.Version,
+		Author:      raw.Author,
+	}
+
+	// metadata.* overrides top-level (agentskills spec).
+	if v, ok := raw.Metadata["version"]; ok {
+		meta.Version = fmt.Sprint(v)
+	}
+	if v, ok := raw.Metadata["author"]; ok {
+		meta.Author = fmt.Sprint(v)
+	}
+
+	if meta.Description == "" {
+		meta.Description = extractFirstParagraph(data)
+	}
+
+	return meta
+}
+
+// extractFrontmatter returns the YAML content between --- delimiters.
+func extractFrontmatter(data []byte) string {
+	s := string(data)
+	if !strings.HasPrefix(strings.TrimSpace(s), "---") {
+		return ""
+	}
+	start := strings.Index(s, "---")
+	if start == -1 {
+		return ""
+	}
+	rest := s[start+3:]
+	end := strings.Index(rest, "---")
+	if end == -1 {
+		return ""
+	}
+	return rest[:end]
+}
+
+// extractFirstParagraph returns the first non-empty line after a # heading.
+func extractFirstParagraph(data []byte) string {
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	pastTitle := false
-
-	var meta SkillMeta
-
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		if line == "---" {
-			if !inFrontmatter && !frontmatterDone {
-				inFrontmatter = true
-				continue
-			}
-			if inFrontmatter {
-				inFrontmatter = false
-				frontmatterDone = true
-				continue
-			}
-		}
-
-		if inFrontmatter {
-			if strings.HasPrefix(line, "description:") {
-				val := strings.TrimSpace(strings.TrimPrefix(line, "description:"))
-				if val == "|" || val == ">" {
-					for scanner.Scan() {
-						next := strings.TrimSpace(scanner.Text())
-						if next != "" {
-							meta.Description = truncateDescription(next)
-							break
-						}
-					}
-				} else {
-					meta.Description = truncateDescription(val)
-				}
-				continue
-			}
-			if strings.HasPrefix(line, "version:") {
-				meta.Version = stripQuotes(strings.TrimSpace(strings.TrimPrefix(line, "version:")))
-				continue
-			}
-			if strings.HasPrefix(line, "name:") {
-				meta.Name = stripQuotes(strings.TrimSpace(strings.TrimPrefix(line, "name:")))
-				continue
-			}
-			continue
-		}
-
-		// Past frontmatter: look for first paragraph after # Title.
 		if strings.HasPrefix(line, "# ") {
 			pastTitle = true
 			continue
 		}
-		if pastTitle && meta.Description == "" && strings.TrimSpace(line) != "" {
-			meta.Description = truncateDescription(strings.TrimSpace(line))
+		if pastTitle && strings.TrimSpace(line) != "" {
+			return truncateDescription(strings.TrimSpace(line))
 		}
 	}
-	return meta
+	return ""
 }
 
 // stripQuotes removes surrounding single or double quotes from a YAML value.
