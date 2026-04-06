@@ -98,6 +98,22 @@ func (f *jsonFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	}
 }
 
+func (f *jsonFormatter) OnConnectDuplicate(_ string) {
+	// JSON mode: handled by caller via exit code / structured output.
+}
+
+func (f *jsonFormatter) OnConnectSaved(_ string) {
+	// JSON mode: connection status is implicit in the response.
+}
+
+func (f *jsonFormatter) OnConnectSyncing() {
+	// JSON mode: no progress output.
+}
+
+func (f *jsonFormatter) OnConnectSyncWarning(_ string, _ error) {
+	// JSON mode: sync warnings are not emitted as JSON yet.
+}
+
 func (f *jsonFormatter) Flush() error {
 	return json.NewEncoder(f.out).Encode(map[string]any{
 		"registries": f.registries,
