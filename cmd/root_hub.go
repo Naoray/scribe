@@ -21,8 +21,14 @@ import (
 func runHub(cmd *cobra.Command, args []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 
-	cfg, _ := config.Load()
-	st, _ := state.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = &config.Config{}
+	}
+	st, stErr := state.Load()
+	if stErr != nil {
+		st = &state.State{Installed: make(map[string]state.InstalledSkill)}
+	}
 
 	// JSON mode: --json flag, non-TTY stdout, or CI environment.
 	if jsonFlag || !isatty.IsTerminal(os.Stdout.Fd()) || os.Getenv("CI") != "" {
@@ -104,8 +110,14 @@ func writeStatusStyled(w io.Writer, cfg *config.Config, st *state.State) {
 		{"Last sync", formatRelativeTime(st.LastSync)},
 	}
 
-	for _, r := range repos {
-		lines = append(lines[:1], append([]struct{ label, value string }{{"", r}}, lines[1:]...)...)
+	if len(repos) > 0 {
+		var out []struct{ label, value string }
+		out = append(out, lines[0]) // "Registries" header
+		for _, r := range repos {
+			out = append(out, struct{ label, value string }{"", r})
+		}
+		out = append(out, lines[1:]...) // Skills, Last sync
+		lines = out
 	}
 
 	for _, l := range lines {
@@ -140,9 +152,13 @@ func showActionMenu(cmd *cobra.Command) error {
 		return err
 	}
 
-	// Execute the selected command through the full Cobra lifecycle.
-	rootCmd.SetArgs([]string{action})
-	return rootCmd.Execute()
+	// Look up and execute the subcommand directly to avoid recursive rootCmd.Execute().
+	sub, _, err := rootCmd.Find([]string{action})
+	if err != nil {
+		return fmt.Errorf("unknown action: %s", action)
+	}
+	sub.SetArgs(nil)
+	return sub.Execute()
 }
 
 func formatRelativeTime(t time.Time) string {
