@@ -65,7 +65,7 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	skills, err := discovery.OnDisk(st)
 	if err != nil {
-		return err
+		return fmt.Errorf("discover skills: %w", err)
 	}
 
 	skill, ok := findSkill(skills, args[0])

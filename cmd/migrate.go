@@ -42,7 +42,7 @@ new scribe.yaml format, and pushes the change as a single commit
 func runMigrate(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	var repo string
@@ -56,7 +56,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 
 	owner, repoName, err := manifest.ParseOwnerRepo(repo)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse registry %q: %w", repo, err)
 	}
 
 	ctx := cmd.Context()
@@ -82,12 +82,12 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 
 	converted, err := migrate.Convert(raw)
 	if err != nil {
-		return err
+		return fmt.Errorf("convert manifest: %w", err)
 	}
 
 	encoded, err := converted.Encode()
 	if err != nil {
-		return err
+		return fmt.Errorf("encode manifest: %w", err)
 	}
 
 	// Show preview — styled for TTY, plain YAML for pipes.
