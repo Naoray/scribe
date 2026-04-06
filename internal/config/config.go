@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v3"
@@ -48,18 +49,41 @@ func (c *Config) TeamRepos() []string {
 	return repos
 }
 
-// AddRegistry appends a registry if not already present.
-func (c *Config) AddRegistry(repo string) {
-	for _, r := range c.Registries {
-		if r.Repo == repo {
+// AddRegistry adds or updates a registry in the config.
+func (c *Config) AddRegistry(rc RegistryConfig) {
+	for i := range c.Registries {
+		if strings.EqualFold(c.Registries[i].Repo, rc.Repo) {
+			c.Registries[i] = rc
 			return
 		}
 	}
-	c.Registries = append(c.Registries, RegistryConfig{
-		Repo:    repo,
-		Enabled: true,
-		Type:    RegistryTypeGitHub,
-	})
+	c.Registries = append(c.Registries, rc)
+}
+
+// FindRegistry returns the RegistryConfig for a given repo, or nil if not found.
+func (c *Config) FindRegistry(repo string) *RegistryConfig {
+	for i := range c.Registries {
+		if strings.EqualFold(c.Registries[i].Repo, repo) {
+			return &c.Registries[i]
+		}
+	}
+	return nil
+}
+
+// EnabledRegistries returns all registries that are enabled.
+func (c *Config) EnabledRegistries() []RegistryConfig {
+	var enabled []RegistryConfig
+	for _, rc := range c.Registries {
+		if rc.Enabled {
+			enabled = append(enabled, rc)
+		}
+	}
+	return enabled
+}
+
+// IsTeam returns whether this is a team registry.
+func (rc RegistryConfig) IsTeam() bool {
+	return rc.Type == "team"
 }
 
 // legacyTOML is the shadow struct for reading old config.toml files.

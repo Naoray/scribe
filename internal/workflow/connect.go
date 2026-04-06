@@ -8,6 +8,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 )
@@ -79,7 +80,11 @@ func StepValidateManifest(_ context.Context, b *Bag) error {
 }
 
 func StepSaveConfig(_ context.Context, b *Bag) error {
-	b.Config.AddRegistry(b.RepoArg)
+	b.Config.AddRegistry(config.RegistryConfig{
+		Repo:    b.RepoArg,
+		Enabled: true,
+		Type:    config.RegistryTypeGitHub,
+	})
 	if err := b.Config.Save(); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
