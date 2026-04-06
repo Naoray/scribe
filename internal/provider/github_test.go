@@ -65,19 +65,22 @@ catalog:
 	}
 
 	p := provider.NewGitHubProvider(client)
-	entries, err := p.Discover(context.Background(), "acme/team-skills")
+	result, err := p.Discover(context.Background(), "acme/team-skills")
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	if len(entries) != 1 {
-		t.Fatalf("entries: got %d, want 1", len(entries))
+	if !result.IsTeam {
+		t.Error("expected IsTeam=true for scribe.yaml discovery")
 	}
-	if entries[0].Name != "deploy" {
-		t.Errorf("name: got %q", entries[0].Name)
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries: got %d, want 1", len(result.Entries))
 	}
-	if entries[0].Author != "alice" {
-		t.Errorf("author: got %q", entries[0].Author)
+	if result.Entries[0].Name != "deploy" {
+		t.Errorf("name: got %q", result.Entries[0].Name)
+	}
+	if result.Entries[0].Author != "alice" {
+		t.Errorf("author: got %q", result.Entries[0].Author)
 	}
 }
 
@@ -100,13 +103,16 @@ path = "skills/deploy"
 	p := provider.NewGitHubProvider(client)
 	p.OnWarning = func(msg string) { warnings = append(warnings, msg) }
 
-	entries, err := p.Discover(context.Background(), "acme/team-skills")
+	result, err := p.Discover(context.Background(), "acme/team-skills")
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	if len(entries) != 1 {
-		t.Fatalf("entries: got %d, want 1", len(entries))
+	if !result.IsTeam {
+		t.Error("expected IsTeam=true for scribe.toml discovery")
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries: got %d, want 1", len(result.Entries))
 	}
 	if len(warnings) == 0 {
 		t.Error("expected legacy warning, got none")
@@ -183,13 +189,16 @@ catalog:
 	}
 
 	p := provider.NewGitHubProvider(client)
-	entries, err := p.Discover(context.Background(), "acme/repo")
+	result, err := p.Discover(context.Background(), "acme/repo")
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	if len(entries) != 1 || entries[0].Name != "from-yaml" {
-		t.Errorf("expected scribe.yaml to win, got %v", entries)
+	if !result.IsTeam {
+		t.Error("expected IsTeam=true for scribe.yaml discovery")
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Name != "from-yaml" {
+		t.Errorf("expected scribe.yaml to win, got %v", result.Entries)
 	}
 }
 
@@ -213,16 +222,19 @@ func TestDiscoverMarketplaceBeforeTreeScan(t *testing.T) {
 	}
 
 	p := provider.NewGitHubProvider(client)
-	entries, err := p.Discover(context.Background(), "acme/repo")
+	result, err := p.Discover(context.Background(), "acme/repo")
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	if len(entries) != 1 || entries[0].Name != "deploy" {
-		t.Errorf("expected marketplace entry, got %v", entries)
+	if result.IsTeam {
+		t.Error("expected IsTeam=false for marketplace discovery")
 	}
-	if entries[0].Group != "plug1" {
-		t.Errorf("expected Group=plug1, got %q", entries[0].Group)
+	if len(result.Entries) != 1 || result.Entries[0].Name != "deploy" {
+		t.Errorf("expected marketplace entry, got %v", result.Entries)
+	}
+	if result.Entries[0].Group != "plug1" {
+		t.Errorf("expected Group=plug1, got %q", result.Entries[0].Group)
 	}
 }
 
@@ -236,17 +248,20 @@ func TestDiscoverTreeScanAsLastResort(t *testing.T) {
 	}
 
 	p := provider.NewGitHubProvider(client)
-	entries, err := p.Discover(context.Background(), "acme/community-skills")
+	result, err := p.Discover(context.Background(), "acme/community-skills")
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	if len(entries) != 2 {
-		t.Fatalf("entries: got %d, want 2", len(entries))
+	if result.IsTeam {
+		t.Error("expected IsTeam=false for tree scan discovery")
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("entries: got %d, want 2", len(result.Entries))
 	}
 
 	names := map[string]bool{}
-	for _, e := range entries {
+	for _, e := range result.Entries {
 		names[e.Name] = true
 	}
 	if !names["deploy"] || !names["lint"] {

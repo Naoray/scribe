@@ -11,13 +11,19 @@ import (
 // Re-exported from tools for caller clarity.
 type File = tools.SkillFile
 
+// DiscoverResult holds the output of a Discover call.
+type DiscoverResult struct {
+	Entries []manifest.Entry
+	IsTeam  bool // true if discovery found a scribe.yaml/toml with a team section
+}
+
 // Provider abstracts how skills are discovered and fetched from a repository.
 // Different repo formats (scribe.yaml, marketplace.json, bare SKILL.md trees)
 // are handled transparently behind this interface.
 type Provider interface {
 	// Discover probes a repository and returns all discoverable catalog entries.
 	// The repo argument is "owner/repo" format.
-	Discover(ctx context.Context, repo string) ([]manifest.Entry, error)
+	Discover(ctx context.Context, repo string) (*DiscoverResult, error)
 
 	// Fetch downloads all files for a single catalog entry.
 	// Returns skill files ready to be written to the canonical store.

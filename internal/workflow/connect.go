@@ -52,7 +52,7 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 		return fmt.Errorf("internal: Provider not set in workflow bag")
 	}
 
-	entries, err := b.Provider.Discover(ctx, b.RepoArg)
+	result, err := b.Provider.Discover(ctx, b.RepoArg)
 	if err != nil {
 		return fmt.Errorf("could not discover skills in %s: %w", b.RepoArg, err)
 	}
@@ -61,8 +61,11 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 	b.manifest = &manifest.Manifest{
 		APIVersion: "scribe/v1",
 		Kind:       "Registry",
-		Team:       &manifest.Team{Name: b.RepoArg},
-		Catalog:    entries,
+		Catalog:    result.Entries,
+	}
+	// Only set Team if discovery found an actual team manifest (scribe.yaml/toml).
+	if result.IsTeam {
+		b.manifest.Team = &manifest.Team{Name: b.RepoArg}
 	}
 	return nil
 }

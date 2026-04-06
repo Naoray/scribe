@@ -44,7 +44,7 @@ func (p *GitHubProvider) warn(msg string) {
 }
 
 // Discover probes the repo using a fallback chain and returns all discovered entries.
-func (p *GitHubProvider) Discover(ctx context.Context, repo string) ([]manifest.Entry, error) {
+func (p *GitHubProvider) Discover(ctx context.Context, repo string) (*DiscoverResult, error) {
 	owner, repoName, err := manifest.ParseOwnerRepo(repo)
 	if err != nil {
 		return nil, err
@@ -53,26 +53,26 @@ func (p *GitHubProvider) Discover(ctx context.Context, repo string) ([]manifest.
 	// Step 1: Try scribe.yaml.
 	entries, err := p.discoverScribeYAML(ctx, owner, repoName)
 	if err == nil {
-		return entries, nil
+		return &DiscoverResult{Entries: entries, IsTeam: true}, nil
 	}
 
 	// Step 2: Try scribe.toml (legacy).
 	entries, err = p.discoverScribeTOML(ctx, owner, repoName)
 	if err == nil {
 		p.warn(fmt.Sprintf("%s uses legacy scribe.toml format — consider migrating to scribe.yaml", repo))
-		return entries, nil
+		return &DiscoverResult{Entries: entries, IsTeam: true}, nil
 	}
 
 	// Step 3: Try .claude-plugin/marketplace.json.
 	entries, err = p.discoverMarketplace(ctx, owner, repoName)
 	if err == nil {
-		return entries, nil
+		return &DiscoverResult{Entries: entries, IsTeam: false}, nil
 	}
 
 	// Step 4: Tree scan for SKILL.md files.
 	entries, err = p.discoverTreeScan(ctx, owner, repoName)
 	if err == nil && len(entries) > 0 {
-		return entries, nil
+		return &DiscoverResult{Entries: entries, IsTeam: false}, nil
 	}
 
 	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml, marketplace.json, and SKILL.md files)", repo)

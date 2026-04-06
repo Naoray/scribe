@@ -17,8 +17,11 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 
 type mockProvider struct{}
 
-func (m *mockProvider) Discover(ctx context.Context, repo string) ([]manifest.Entry, error) {
-	return []manifest.Entry{{Name: "test"}}, nil
+func (m *mockProvider) Discover(ctx context.Context, repo string) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{
+		Entries: []manifest.Entry{{Name: "test"}},
+		IsTeam:  false,
+	}, nil
 }
 
 func (m *mockProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]tools.SkillFile, error) {
