@@ -206,7 +206,7 @@ func printSkillHeader(w io.Writer, skill discovery.Skill) {
 	if skill.Description != "" {
 		fmt.Fprintln(w, explDimStyle.Render(skill.Description))
 	}
-	type kv struct{ key, val string }
+	type kv struct{ key, value string }
 	var meta []kv
 	if skill.Version != "" {
 		meta = append(meta, kv{"Version", skill.Version})
@@ -218,7 +218,7 @@ func printSkillHeader(w io.Writer, skill discovery.Skill) {
 		meta = append(meta, kv{"Agents", strings.Join(skill.Targets, ", ")})
 	}
 	for _, m := range meta {
-		fmt.Fprintf(w, "%s %s\n", explDimStyle.Render(m.key+":"), m.val)
+		fmt.Fprintf(w, "%s %s\n", explDimStyle.Render(m.key+":"), m.value)
 	}
 	fmt.Fprintln(w, explDivStyle.Render(strings.Repeat("─", 60)))
 }
