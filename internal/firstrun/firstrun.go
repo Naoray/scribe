@@ -21,7 +21,7 @@ func BuiltinRegistries() []config.RegistryConfig {
 		registries[i] = config.RegistryConfig{
 			Repo:    repo,
 			Enabled: true,
-			Type:    "community",
+			Type:    config.RegistryTypeCommunity,
 			Builtin: true,
 		}
 	}
