@@ -9,6 +9,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/migrate"
 )
 
 // ConnectSteps returns the step list for the connect command.
@@ -51,16 +52,18 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 		return err
 	}
 
-	// Try scribe.yaml first, fall back to scribe.toml.
+	// Try scribe.yaml first, fall back to scribe.toml (converting via migrate).
 	raw, err := b.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
-	if err != nil {
+	var m *manifest.Manifest
+	if err == nil {
+		m, err = manifest.Parse(raw)
+	} else {
 		raw, err = b.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
 		if err != nil {
 			return fmt.Errorf("could not access %s: %w", b.RepoArg, err)
 		}
+		m, err = migrate.Convert(raw)
 	}
-
-	m, err := manifest.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("invalid manifest in %s: %w", b.RepoArg, err)
 	}
@@ -69,7 +72,7 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 }
 
 func StepValidateManifest(_ context.Context, b *Bag) error {
-	if !b.manifest.IsLoadout() {
+	if !b.manifest.IsRegistry() {
 		return fmt.Errorf("%s manifest has no team section — is this a skill package?", b.RepoArg)
 	}
 	return nil

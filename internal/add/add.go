@@ -12,6 +12,7 @@ import (
 	"github.com/Naoray/scribe/internal/discovery"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/targets"
 )
@@ -75,7 +76,6 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 func (a *Adder) DiscoverRemote(targetManifest *manifest.Manifest, otherManifests map[string]*manifest.Manifest) []Candidate {
 	var candidates []Candidate
 
-	// Build target names set from catalog entries.
 	targetNames := make(map[string]bool, len(targetManifest.Catalog))
 	for _, e := range targetManifest.Catalog {
 		targetNames[e.Name] = true
@@ -154,19 +154,15 @@ func ReadLocalSkillFiles(c Candidate) (map[string]string, error) {
 // in a single atomic commit. For each candidate: adds a source reference or
 // uploads files + self-reference. Emits events throughout.
 func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candidate) error {
-	owner, repo, err := splitRepo(targetRepo)
+	owner, repo, err := manifest.ParseOwnerRepo(targetRepo)
 	if err != nil {
 		return err
 	}
 
 	// Fetch the current manifest with fallback.
-	raw, _, err := a.fetchManifest(ctx, owner, repo)
+	m, err := a.fetchManifest(ctx, owner, repo)
 	if err != nil {
 		return fmt.Errorf("fetch manifest: %w", err)
-	}
-	m, err := manifest.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("parse manifest: %w", err)
 	}
 
 	// Accumulate all files to push in one commit.
@@ -175,6 +171,11 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	var failed int
 
 	for _, c := range candidates {
+		// Skip if already in catalog (prevents duplicates within a batch).
+		if m.FindByName(c.Name) != nil {
+			continue
+		}
+
 		a.emit(SkillAddingMsg{Name: c.Name, Upload: c.NeedsUpload()})
 
 		if c.NeedsUpload() {
@@ -226,25 +227,18 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	return a.Client.PushFiles(ctx, owner, repo, pushFiles, msg)
 }
 
-// fetchManifest tries scribe.yaml first, falls back to scribe.toml.
-func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) ([]byte, string, error) {
+// fetchManifest tries scribe.yaml first, falls back to scribe.toml (converting via migrate).
+func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
 	raw, err := a.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
 	if err == nil {
-		return raw, manifest.ManifestFilename, nil
+		return manifest.Parse(raw)
 	}
 
 	raw, legacyErr := a.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
 	if legacyErr != nil {
-		return nil, "", fmt.Errorf("fetch manifest: %w", err)
+		return nil, fmt.Errorf("fetch manifest: %w", err)
 	}
 
-	return raw, manifest.LegacyManifestFilename, nil
+	return migrate.Convert(raw)
 }
 
-func splitRepo(teamRepo string) (owner, repo string, err error) {
-	parts := strings.SplitN(teamRepo, "/", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo", teamRepo)
-	}
-	return parts[0], parts[1], nil
-}

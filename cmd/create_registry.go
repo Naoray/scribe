@@ -206,7 +206,7 @@ func scaffoldYAML(team string) string {
 	return fmt.Sprintf(`apiVersion: scribe/v1
 kind: Registry
 team:
-  name: %s
+  name: %q
   description: %q
 
 # Add skills here. Example:

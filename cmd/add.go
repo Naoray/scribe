@@ -16,6 +16,7 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/targets"
@@ -107,16 +108,9 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid target registry: %w", err)
 	}
-	targetRaw, err := client.FetchFile(ctx, targetOwner, targetRepoName, manifest.ManifestFilename, "HEAD")
+	targetManifest, err := fetchRegistryManifest(ctx, client, targetOwner, targetRepoName)
 	if err != nil {
-		targetRaw, err = client.FetchFile(ctx, targetOwner, targetRepoName, manifest.LegacyManifestFilename, "HEAD")
-		if err != nil {
-			return fmt.Errorf("fetch target registry: %w", err)
-		}
-	}
-	targetManifest, err := manifest.Parse(targetRaw)
-	if err != nil {
-		return fmt.Errorf("parse target registry: %w", err)
+		return fmt.Errorf("fetch target registry: %w", err)
 	}
 
 	// Fetch other registries for remote discovery.
@@ -129,15 +123,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			continue // skip malformed registry entries
 		}
-		raw, err := client.FetchFile(ctx, o, r, manifest.ManifestFilename, "HEAD")
-		if err != nil {
-			raw, err = client.FetchFile(ctx, o, r, manifest.LegacyManifestFilename, "HEAD")
-			if err != nil {
-				continue // skip unreachable registries
-			}
-		}
-		m, err := manifest.Parse(raw)
-		if err != nil || !m.IsLoadout() {
+		m, err := fetchRegistryManifest(ctx, client, o, r)
+		if err != nil || !m.IsRegistry() {
 			continue
 		}
 		otherManifests[repo] = m
@@ -428,4 +415,20 @@ func autoSync(ctx context.Context, targetRepo string, st *state.State, client *g
 		return false
 	}
 	return true
+}
+
+// fetchRegistryManifest fetches a manifest, trying scribe.yaml first then
+// falling back to scribe.toml (converting TOML to the new format via migrate).
+func fetchRegistryManifest(ctx context.Context, client *gh.Client, owner, repo string) (*manifest.Manifest, error) {
+	raw, err := client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
+	if err == nil {
+		return manifest.Parse(raw)
+	}
+
+	raw, legacyErr := client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
+	if legacyErr != nil {
+		return nil, fmt.Errorf("fetch manifest: %w", err)
+	}
+
+	return migrate.Convert(raw)
 }

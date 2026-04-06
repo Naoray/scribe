@@ -1,6 +1,9 @@
 package sync
 
-import "github.com/Naoray/scribe/internal/state"
+import (
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/state"
+)
 
 // Status describes how a skill compares against the team loadout.
 type Status int
@@ -31,8 +34,9 @@ func (s Status) String() string {
 type SkillStatus struct {
 	Name       string
 	Status     Status
-	Installed  *state.InstalledSkill // nil if not installed
-	LoadoutRef string                // the ref from scribe.toml (e.g. "v1.0.0", "main")
+	Installed  *state.InstalledSkill  // nil if not installed
+	Entry      *manifest.Entry        // catalog entry, nil for StatusExtra
+	LoadoutRef string                 // the ref from the manifest (e.g. "v1.0.0", "main")
 	Maintainer string
 	IsPackage  bool
 }

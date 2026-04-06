@@ -11,7 +11,3 @@ func CommandHash(install, update string) string {
 	return fmt.Sprintf("%x", h)
 }
 
-// CommandHashChanged reports whether the command hash has changed.
-func CommandHashChanged(oldHash, newHash string) bool {
-	return oldHash != newHash
-}

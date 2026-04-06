@@ -39,6 +39,9 @@ type Package struct {
 	Repository  string   `yaml:"repository,omitempty"`
 }
 
+// EntryTypePackage is the type value for package catalog entries.
+const EntryTypePackage = "package"
+
 // Entry represents one item in the catalog list.
 type Entry struct {
 	Name        string `yaml:"name"`
@@ -59,7 +62,7 @@ func (e Entry) Maintainer() string {
 
 // IsPackage reports whether this entry is a package-type entry.
 func (e Entry) IsPackage() bool {
-	return e.Type == "package"
+	return e.Type == EntryTypePackage
 }
 
 type Targets struct {
@@ -101,20 +104,24 @@ func (m *Manifest) Validate() error {
 	if m.Team != nil && m.Package != nil {
 		return errors.New("manifest cannot have both team and package sections")
 	}
+	if m.Kind == "Registry" && m.Team == nil {
+		return errors.New("kind is Registry but no team section present")
+	}
+	if m.Kind == "Package" && m.Package == nil {
+		return errors.New("kind is Package but no package section present")
+	}
 
-	// Check for duplicate names in catalog.
 	seen := make(map[string]bool, len(m.Catalog))
 	for _, e := range m.Catalog {
+		if e.Name == "" {
+			return errors.New("catalog entry has empty name")
+		}
 		if seen[e.Name] {
 			return fmt.Errorf("duplicate catalog entry name %q", e.Name)
 		}
 		seen[e.Name] = true
-	}
-
-	// Validate entry types.
-	for _, e := range m.Catalog {
-		if e.Type != "" && e.Type != "package" {
-			return fmt.Errorf("unknown entry type %q for %q (expected \"\" or \"package\")", e.Type, e.Name)
+		if e.Type != "" && e.Type != EntryTypePackage {
+			return fmt.Errorf("unknown entry type %q for %q (expected \"\" or %q)", e.Type, e.Name, EntryTypePackage)
 		}
 	}
 
