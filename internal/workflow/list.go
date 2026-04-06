@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/discovery"
@@ -87,10 +88,11 @@ var (
 	}
 )
 
-// renderStatus returns a styled "icon label" string for a sync status.
+// renderStatus returns a styled "icon label" string for a sync status, padded to consistent width.
 func renderStatus(s sync.Status) string {
 	d := s.Display()
-	return statusStyles[s].Render(d.Icon + " " + d.Label)
+	raw := d.Icon + " " + d.Label
+	return statusStyles[s].Render(runewidth.FillRight(raw, 10))
 }
 
 // renderStatusCount returns a styled "N label" string, or "" if count is zero.
@@ -143,8 +145,8 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 		// Compute column widths.
 		maxName, maxVer := 4, 7
 		for _, sk := range g.skills {
-			maxName = max(maxName, len(sk.Name))
-			maxVer = max(maxVer, len(sk.Version))
+			maxName = max(maxName, runewidth.StringWidth(sk.Name))
+			maxVer = max(maxVer, runewidth.StringWidth(sk.Version))
 		}
 
 		for _, sk := range g.skills {
@@ -154,8 +156,8 @@ func printLocalTable(w io.Writer, skills []discovery.Skill) error {
 			}
 			agents := listDimStyle.Render(strings.Join(sk.Targets, ", "))
 
-			name := listNameStyle.Render(fmt.Sprintf("%-*s", maxName, sk.Name))
-			verStr := listDimStyle.Render(fmt.Sprintf("%-*s", maxVer, ver))
+			name := listNameStyle.Render(runewidth.FillRight(sk.Name, maxName))
+			verStr := listDimStyle.Render(runewidth.FillRight(ver, maxVer))
 
 			fmt.Fprintf(w, "  %s  %s  %s\n", name, verStr, agents)
 		}
@@ -243,20 +245,20 @@ func renderSkillTable(w io.Writer, repo string, statuses []sync.SkillStatus) {
 	// Compute column widths in one pass.
 	maxName, maxVer, maxAuthor := 4, 7, 6
 	for _, sk := range statuses {
-		maxName = max(maxName, len(sk.Name))
-		maxVer = max(maxVer, len(sk.DisplayVersion()))
-		maxAuthor = max(maxAuthor, len(sk.DisplayAuthor()))
+		maxName = max(maxName, runewidth.StringWidth(sk.Name))
+		maxVer = max(maxVer, runewidth.StringWidth(sk.DisplayVersion()))
+		maxAuthor = max(maxAuthor, runewidth.StringWidth(sk.DisplayAuthor()))
 	}
 
 	// Rows.
 	for _, sk := range statuses {
-		name := listNameStyle.Render(fmt.Sprintf("%-*s", maxName, sk.Name))
-		ver := listDimStyle.Render(fmt.Sprintf("%-*s", maxVer, sk.DisplayVersion()))
-		author := listAuthorStyle.Render(fmt.Sprintf("%-*s", maxAuthor, sk.DisplayAuthor()))
+		name := listNameStyle.Render(runewidth.FillRight(sk.Name, maxName))
+		ver := listDimStyle.Render(runewidth.FillRight(sk.DisplayVersion(), maxVer))
+		author := listAuthorStyle.Render(runewidth.FillRight(sk.DisplayAuthor(), maxAuthor))
 		status := renderStatus(sk.Status)
 		agents := listDimStyle.Render(sk.DisplayAgents())
 
-		fmt.Fprintf(w, "  %s  %s  %s  %-12s  %s\n", name, ver, author, status, agents)
+		fmt.Fprintf(w, "  %s  %s  %s  %s  %s\n", name, ver, author, status, agents)
 	}
 }
 

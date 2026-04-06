@@ -90,8 +90,12 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Show styled preview.
-	renderMigratePreview(owner+"/"+repoName, converted)
+	// Show preview — styled for TTY, plain YAML for pipes.
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		renderMigratePreview(owner+"/"+repoName, converted)
+	} else {
+		fmt.Printf("Converted %s/%s:\n\n%s\n", owner, repoName, string(encoded))
+	}
 
 	if isatty.IsTerminal(os.Stdin.Fd()) {
 		var confirm bool
