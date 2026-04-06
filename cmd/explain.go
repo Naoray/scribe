@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -93,18 +94,37 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return renderSkillBody(w, content)
 	}
 
-	// Always show the rendered skill file first — instant feedback.
-	if err := explainRendered(w, skill, content); err != nil {
+	if rawFlag {
+		return explainRendered(w, skill, content)
+	}
+
+	// Default interactive mode: show preview, expand on Enter.
+	body := stripFrontmatter(content)
+	preview, hasMore := extractPreview(body, previewParagraphs)
+
+	printSkillHeader(w, skill)
+	if err := renderMarkdownTo(w, preview); err != nil {
 		return err
 	}
 
-	if rawFlag {
-		return nil
+	stdinTTY := isatty.IsTerminal(os.Stdin.Fd())
+
+	if hasMore && stdinTTY {
+		if promptExpand(w) {
+			fullRendered, err := renderMarkdownString(body)
+			if err != nil {
+				return err
+			}
+			if err := showInPager(fullRendered); err != nil {
+				// Pager failed — fall back to inline print.
+				fmt.Fprint(w, fullRendered)
+			}
+		}
 	}
 
 	// Offer AI explanation if an LLM CLI is available and stdin is interactive.
 	if _, err := detectLLMCLI(); err == nil {
-		if isatty.IsTerminal(os.Stdin.Fd()) {
+		if stdinTTY {
 			return offerAIExplanation(w, cmd.Context(), content)
 		}
 	}
@@ -206,13 +226,75 @@ func printSkillHeader(w io.Writer, skill discovery.Skill) {
 
 func renderSkillBody(w io.Writer, content string) error {
 	body := stripFrontmatter(content)
-	rendered, err := glamour.Render(body, "auto")
+	return renderMarkdownTo(w, body)
+}
+
+// previewParagraphs is the number of markdown paragraphs to show before
+// prompting the user to expand. Paragraph = text separated by blank lines.
+const previewParagraphs = 3
+
+// extractPreview splits a markdown body at paragraph boundaries (blank lines).
+// It returns the first maxParagraphs paragraphs and whether more content exists.
+func extractPreview(body string, maxParagraphs int) (preview string, hasMore bool) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "", false
+	}
+	parts := strings.SplitN(body, "\n\n", maxParagraphs+1)
+	if len(parts) <= maxParagraphs {
+		return body, false
+	}
+	return strings.Join(parts[:maxParagraphs], "\n\n"), true
+}
+
+// renderMarkdownTo renders a markdown string through glamour to the writer.
+func renderMarkdownTo(w io.Writer, md string) error {
+	rendered, err := glamour.Render(md, "auto")
 	if err != nil {
-		fmt.Fprintln(w, body)
+		fmt.Fprintln(w, md)
 		return nil
 	}
 	fmt.Fprint(w, rendered)
 	return nil
+}
+
+// renderMarkdownString renders markdown to a string for use with a pager.
+func renderMarkdownString(md string) (string, error) {
+	rendered, err := glamour.Render(md, "auto")
+	if err != nil {
+		return md, nil
+	}
+	return rendered, nil
+}
+
+// promptExpand shows a hint and waits for the user to press Enter or q.
+func promptExpand(w io.Writer) bool {
+	fmt.Fprintln(w, explDimStyle.Render("  ↵ Enter to read more · q to skip"))
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	return strings.TrimSpace(line) != "q"
+}
+
+// showInPager pipes content through the system pager (less, more, or $PAGER).
+func showInPager(content string) error {
+	pager := os.Getenv("PAGER")
+	if pager == "" {
+		if _, err := exec.LookPath("less"); err == nil {
+			pager = "less -RFX"
+		} else if _, err := exec.LookPath("more"); err == nil {
+			pager = "more"
+		} else {
+			// No pager available — caller should fall back to inline print.
+			return fmt.Errorf("no pager found")
+		}
+	}
+
+	parts := strings.Fields(pager)
+	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd.Stdin = strings.NewReader(content)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func explainRendered(w io.Writer, skill discovery.Skill, content string) error {
