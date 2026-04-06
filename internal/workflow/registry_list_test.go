@@ -11,13 +11,14 @@ import (
 )
 
 func TestCountSkillsPerRegistry(t *testing.T) {
+	// Keys are namespaced: owner/skill. CountSkillsPerRegistry matches
+	// the owner prefix against each repo's owner.
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"browse": {Registries: []string{"ArtistfyHQ/skills"}},
-			"deploy": {Registries: []string{"ArtistfyHQ/skills", "Naoray/my-skills"}},
-			"lint":   {Registries: []string{"Naoray/my-skills"}},
-			"orphan": {Registries: nil},
-			"empty":  {Registries: []string{}},
+			"ArtistfyHQ/browse": {},
+			"ArtistfyHQ/deploy": {},
+			"Naoray/lint":       {},
+			"local/orphan":      {},
 		},
 	}
 
@@ -29,7 +30,7 @@ func TestCountSkillsPerRegistry(t *testing.T) {
 		{
 			"multi-registry counts",
 			[]string{"ArtistfyHQ/skills", "Naoray/my-skills"},
-			map[string]int{"ArtistfyHQ/skills": 2, "Naoray/my-skills": 2},
+			map[string]int{"ArtistfyHQ/skills": 2, "Naoray/my-skills": 1},
 		},
 		{
 			"case-insensitive match",
@@ -64,10 +65,10 @@ func TestPrintRegistryJSON_Shape(t *testing.T) {
 	syncTime := time.Date(2026, 4, 3, 10, 0, 0, 0, time.UTC)
 
 	st := &state.State{
-		Team: state.TeamState{LastSync: syncTime},
+		LastSync: syncTime,
 		Installed: map[string]state.InstalledSkill{
-			"browse": {Registries: []string{"Foo/bar"}},
-			"deploy": {Registries: []string{"Foo/bar"}},
+			"Foo/browse": {},
+			"Foo/deploy": {},
 		},
 	}
 

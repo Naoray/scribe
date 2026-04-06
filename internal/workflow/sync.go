@@ -20,7 +20,6 @@ func SyncSteps() []Step {
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
 		{"CheckConnected", StepCheckConnected},
-		{"MigrateRegistries", StepMigrateRegistries},
 		{"FilterRegistries", StepFilterRegistries},
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTargets", StepResolveTargets},
@@ -60,11 +59,6 @@ func StepCheckConnected(_ context.Context, b *Bag) error {
 	if len(b.Config.TeamRepos()) == 0 {
 		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
-	return nil
-}
-
-func StepMigrateRegistries(_ context.Context, b *Bag) error {
-	b.State.MigrateRegistries(b.Config.TeamRepos()[0])
 	return nil
 }
 
@@ -134,10 +128,6 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 			return err
 		}
 
-		// Track which registry each synced skill belongs to.
-		for name := range resolved {
-			b.State.AddRegistry(name, teamRepo)
-		}
 		if err := b.State.Save(); err != nil {
 			return fmt.Errorf("save state: %w", err)
 		}

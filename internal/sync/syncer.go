@@ -221,7 +221,7 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.St
 				Version:   src.Ref,
 				CommitSHA: latestSHA,
 				Source:    sk.Entry.Source,
-				Targets:   targetNames,
+				Tools:     targetNames,
 				Paths:     paths,
 			})
 			// Save after each successful install — partial sync is safe.

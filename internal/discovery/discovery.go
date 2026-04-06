@@ -107,7 +107,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 			if installed, ok := st.Installed[name]; ok {
 				sk.Source = installed.Source
 				sk.Version = installed.DisplayVersion()
-				sk.Targets = installed.Targets
+				sk.Targets = installed.Tools
 			} else if dir.target != "" {
 				sk.Targets = []string{dir.target}
 			}
@@ -133,7 +133,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 			Name:    name,
 			Source:  installed.Source,
 			Version: installed.DisplayVersion(),
-			Targets: installed.Targets,
+			Targets: installed.Tools,
 		})
 	}
 
