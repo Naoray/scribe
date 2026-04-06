@@ -28,7 +28,7 @@ type Candidate struct {
 }
 
 // NeedsUpload reports whether this candidate requires uploading files to the
-// registry (as opposed to just adding a source reference to scribe.toml).
+// registry (as opposed to just adding a source reference to scribe.yaml).
 func (c Candidate) NeedsUpload() bool {
 	return c.Source == "" && c.LocalPath != ""
 }
@@ -75,17 +75,23 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 func (a *Adder) DiscoverRemote(targetManifest *manifest.Manifest, otherManifests map[string]*manifest.Manifest) []Candidate {
 	var candidates []Candidate
 
+	// Build target names set from catalog entries.
+	targetNames := make(map[string]bool, len(targetManifest.Catalog))
+	for _, e := range targetManifest.Catalog {
+		targetNames[e.Name] = true
+	}
+
 	for registry, m := range otherManifests {
-		for name, skill := range m.Skills {
+		for _, entry := range m.Catalog {
 			// Skip if already in target registry.
-			if _, exists := targetManifest.Skills[name]; exists {
+			if targetNames[entry.Name] {
 				continue
 			}
 
 			candidates = append(candidates, Candidate{
-				Name:   name,
+				Name:   entry.Name,
 				Origin: "registry:" + registry,
-				Source: skill.Source,
+				Source: entry.Source,
 			})
 		}
 	}
@@ -144,7 +150,7 @@ func ReadLocalSkillFiles(c Candidate) (map[string]string, error) {
 	return files, nil
 }
 
-// Add pushes one or more skills to the target registry's scribe.toml on GitHub
+// Add pushes one or more skills to the target registry's scribe.yaml on GitHub
 // in a single atomic commit. For each candidate: adds a source reference or
 // uploads files + self-reference. Emits events throughout.
 func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candidate) error {
@@ -153,17 +159,14 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 		return err
 	}
 
-	// Fetch the current manifest once.
-	raw, err := a.Client.FetchFile(ctx, owner, repo, "scribe.toml", "HEAD")
+	// Fetch the current manifest with fallback.
+	raw, _, err := a.fetchManifest(ctx, owner, repo)
 	if err != nil {
-		return fmt.Errorf("fetch scribe.toml: %w", err)
+		return fmt.Errorf("fetch manifest: %w", err)
 	}
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("parse scribe.toml: %w", err)
-	}
-	if m.Skills == nil {
-		m.Skills = make(map[string]manifest.Skill)
+		return fmt.Errorf("parse manifest: %w", err)
 	}
 
 	// Accumulate all files to push in one commit.
@@ -184,12 +187,16 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 			for k, v := range localFiles {
 				pushFiles[k] = v
 			}
-			m.Skills[c.Name] = manifest.Skill{
+			m.Catalog = append(m.Catalog, manifest.Entry{
+				Name:   c.Name,
 				Source: fmt.Sprintf("github:%s/%s@main", owner, repo),
 				Path:   "skills/" + c.Name,
-			}
+			})
 		} else {
-			m.Skills[c.Name] = manifest.Skill{Source: c.Source}
+			m.Catalog = append(m.Catalog, manifest.Entry{
+				Name:   c.Name,
+				Source: c.Source,
+			})
 		}
 
 		source := c.Source
@@ -213,10 +220,25 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	if err != nil {
 		return err
 	}
-	pushFiles["scribe.toml"] = string(encoded)
+	pushFiles[manifest.ManifestFilename] = string(encoded)
 
 	msg := fmt.Sprintf("add skills: %s", strings.Join(added, ", "))
 	return a.Client.PushFiles(ctx, owner, repo, pushFiles, msg)
+}
+
+// fetchManifest tries scribe.yaml first, falls back to scribe.toml.
+func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) ([]byte, string, error) {
+	raw, err := a.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
+	if err == nil {
+		return raw, manifest.ManifestFilename, nil
+	}
+
+	raw, legacyErr := a.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
+	if legacyErr != nil {
+		return nil, "", fmt.Errorf("fetch manifest: %w", err)
+	}
+
+	return raw, manifest.LegacyManifestFilename, nil
 }
 
 func splitRepo(teamRepo string) (owner, repo string, err error) {
@@ -226,4 +248,3 @@ func splitRepo(teamRepo string) (owner, repo string, err error) {
 	}
 	return parts[0], parts[1], nil
 }
-
