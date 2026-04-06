@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	RegistryTypeGitHub    = "github"    // transport: GitHub-hosted registry
+	RegistryTypeGitHub    = "github"    // kind: legacy-migrated registry (no type info at migration time)
 	RegistryTypeTeam      = "team"      // kind: org/team registry with scribe.yaml
 	RegistryTypeCommunity = "community" // kind: community registry (marketplace or tree scan)
 )

@@ -95,10 +95,10 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
-		// Only resolve the latest SHA when using the real GitHub client.
-		// When Provider is set, the Client may be a NoopFetcher that cannot make
-		// API calls — silently skipping SHA resolution is correct here.
-		if err == nil && (src.IsBranch() || entry.IsPackage()) && s.Provider == nil {
+		// Resolve the latest SHA for branch-pinned and package entries.
+		// If Client is a NoopFetcher (or the API is unavailable), LatestCommitSHA
+		// returns an error and latestSHA stays ""; compareEntry handles that gracefully.
+		if err == nil && (src.IsBranch() || entry.IsPackage()) {
 			key := src.Owner + "/" + src.Repo + "/" + src.Ref
 			if cached, ok := shaCache[key]; ok {
 				latestSHA = cached

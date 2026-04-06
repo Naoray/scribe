@@ -114,7 +114,7 @@ func TestSave(t *testing.T) {
 
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: "github"},
+			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: config.RegistryTypeGitHub},
 		},
 		Token: "ghp_test",
 	}
@@ -156,8 +156,8 @@ func TestSaveRoundTrip(t *testing.T) {
 
 	original := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "a/b", Enabled: true, Type: "github"},
-			{Repo: "c/d", Enabled: true, Type: "github"},
+			{Repo: "a/b", Enabled: true, Type: config.RegistryTypeGitHub},
+			{Repo: "c/d", Enabled: true, Type: config.RegistryTypeGitHub},
 		},
 		Token: "tok",
 	}
@@ -334,7 +334,7 @@ func TestSaveYAML(t *testing.T) {
 
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: "github", Writable: true},
+			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: config.RegistryTypeGitHub, Writable: true},
 		},
 		Tools: []config.ToolConfig{
 			{Name: "claude", Enabled: true},
@@ -394,11 +394,11 @@ func TestRegistryType(t *testing.T) {
 		regType  string
 		wantTeam bool
 	}{
-		{"team registry", "team", true},
-		{"community registry", "community", false},
+		{"team registry", config.RegistryTypeTeam, true},
+		{"community registry", config.RegistryTypeCommunity, false},
 		{"marketplace", "marketplace", false},
 		{"package", "package", false},
-		{"github default", "github", false},
+		{"github default", config.RegistryTypeGitHub, false},
 	}
 
 	for _, c := range cases {
@@ -445,22 +445,22 @@ func TestFindRegistry(t *testing.T) {
 func TestAddRegistryUpdatesExisting(t *testing.T) {
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "acme/skills", Enabled: true, Type: "github"},
+			{Repo: "acme/skills", Enabled: true, Type: config.RegistryTypeGitHub},
 		},
 	}
 
 	cfg.AddRegistry(config.RegistryConfig{
 		Repo:     "acme/skills",
 		Enabled:  true,
-		Type:     "team",
+		Type:     config.RegistryTypeTeam,
 		Writable: true,
 	})
 
 	if len(cfg.Registries) != 1 {
 		t.Fatalf("expected 1 registry, got %d", len(cfg.Registries))
 	}
-	if cfg.Registries[0].Type != "team" {
-		t.Errorf("type: got %q, want team", cfg.Registries[0].Type)
+	if cfg.Registries[0].Type != config.RegistryTypeTeam {
+		t.Errorf("type: got %q, want %q", cfg.Registries[0].Type, config.RegistryTypeTeam)
 	}
 	if !cfg.Registries[0].Writable {
 		t.Error("expected writable to be updated")
