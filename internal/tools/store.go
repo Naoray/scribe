@@ -4,24 +4,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Naoray/scribe/internal/paths"
 )
 
-// WriteToStore writes all skill files to ~/.scribe/skills/<name>/.
+// SlugifyRegistry converts "owner/repo" to "owner-repo" for filesystem paths.
+func SlugifyRegistry(repo string) string {
+	return strings.ReplaceAll(repo, "/", "-")
+}
+
+// WriteToStore writes all skill files to ~/.scribe/skills/<registrySlug>/<name>/.
 // Returns the canonical directory path.
 // Called once per skill before any target links are created.
-func WriteToStore(skillName string, files []SkillFile) (string, error) {
+func WriteToStore(registrySlug, skillName string, files []SkillFile) (string, error) {
 	base, err := StoreDir()
 	if err != nil {
 		return "", err
 	}
 
-	skillDir := filepath.Join(base, skillName)
+	skillDir := filepath.Join(base, registrySlug, skillName)
 
 	// Clean slate on update — remove existing before writing.
 	if err := os.RemoveAll(skillDir); err != nil {
-		return "", fmt.Errorf("clear store for %s: %w", skillName, err)
+		return "", fmt.Errorf("clear store for %s/%s: %w", registrySlug, skillName, err)
 	}
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		return "", fmt.Errorf("create store dir: %w", err)

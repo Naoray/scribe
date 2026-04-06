@@ -30,11 +30,11 @@ func (t ClaudeTool) Install(skillName, canonicalDir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create claude skills dir: %w", err)
-	}
 
 	link := filepath.Join(skillsDir, skillName)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return nil, fmt.Errorf("create claude skills subdir: %w", err)
+	}
 	if err := replaceSymlink(link, canonicalDir); err != nil {
 		return nil, fmt.Errorf("symlink claude/%s: %w", skillName, err)
 	}
@@ -49,6 +49,11 @@ func (t ClaudeTool) Uninstall(skillName string) error {
 	link := filepath.Join(skillsDir, skillName)
 	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove claude/%s: %w", skillName, err)
+	}
+	// Clean up empty parent directories left after removing namespaced symlinks.
+	parent := filepath.Dir(link)
+	if parent != skillsDir {
+		_ = os.Remove(parent) // ignore error if not empty
 	}
 	return nil
 }

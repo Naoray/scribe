@@ -26,7 +26,7 @@ Run the deploy script.
 func setup(t *testing.T) (canonicalDir string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	dir, err := tools.WriteToStore("deploy", testFiles)
+	dir, err := tools.WriteToStore("test-registry", "deploy", testFiles)
 	if err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
@@ -35,7 +35,7 @@ func setup(t *testing.T) (canonicalDir string) {
 
 func TestWriteToStore(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dir, err := tools.WriteToStore("deploy", testFiles)
+	dir, err := tools.WriteToStore("test-registry", "deploy", testFiles)
 	if err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
@@ -199,5 +199,94 @@ func TestCursorUninstall(t *testing.T) {
 	link := filepath.Join(workDir, ".cursor", "rules", "deploy.mdc")
 	if _, err := os.Lstat(link); !os.IsNotExist(err) {
 		t.Error("expected symlink to be removed after uninstall")
+	}
+}
+
+func TestSlugifyRegistry(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"ArtistfyHQ/team-skills", "ArtistfyHQ-team-skills"},
+		{"vercel/skills", "vercel-skills"},
+		{"owner/repo", "owner-repo"},
+	}
+	for _, c := range cases {
+		t.Run(c.input, func(t *testing.T) {
+			got := tools.SlugifyRegistry(c.input)
+			if got != c.want {
+				t.Errorf("SlugifyRegistry(%q) = %q, want %q", c.input, got, c.want)
+			}
+		})
+	}
+}
+
+func TestWriteToStoreNamespaced(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dir, err := tools.WriteToStore("ArtistfyHQ-team-skills", "deploy", testFiles)
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+
+	// Verify path includes registry slug.
+	storeDir, _ := tools.StoreDir()
+	expected := filepath.Join(storeDir, "ArtistfyHQ-team-skills", "deploy")
+	if dir != expected {
+		t.Errorf("store dir = %q, want %q", dir, expected)
+	}
+
+	// Files exist.
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+		t.Error("SKILL.md not in namespaced store")
+	}
+}
+
+func TestClaudeInstallNamespaced(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dir, err := tools.WriteToStore("ArtistfyHQ-team-skills", "deploy", testFiles)
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+
+	tool := tools.ClaudeTool{}
+	paths, err := tool.Install("ArtistfyHQ-team-skills/deploy", dir)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Symlink should be at ~/.claude/skills/ArtistfyHQ-team-skills/deploy
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, ".claude", "skills", "ArtistfyHQ-team-skills", "deploy")
+	if paths[0] != expected {
+		t.Errorf("symlink path = %q, want %q", paths[0], expected)
+	}
+
+	resolved, _ := os.Readlink(paths[0])
+	if resolved != dir {
+		t.Errorf("symlink resolves to %q, want %q", resolved, dir)
+	}
+}
+
+func TestCursorInstallNamespaced(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workDir := t.TempDir()
+
+	dir, err := tools.WriteToStore("ArtistfyHQ-team-skills", "deploy", testFiles)
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+
+	tool := tools.CursorTool{WorkDir: workDir}
+	paths, err := tool.Install("ArtistfyHQ-team-skills/deploy", dir)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Cursor flattens namespaced names: ArtistfyHQ-team-skills-deploy.mdc
+	expectedLink := filepath.Join(workDir, ".cursor", "rules", "ArtistfyHQ-team-skills-deploy.mdc")
+	if paths[0] != expectedLink {
+		t.Errorf("symlink path = %q, want %q", paths[0], expectedLink)
 	}
 }

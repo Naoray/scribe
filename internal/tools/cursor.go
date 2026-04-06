@@ -57,11 +57,15 @@ func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
 	}
 
 	rulesDir := filepath.Join(workDir, ".cursor", "rules")
-	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+
+	// For namespaced names like "ArtistfyHQ-team-skills/deploy",
+	// flatten to a single .mdc filename to avoid subdirectories in .cursor/rules.
+	mdcName := strings.ReplaceAll(skillName, "/", "-") + ".mdc"
+
+	link := filepath.Join(rulesDir, mdcName)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 		return nil, fmt.Errorf("create cursor rules dir: %w", err)
 	}
-
-	link := filepath.Join(rulesDir, skillName+".mdc")
 	if err := replaceSymlink(link, mdcPath); err != nil {
 		return nil, fmt.Errorf("symlink cursor/%s: %w", skillName, err)
 	}
@@ -77,7 +81,8 @@ func (t CursorTool) Uninstall(skillName string) error {
 			return fmt.Errorf("getwd: %w", err)
 		}
 	}
-	link := filepath.Join(workDir, ".cursor", "rules", skillName+".mdc")
+	mdcName := strings.ReplaceAll(skillName, "/", "-") + ".mdc"
+	link := filepath.Join(workDir, ".cursor", "rules", mdcName)
 	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove cursor/%s: %w", skillName, err)
 	}

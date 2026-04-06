@@ -67,11 +67,13 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		return nil, nil, fmt.Errorf("%s has no team section", teamRepo)
 	}
 
+	registrySlug := tools.SlugifyRegistry(teamRepo)
 	var statuses []SkillStatus
 
 	for i := range m.Catalog {
 		entry := &m.Catalog[i]
-		installedPtr := lookupInstalled(st, entry.Name)
+		qualifiedName := registrySlug + "/" + entry.Name
+		installedPtr := lookupInstalled(st, qualifiedName)
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
@@ -97,7 +99,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 	// Extra skills (installed but not in catalog).
 	catalogNames := make(map[string]bool, len(m.Catalog))
 	for _, e := range m.Catalog {
-		catalogNames[e.Name] = true
+		catalogNames[registrySlug+"/"+e.Name] = true
 	}
 	extraNames := make([]string, 0)
 	for name := range st.Installed {
@@ -126,16 +128,16 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	if err != nil {
 		return err
 	}
-	return s.apply(ctx, statuses, st)
+	return s.apply(ctx, teamRepo, statuses, st)
 }
 
 // RunWithDiff is like Run but uses pre-computed diff results, avoiding a
 // redundant manifest fetch when the caller already called Diff.
-func (s *Syncer) RunWithDiff(ctx context.Context, statuses []SkillStatus, st *state.State) error {
-	return s.apply(ctx, statuses, st)
+func (s *Syncer) RunWithDiff(ctx context.Context, teamRepo string, statuses []SkillStatus, st *state.State) error {
+	return s.apply(ctx, teamRepo, statuses, st)
 }
 
-func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.State) error {
+func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillStatus, st *state.State) error {
 	// Emit resolved status for each skill (populates list view before downloads start).
 	for _, sk := range statuses {
 		s.emit(SkillResolvedMsg{sk})
@@ -184,18 +186,20 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.St
 			}
 
 			// Write files to canonical store once, then symlink per target.
-			canonicalDir, err := tools.WriteToStore(sk.Name, tFiles)
+			registrySlug := tools.SlugifyRegistry(teamRepo)
+			canonicalDir, err := tools.WriteToStore(registrySlug, sk.Name, tFiles)
 			if err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("write store: %w", err)})
 				summary.Failed++
 				continue
 			}
 
+			qualifiedName := registrySlug + "/" + sk.Name
 			var paths []string
 			var targetNames []string
 			targetFailed := false
 			for _, t := range s.Tools {
-				links, err := t.Install(sk.Name, canonicalDir)
+				links, err := t.Install(qualifiedName, canonicalDir)
 				if err != nil {
 					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
 					summary.Failed++
@@ -217,7 +221,7 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, st *state.St
 				}
 			}
 
-			st.RecordInstall(sk.Name, state.InstalledSkill{
+			st.RecordInstall(qualifiedName, state.InstalledSkill{
 				Version:   src.Ref,
 				CommitSHA: latestSHA,
 				Source:    sk.Entry.Source,
