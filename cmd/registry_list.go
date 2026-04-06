@@ -6,15 +6,15 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var registryListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "Show connected registries",
-	Args:  cobra.NoArgs,
-	RunE:  runRegistryList,
-}
-
-func init() {
-	registryListCmd.Flags().Bool("json", false, "Output machine-readable JSON")
+func newRegistryListCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "Show connected registries",
+		Args:  cobra.NoArgs,
+		RunE:  runRegistryList,
+	}
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	return cmd
 }
 
 func runRegistryList(cmd *cobra.Command, args []string) error {

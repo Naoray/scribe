@@ -6,17 +6,17 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var syncCmd = &cobra.Command{
-	Use:   "sync",
-	Short: "Sync local skills to match team loadout",
-	RunE:  runSync,
-}
-
-func init() {
-	syncCmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
-	syncCmd.Flags().String("registry", "", "Sync only this registry (owner/repo or repo name)")
-	syncCmd.Flags().Bool("all", false, "Sync all registries (default behavior)")
-	syncCmd.Flags().MarkHidden("all")
+func newSyncCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Sync local skills to match team loadout",
+		RunE:  runSync,
+	}
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
+	cmd.Flags().String("registry", "", "Sync only this registry (owner/repo or repo name)")
+	cmd.Flags().Bool("all", false, "Sync all registries (default behavior)")
+	cmd.Flags().MarkHidden("all")
+	return cmd
 }
 
 func runSync(cmd *cobra.Command, args []string) error {

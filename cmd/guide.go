@@ -15,33 +15,33 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-var guideCmd = &cobra.Command{
-	Use:   "guide",
-	Short: "Interactive setup guide for Scribe",
-	Long: `Walk through Scribe setup step by step.
+func newGuideCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "guide",
+		Short: "Interactive setup guide for Scribe",
+		Long: `Walk through Scribe setup step by step.
 
 Run with --json or pipe to get machine-readable steps for agents.
 
 Examples:
   scribe guide          # interactive setup
   scribe guide --json   # agent-friendly step list`,
-	Args: cobra.NoArgs,
-	RunE: runGuide,
-}
-
-func init() {
-	guideCmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
+		Args: cobra.NoArgs,
+		RunE: runGuide,
+	}
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
+	return cmd
 }
 
 // Styles for guide output — kept local to cmd/ per architecture.
 var (
-	guideTitle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Padding(0, 1)
-	guideCheckOK     = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
-	guideCheckFail   = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
-	guideCheckPend   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
-	guideSubtle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
-	guideBold        = lipgloss.NewStyle().Bold(true)
-	guideSummaryBox  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).BorderForeground(lipgloss.Color("#7C3AED"))
+	guideTitle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Padding(0, 1)
+	guideCheckOK    = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	guideCheckFail  = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+	guideCheckPend  = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
+	guideSubtle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
+	guideBold       = lipgloss.NewStyle().Bold(true)
+	guideSummaryBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).BorderForeground(lipgloss.Color("#7C3AED"))
 )
 
 func runGuide(cmd *cobra.Command, _ []string) error {
@@ -236,8 +236,9 @@ func runGuideInteractive(cmd *cobra.Command) error {
 		displayGuideSummary(repo, "join")
 
 	case "create":
-		createRegistryCmd.SetContext(cmd.Context())
-		if err := runCreateRegistry(createRegistryCmd, nil); err != nil {
+		createCmd := newCreateRegistryCommand()
+		createCmd.SetContext(cmd.Context())
+		if err := runCreateRegistry(createCmd, nil); err != nil {
 			return err
 		}
 		// Show summary with the last connected repo.
@@ -248,6 +249,7 @@ func runGuideInteractive(cmd *cobra.Command) error {
 		}
 
 	case "view":
+		listCmd := newListCommand()
 		listCmd.SetContext(cmd.Context())
 		return runList(listCmd, nil)
 	}
