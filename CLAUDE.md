@@ -18,6 +18,7 @@ internal/
   discovery/            # On-disk skill discovery, YAML frontmatter parsing, content hashing
   github/               # GitHub API client (go-github + oauth2)
   manifest/             # scribe.yaml parsing (gopkg.in/yaml.v3), legacy scribe.toml fallback
+  logo/                 # ASCII logo rendering with lipgloss gradient (width-adaptive, NO_COLOR safe)
   migrate/              # TOML → YAML manifest conversion
   paths/                # XDG-style path helpers (~/.scribe/)
   prereq/               # Prerequisite checks (gh CLI availability)
