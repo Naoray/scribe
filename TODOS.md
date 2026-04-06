@@ -1,66 +1,20 @@
 # TODOS
 
-## Multi-registry sync/list UX
+## ~~Multi-registry sync/list UX~~ **Completed:** PR #21 (2026-03-29)
 
-**What:** When multiple registries are connected, `scribe sync` and `scribe list` should support registry selection.
-
-**Why:** With a single registry the behavior is obvious. With multiple, the user needs control over which registry to sync from or list. Without this, commands silently operate on all registries which may not be what they want.
-
-**Behavior:**
-- If one registry connected: proceed as today (no prompt)
-- If multiple registries connected + no flag: prompt user to select one (huh select)
-- `--all` flag: operate on all connected registries
-
-**Pros:** Clear UX, no surprises, consistent with how tools like `git remote` work.
-
-**Cons:** Adds a prompt to every sync/list run for multi-registry users unless they always use `--all`.
-
-**Context:** Decision made during eng review of `scribe connect` (2026-03-28). The `huh` library is being added for `scribe connect`'s interactive prompt, so the select UI is already available.
-
-**Depends on:** `scribe connect` multi-registry config landed.
+`--registry` flag on sync/list, `--all` flag, grouped output by registry.
 
 ---
 
-## Registry column in `scribe list`
+## ~~Registry column in `scribe list`~~ **Completed:** PR #21 (2026-03-29)
 
-**What:** Add a REGISTRY column to `scribe list` output showing which registry each skill came from. Highlight name conflicts (same skill name from different registries).
-
-**Why:** With multiple registries connected, a flat skill list with no source attribution is confusing. Users need to know where each skill came from, especially when there are conflicts.
-
-**Behavior:** Table gains REGISTRY column. Name conflicts shown with a warning indicator.
-
-**Pros:** Transparency, easier debugging, supports `--registry` filter flag.
-
-**Cons:** Wider table output, more complex list rendering.
-
-**Context:** Flagged during eng review 2026-03-28. Requires `registry` field in state.json InstalledSkill (see below).
-
-**Depends on:** Registry tracking in state.json.
+Skills grouped by registry in list output. `--registry` filter flag available.
 
 ---
 
-## Registry source tracking in state.json
+## ~~Registry source tracking in state.json~~ **Completed:** PR #21 (2026-03-29)
 
-**What:** Add a `registry` field to `InstalledSkill` in state.json.
-
-**Why:** With multi-registry support, re-sync needs to know which registry to check for updates for each installed skill. Without this, every sync checks all registries for every skill.
-
-**What to add:**
-```json
-"gstack": {
-  "registry": "vercel/skills",
-  "version": "v0.12.9.0",
-  ...
-}
-```
-
-**Pros:** Enables precise per-registry diffs, list attribution, and update tracking.
-
-**Cons:** State migration needed for existing installs (old entries have no registry field — treat as belonging to the first configured registry, or flag as unknown).
-
-**Context:** Flagged during eng review 2026-03-28.
-
-**Depends on:** `scribe connect` multi-registry config landed.
+`Registries []string` field added to `InstalledSkill`. `AddRegistry()` / `RemoveRegistry()` methods. Backfill migration via `MigrateRegistries()`.
 
 ---
 
@@ -78,7 +32,7 @@
 
 ## `scribe create registry --existing <owner/repo>` (initialize registry in existing repo)
 
-**What:** Allow `scribe create registry` to scaffold a `scribe.toml` + `skills/` folder inside an existing GitHub repo instead of always creating a new one.
+**What:** Allow `scribe create registry` to scaffold a `scribe.yaml` + `skills/` folder inside an existing GitHub repo instead of always creating a new one.
 
 **Why:** Teams already have repos (e.g., a team hub, monorepo, or docs repo) where they want to add a skill registry. Currently the only option is to manually push the manifest and then `scribe connect`. The CLI should handle this end-to-end.
 
@@ -95,7 +49,7 @@
 
 ## `scribe init` (package author mode)
 
-**What:** Scaffold a new skill package in the current directory — creates `scribe.toml` with `[package]` section, detects existing SKILL.md files, prompts for name/description/author.
+**What:** Scaffold a new skill package in the current directory — creates `scribe.yaml` with `package:` section, detects existing SKILL.md files, prompts for name/description/author.
 
 **Why:** The "publish your own skills" workflow. Needed for anyone who wants to create a skill package that others can install via Scribe.
 

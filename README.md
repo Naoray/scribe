@@ -11,7 +11,7 @@ scribe sync
 
 AI coding agents like Claude Code and Cursor work better with "skills" — markdown instruction files that teach the agent how to do specific tasks (code reviews, deployments, Laravel patterns, etc.). If you've built a good set of skills, sharing them with teammates currently means Slack links and manual file copying. Nobody knows if they're on the latest version. The person who just joined has no idea what they're missing.
 
-Scribe fixes this. You put your team's skills in a GitHub repo with a `scribe.toml` manifest, teammates run `scribe connect`, and `scribe sync` keeps everyone up to date automatically. Works with Claude Code and Cursor from the same manifest.
+Scribe fixes this. You put your team's skills in a GitHub repo with a `scribe.yaml` manifest (or legacy `scribe.toml`), teammates run `scribe connect`, and `scribe sync` keeps everyone up to date automatically. Works with Claude Code and Cursor from the same manifest.
 
 ## Install
 
@@ -124,6 +124,9 @@ ArtistfyHQ/team-skills/
 | `scribe list` | Show all skills: what's installed, what's outdated, what's missing |
 | `scribe add [name]` | Add a skill to the team registry (interactive picker or by name) |
 | `scribe create registry` | Scaffold a new team skills registry on GitHub and connect to it |
+| `scribe guide` | Interactive onboarding — walks through connect, sync, and add |
+| `scribe registry list` | Show connected registries with skill counts |
+| `scribe migrate [registry]` | Convert a `scribe.toml` registry to `scribe.yaml` |
 
 ### scribe list output
 
@@ -201,7 +204,7 @@ Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specificati
 ~/.scribe/
   config.toml    # which team repos you're connected to
   state.json     # what's installed, last sync time
-  cache/         # cached GitHub downloads
+  skills/        # canonical skill store (symlinked by targets)
 ```
 
 ## Requirements
@@ -224,8 +227,10 @@ Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specificati
 - `scribe add` — add local or remote skills to your team registry
 
 **Coming later:**
+- Community registries — connect to any GitHub repo with SKILL.md files
+- Package support — third-party tools with custom install/update commands
+- `scribe upgrade` — self-update command
 - Lockfile (`scribe.lock`) — pin exact versions across the team
-- `scribe publish` — publish skill packages
 
 ## Contributing
 
