@@ -19,6 +19,12 @@ type Formatter interface {
 	OnSkillError(name string, err error)
 	OnSyncComplete(summary sync.SyncCompleteMsg)
 
+	// Connect lifecycle
+	OnConnectDuplicate(repo string)
+	OnConnectSaved(repo string)
+	OnConnectSyncing()
+	OnConnectSyncWarning(repo string, err error)
+
 	// Flush writes any buffered output (JSON mode). Text mode is a no-op.
 	Flush() error
 }

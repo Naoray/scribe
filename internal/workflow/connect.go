@@ -18,6 +18,7 @@ import (
 func ConnectSteps() []Step {
 	return []Step{
 		{"LoadConfig", StepLoadConfig},
+		{"ResolveFormatter", StepResolveFormatter},
 		{"DedupCheck", StepDedupCheck},
 		{"FetchManifest", StepFetchManifest},
 		{"ValidateManifest", StepValidateManifest},
@@ -25,13 +26,12 @@ func ConnectSteps() []Step {
 		{"SaveConfig", StepSaveConfig},
 		{"LoadState", StepLoadState},
 		{"SetSingleRepo", StepSetSingleRepo},
-		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepConnectSyncError},
 	}
 }
 
-// ConnectTail returns the connect steps starting from DedupCheck — for use
+// ConnectTail returns the connect steps starting from ResolveFormatter — for use
 // by create-registry when Config and Client are already populated.
 func ConnectTail() []Step {
 	return ConnectSteps()[1:] // skip LoadConfig
@@ -40,7 +40,7 @@ func ConnectTail() []Step {
 func StepDedupCheck(_ context.Context, b *Bag) error {
 	for _, existing := range b.Config.TeamRepos() {
 		if strings.EqualFold(existing, b.RepoArg) {
-			fmt.Printf("Already connected to %s\n", existing)
+			b.Formatter.OnConnectDuplicate(existing)
 			return errSkip
 		}
 	}
@@ -105,14 +105,14 @@ func StepSaveConfig(_ context.Context, b *Bag) error {
 	if err := b.Config.Save(); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	fmt.Printf("Connected to %s\n", b.RepoArg)
+	b.Formatter.OnConnectSaved(b.RepoArg)
 	return nil
 }
 
 // StepSetSingleRepo sets Repos to just the newly connected repo for the sync tail.
 func StepSetSingleRepo(_ context.Context, b *Bag) error {
 	b.Repos = []string{b.RepoArg}
-	fmt.Printf("\nsyncing skills...\n\n")
+	b.Formatter.OnConnectSyncing()
 	return nil
 }
 
@@ -122,8 +122,7 @@ func StepConnectSyncError(ctx context.Context, b *Bag) error {
 	// This step wraps SyncSkills with error recovery for connect.
 	err := StepSyncSkills(ctx, b)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: sync failed for %s: %v\n", b.RepoArg, err)
-		fmt.Fprintf(os.Stderr, "run `scribe sync` to retry\n")
+		b.Formatter.OnConnectSyncWarning(b.RepoArg, err)
 		if !isatty.IsTerminal(os.Stdout.Fd()) {
 			return fmt.Errorf("sync failed: %w", err)
 		}
