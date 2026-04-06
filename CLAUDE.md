@@ -11,20 +11,22 @@ Team skill sync CLI for AI coding agents. Go + Cobra + Charm (Bubble Tea).
 ## Architecture
 
 ```
-cmd/                    # Cobra commands (connect, sync, list, add, create, guide, registry, migrate)
+cmd/                    # Cobra commands (connect, sync, list, add, create, explain, guide, registry, migrate)
 internal/
   add/                  # Add workflow — local/remote discovery, GitHub push
   config/               # config.toml loading (~/.scribe/config.toml)
   discovery/            # On-disk skill discovery, YAML frontmatter parsing, content hashing
+  firstrun/             # First-run experience and onboarding
   github/               # GitHub API client (go-github + oauth2)
-  manifest/             # scribe.yaml parsing (gopkg.in/yaml.v3), legacy scribe.toml fallback
   logo/                 # ASCII logo rendering with lipgloss gradient (width-adaptive, NO_COLOR safe)
+  manifest/             # scribe.yaml parsing (gopkg.in/yaml.v3), legacy scribe.toml fallback
   migrate/              # TOML → YAML manifest conversion
   paths/                # XDG-style path helpers (~/.scribe/)
   prereq/               # Prerequisite checks (gh CLI availability)
+  provider/             # Provider abstraction — GitHubProvider, marketplace.json, tree scan
   state/                # ~/.scribe/state.json management
   sync/                 # Sync algorithm — UI-agnostic, emits tea.Msg events
-  targets/              # Install target writers (claude, cursor)
+  tools/                # Install target writers (claude, cursor)
   workflow/             # Step-sequence engine: Runner, Bag, Formatter, per-command steps
 ```
 

@@ -101,6 +101,64 @@ func TestExplainRawFlagAndJSONMutuallyExclusive(t *testing.T) {
 	}
 }
 
+func TestExtractPreview(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		max      int
+		wantPrev string
+		wantMore bool
+	}{
+		{
+			name:     "empty body",
+			body:     "",
+			max:      3,
+			wantPrev: "",
+			wantMore: false,
+		},
+		{
+			name:     "single paragraph",
+			body:     "Hello world.",
+			max:      3,
+			wantPrev: "Hello world.",
+			wantMore: false,
+		},
+		{
+			name:     "exactly max paragraphs",
+			body:     "# Title\n\nParagraph one.\n\nParagraph two.",
+			max:      3,
+			wantPrev: "# Title\n\nParagraph one.\n\nParagraph two.",
+			wantMore: false,
+		},
+		{
+			name:     "more than max",
+			body:     "# Title\n\nFirst.\n\nSecond.\n\nThird.\n\nFourth.",
+			max:      3,
+			wantPrev: "# Title\n\nFirst.\n\nSecond.",
+			wantMore: true,
+		},
+		{
+			name:     "whitespace trimmed",
+			body:     "\n\n  # Title\n\nBody.\n\n",
+			max:      2,
+			wantPrev: "# Title\n\nBody.",
+			wantMore: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, hasMore := extractPreview(tt.body, tt.max)
+			if got != tt.wantPrev {
+				t.Errorf("extractPreview preview = %q, want %q", got, tt.wantPrev)
+			}
+			if hasMore != tt.wantMore {
+				t.Errorf("extractPreview hasMore = %v, want %v", hasMore, tt.wantMore)
+			}
+		})
+	}
+}
+
 func TestStripFrontmatter(t *testing.T) {
 	tests := []struct {
 		name  string
