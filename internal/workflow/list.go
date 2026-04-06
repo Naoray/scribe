@@ -72,12 +72,19 @@ func listLocal(w io.Writer, st *state.State, useJSON bool, tuiFn func([]discover
 
 // list styles — scoped to avoid polluting the package namespace.
 var (
-	listHeaderStyle = lipgloss.NewStyle().Bold(true)
-	listCountStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	listNameStyle   = lipgloss.NewStyle().Bold(true)
-	listDescStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
-	listDivStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	listTotalStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	listHeaderStyle  = lipgloss.NewStyle().Bold(true)
+	listCountStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	listNameStyle    = lipgloss.NewStyle().Bold(true)
+	listDescStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
+	listDivStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	listTotalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	listDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	listCurrentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	listOutdatedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+	listMissingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+	listExtraStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
+	listAuthorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF"))
+	listRegStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
 )
 
 func printLocalTable(w io.Writer, skills []discovery.Skill) error {
@@ -212,17 +219,41 @@ func printMultiListTable(ctx context.Context, w io.Writer, repos []string, synce
 			return err
 		}
 
-		if grouped {
-			if i > 0 {
-				fmt.Fprintln(w)
-			}
-			fmt.Fprintf(w, "── %s ──\n", teamRepo)
-		} else {
-			fmt.Fprintf(w, "team: %s\n\n", teamRepo)
+		if i > 0 {
+			fmt.Fprintln(w)
 		}
 
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "SKILL\tVERSION\tSTATUS\tAGENTS")
+		// Registry header.
+		count := listCountStyle.Render(fmt.Sprintf("(%d skills)", len(statuses)))
+		fmt.Fprintf(w, "%s %s\n", listRegStyle.Render(teamRepo), count)
+		fmt.Fprintln(w, listDivStyle.Render(strings.Repeat("─", len(teamRepo)+15)))
+
+		// Calculate column widths.
+		maxName, maxVer, maxAuthor := 0, 0, 0
+		for _, sk := range statuses {
+			if w := len(sk.Name); w > maxName {
+				maxName = w
+			}
+			ver := sk.LoadoutRef
+			if ver == "" && sk.Installed != nil {
+				ver = sk.Installed.DisplayVersion()
+			}
+			if w := len(ver); w > maxVer {
+				maxVer = w
+			}
+			if w := len(sk.Maintainer); w > maxAuthor {
+				maxAuthor = w
+			}
+		}
+		if maxName < 4 {
+			maxName = 4
+		}
+		if maxVer < 7 {
+			maxVer = 7
+		}
+		if maxAuthor < 6 {
+			maxAuthor = 6
+		}
 
 		for _, sk := range statuses {
 			ver := sk.LoadoutRef
@@ -230,15 +261,37 @@ func printMultiListTable(ctx context.Context, w io.Writer, repos []string, synce
 				ver = sk.Installed.DisplayVersion()
 			}
 
-			agents := ""
-			if sk.Installed != nil {
-				agents = strings.Join(sk.Installed.Targets, ", ")
+			// Status indicator with color.
+			var statusStr string
+			switch sk.Status {
+			case sync.StatusCurrent:
+				statusStr = listCurrentStyle.Render("✓ current")
+			case sync.StatusOutdated:
+				statusStr = listOutdatedStyle.Render("↑ update")
+			case sync.StatusMissing:
+				statusStr = listMissingStyle.Render("○ missing")
+			case sync.StatusExtra:
+				statusStr = listExtraStyle.Render("? extra")
 			}
 
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", sk.Name, ver, sk.Status.String(), agents)
-		}
+			// Author.
+			author := sk.Maintainer
+			if author == "" {
+				author = "—"
+			}
 
-		tw.Flush()
+			// Agents.
+			agents := ""
+			if sk.Installed != nil && len(sk.Installed.Targets) > 0 {
+				agents = listDimStyle.Render(strings.Join(sk.Installed.Targets, ", "))
+			}
+
+			name := listNameStyle.Render(fmt.Sprintf("%-*s", maxName, sk.Name))
+			verStr := listDimStyle.Render(fmt.Sprintf("%-*s", maxVer, ver))
+			authorStr := listAuthorStyle.Render(fmt.Sprintf("%-*s", maxAuthor, author))
+
+			fmt.Fprintf(w, "  %s  %s  %s  %-12s  %s\n", name, verStr, authorStr, statusStr, agents)
+		}
 
 		counts := countStatuses(statuses)
 		if grouped {
@@ -246,19 +299,36 @@ func printMultiListTable(ctx context.Context, w io.Writer, repos []string, synce
 			if parts != "" {
 				footerParts = append(footerParts, fmt.Sprintf("%s: %s", teamRepo, parts))
 			}
-		} else {
-			fmt.Fprintf(w, "\n%d current · %d outdated · %d missing · %d extra\n",
-				counts[sync.StatusCurrent], counts[sync.StatusOutdated],
-				counts[sync.StatusMissing], counts[sync.StatusExtra])
 		}
 	}
 
-	if grouped && len(footerParts) > 0 {
-		fmt.Fprintf(w, "\n%s\n", strings.Join(footerParts, "  ·  "))
+	// Summary footer.
+	fmt.Fprintln(w)
+	if len(repos) == 1 {
+		statuses, _, err := syncer.Diff(ctx, repos[0], st)
+		if err == nil {
+			counts := countStatuses(statuses)
+			var parts []string
+			if n := counts[sync.StatusCurrent]; n > 0 {
+				parts = append(parts, listCurrentStyle.Render(fmt.Sprintf("%d current", n)))
+			}
+			if n := counts[sync.StatusOutdated]; n > 0 {
+				parts = append(parts, listOutdatedStyle.Render(fmt.Sprintf("%d outdated", n)))
+			}
+			if n := counts[sync.StatusMissing]; n > 0 {
+				parts = append(parts, listMissingStyle.Render(fmt.Sprintf("%d missing", n)))
+			}
+			if n := counts[sync.StatusExtra]; n > 0 {
+				parts = append(parts, listExtraStyle.Render(fmt.Sprintf("%d extra", n)))
+			}
+			fmt.Fprintln(w, strings.Join(parts, listDimStyle.Render(" · ")))
+		}
+	} else if len(footerParts) > 0 {
+		fmt.Fprintln(w, strings.Join(footerParts, listDimStyle.Render("  ·  ")))
 	}
 
 	if !st.Team.LastSync.IsZero() {
-		fmt.Fprintf(w, "Last sync: %s\n", st.Team.LastSync.Local().Format("2006-01-02 15:04"))
+		fmt.Fprintln(w, listDimStyle.Render("Last sync: "+st.Team.LastSync.Local().Format("2006-01-02 15:04")))
 	}
 	return nil
 }
