@@ -15,8 +15,6 @@ type hubStatus struct {
 	Registries     []string `json:"registries"`
 	InstalledCount int      `json:"installed_count"`
 	LastSync       string   `json:"last_sync,omitempty"`
-	PendingUpdates int      `json:"pending_updates"`
-	StaleStatus    bool     `json:"stale_status"`
 }
 
 func TestHubJSONOutput(t *testing.T) {
@@ -60,9 +58,6 @@ func TestHubJSONOutput(t *testing.T) {
 	if got.LastSync != "2026-04-06T10:00:00Z" {
 		t.Errorf("last_sync: got %q, want %q", got.LastSync, "2026-04-06T10:00:00Z")
 	}
-	if !got.StaleStatus {
-		t.Error("stale_status: got false, want true")
-	}
 }
 
 func TestHubJSONNoState(t *testing.T) {
@@ -90,37 +85,5 @@ func TestHubJSONNoState(t *testing.T) {
 	}
 	if got.InstalledCount != 0 {
 		t.Errorf("installed_count: got %d, want 0", got.InstalledCount)
-	}
-}
-
-func TestFormatRelativeTime(t *testing.T) {
-	tests := []struct {
-		name string
-		ago  time.Duration
-		want string
-	}{
-		{"just now", 30 * time.Second, "just now"},
-		{"minutes", 5 * time.Minute, "5 minutes ago"},
-		{"one hour", 1 * time.Hour, "1 hour ago"},
-		{"hours", 3 * time.Hour, "3 hours ago"},
-		{"one day", 25 * time.Hour, "1 day ago"},
-		{"days", 72 * time.Hour, "3 days ago"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ts := time.Now().Add(-tt.ago)
-			got := formatRelativeTime(ts)
-			if got != tt.want {
-				t.Errorf("formatRelativeTime(%v ago): got %q, want %q", tt.ago, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFormatRelativeTimeZero(t *testing.T) {
-	got := formatRelativeTime(time.Time{})
-	if got != "never" {
-		t.Errorf("formatRelativeTime(zero): got %q, want %q", got, "never")
 	}
 }

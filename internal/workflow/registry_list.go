@@ -87,7 +87,7 @@ func printRegistryTable(w io.Writer, repos []string, counts map[string]int, st *
 	if st.LastSync.IsZero() {
 		footer += " · never synced"
 	} else {
-		footer += " · last sync " + timeAgo(st.LastSync)
+		footer += " · last sync " + TimeAgo(st.LastSync)
 	}
 
 	fmt.Fprintln(w, regFootStyle.Render(footer))
