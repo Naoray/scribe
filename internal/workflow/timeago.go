@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// timeAgo returns a human-readable relative time string.
+// TimeAgo returns a human-readable relative time string.
 // Returns "never synced" for the zero value.
-func timeAgo(t time.Time) string {
+func TimeAgo(t time.Time) string {
 	if t.IsZero() {
 		return "never synced"
 	}

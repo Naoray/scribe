@@ -15,10 +15,13 @@ import (
 var Version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:     "scribe",
-	Short:   "Team skill sync for AI coding agents",
-	Long:    "Scribe syncs AI coding agent skills across your team via a shared GitHub loadout.",
-	Version: Version,
+	Use:           "scribe",
+	Short:         "Team skill sync for AI coding agents",
+	Long:          "Scribe syncs AI coding agent skills across your team via a shared GitHub loadout.",
+	Version:       Version,
+	Args:          cobra.NoArgs,
+	SilenceUsage:  true,
+	SilenceErrors: true, // errors printed once below; prevents double-print when RunE re-enters Execute
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip first-run for meta commands.
 		if cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "migrate" {
@@ -51,13 +54,16 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func init() {
+	rootCmd.RunE = runHub
+	rootCmd.Flags().Bool("json", false, "Output machine-readable JSON")
+
 	// connectCmd moved under registry — add hidden alias for backward compat
 	aliasConnect := *connectCmd
 	aliasConnect.Hidden = true
@@ -71,4 +77,5 @@ func init() {
 	rootCmd.AddCommand(guideCmd)
 	rootCmd.AddCommand(registryCmd)
 	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(newExplainCommand())
 }

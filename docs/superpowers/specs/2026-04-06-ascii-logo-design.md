@@ -34,11 +34,17 @@ ANSI Shadow filled-block characters (`█`, `╔`, `╗`, `║`, `═`, `╚`, `
 
 ### Color Gradient
 
-Teal → Cyan (Ocean palette) via `lipgloss.Blend1D`:
+Teal → Cyan (Ocean palette) via `lipgloss.Blend1D`. Bold styling applied. Per-line application — each of the 6 logo lines gets a color from the gradient.
+
+**Dark terminals:**
 - Start: `#00B4D8`
 - End: `#60E890`
 
-Per-line application — each of the 6 logo lines gets a color from the gradient. Bold styling applied.
+**Light terminals** (detected via `lipgloss.HasDarkBackground()`):
+- Start: `#0077B6`
+- End: `#2D6A4F`
+
+The deeper palette ensures legibility on white backgrounds. Detection is blocking but acceptable for a one-shot render on startup.
 
 ### Version Display
 
@@ -64,8 +70,9 @@ When the user runs `scribe` with no arguments in a TTY, the root command becomes
    - Installed skills count
    - Last sync time (relative, e.g. "2 hours ago")
    - Pending updates if known from last sync (no network calls — local state only)
-3. **Action menu** — `huh.NewSelect` with options: Sync, List, Connect, Guide, Help
-4. **On selection** — execute that command's `RunE` directly
+3. **Stdin TTY check** — verify `isatty.IsTerminal(os.Stdin.Fd())` before showing the menu. If stdin is not a TTY (piped input), show logo + status only, then print a hint: `Run 'scribe --help' to see available commands`.
+4. **Action menu** — `huh.NewSelect` with options: Sync, List, Connect, Guide, Help. Ctrl+C exits cleanly with code 130.
+5. **On selection** — execute the selected command via `cmd.ExecuteContext(cmd.Context())` to run the full Cobra lifecycle (PreRunE, flag defaults, context propagation). Do not call `RunE` directly.
 
 ### Non-TTY / `--json` Mode
 
@@ -78,7 +85,7 @@ Skip logo and interactive menu. Output status as JSON:
   "installed_count": 12,
   "last_sync": "2026-04-06T10:00:00Z",
   "pending_updates": 2,
-  "note": "pending_updates reflects last sync result, not a live check"
+  "stale_status": true
 }
 ```
 
@@ -88,16 +95,17 @@ When `CI` env var is set, behave the same as `--json`.
 
 ## Environment Detection & Degradation
 
-Cascade (checked in order):
+Cascade (checked in order — monotonically degrading):
 
-1. `--json` flag or `!isatty(stdout)` → JSON output, no logo, no menu
-2. `CI` env var set → same as `--json`
-3. `SCRIBE_NO_BANNER` env var set → skip logo, still show status + menu
-4. `NO_COLOR` env var set → logo renders without ANSI colors (plain block characters)
-5. `TERM=dumb` → plain text fallback, no menu (print status only)
-6. Terminal width < 40 → plain text logo
-7. Terminal width 40–59 → compact logo
-8. Terminal width ≥ 60 → full logo
+1. `--json` flag → JSON output, no logo, no menu
+2. `!isatty(stdout)` → JSON output, no logo, no menu
+3. `CI` env var set → same as `--json`
+4. `TERM=dumb` → plain text version string + static status text, no menu, no block characters
+5. `SCRIBE_NO_BANNER` env var set → skip logo, still show status + menu
+6. `NO_COLOR` env var set → logo renders without ANSI colors (plain block characters), menu still works
+7. Terminal width < 40 → plain text logo
+8. Terminal width 40–59 → compact logo
+9. Terminal width ≥ 60 → full logo
 
 Logo suppression logic lives in `internal/logo/`. Menu/status decisions live in `cmd/root_hub.go`. The `logo.Render` function handles its own suppression internally.
 
@@ -109,7 +117,7 @@ Logo suppression logic lives in `internal/logo/`. Menu/status decisions live in 
 | Logo | `internal/logo/logo_test.go` | Create | TTY/NO_COLOR/width tests, output assertions |
 | Root hub | `cmd/root_hub.go` | Create | Status gathering, Lip Gloss styled output, Huh action menu, JSON mode |
 | Root hub | `cmd/root_hub_test.go` | Create | Status formatting, JSON output tests |
-| Root | `cmd/root.go` | Modify | Add `RunE` to `rootCmd`, add `--json` flag |
+| Root | `cmd/root.go` | Modify | Add `RunE` to `rootCmd`, add `--json` local flag, set `Args: cobra.NoArgs`, set `SilenceUsage: true` |
 
 ## Dependencies
 
