@@ -1,0 +1,29 @@
+{
+  "team": {
+    "last_sync": "2026-03-15T10:00:00Z"
+  },
+  "installed": {
+    "deploy": {
+      "version": "v1.0.0",
+      "source": "github:ArtistfyHQ/team-skills@v1.0.0",
+      "installed_at": "2026-03-10T12:00:00Z",
+      "targets": ["claude", "cursor"],
+      "paths": ["/Users/test/.claude/skills/deploy", "/Users/test/project/.cursor/rules/deploy.mdc"],
+      "registries": ["ArtistfyHQ/team-skills"]
+    },
+    "gstack": {
+      "version": "main",
+      "commit_sha": "a3f2c1b9e4d5f678",
+      "source": "github:garrytan/gstack@main",
+      "installed_at": "2026-03-12T08:00:00Z",
+      "targets": ["claude"],
+      "paths": ["/Users/test/.claude/skills/gstack"],
+      "type": "package",
+      "install_cmd": "git clone https://github.com/garrytan/gstack ~/.claude/skills/gstack",
+      "update_cmd": "cd ~/.claude/skills/gstack && git pull",
+      "cmd_hash": "deadbeef",
+      "approval": "approved",
+      "approved_at": "2026-03-12T08:00:00Z"
+    }
+  }
+}

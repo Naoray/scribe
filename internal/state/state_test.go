@@ -249,3 +249,211 @@ func TestRemove(t *testing.T) {
 		t.Error("expected gstack to be removed")
 	}
 }
+
+// --- Migration tests (Task 1) ---
+// These tests reference fields/methods that don't exist yet (skill.Tools,
+// s.LastSync at top level, namespaced keys, etc.). They are expected to fail
+// with compilation errors until Tasks 3-4 are implemented.
+
+func TestStateMigrateTargetsToTools(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Write legacy state with "targets" field.
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"team": {"last_sync": "2026-03-15T10:00:00Z"},
+		"installed": {
+			"deploy": {
+				"version": "v1.0.0",
+				"source": "github:ArtistfyHQ/team-skills@v1.0.0",
+				"installed_at": "2026-03-10T12:00:00Z",
+				"targets": ["claude", "cursor"],
+				"paths": ["/Users/test/.claude/skills/deploy"]
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	skill := s.Installed["deploy"]
+	if len(skill.Tools) != 2 {
+		t.Fatalf("expected 2 tools after migration, got %d", len(skill.Tools))
+	}
+	if skill.Tools[0] != "claude" || skill.Tools[1] != "cursor" {
+		t.Errorf("tools: got %v", skill.Tools)
+	}
+}
+
+func TestStatePromoteLastSync(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"team": {"last_sync": "2026-03-15T10:00:00Z"},
+		"installed": {}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if s.LastSync.IsZero() {
+		t.Error("expected LastSync to be promoted from team.last_sync")
+	}
+	expected := time.Date(2026, 3, 15, 10, 0, 0, 0, time.UTC)
+	if !s.LastSync.Equal(expected) {
+		t.Errorf("LastSync: got %v, want %v", s.LastSync, expected)
+	}
+}
+
+func TestStateNamespaceKeys(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"team": {"last_sync": "2026-03-15T10:00:00Z"},
+		"installed": {
+			"deploy": {
+				"version": "v1.0.0",
+				"source": "github:ArtistfyHQ/team-skills@v1.0.0",
+				"installed_at": "2026-03-10T12:00:00Z",
+				"targets": ["claude"],
+				"paths": [],
+				"registries": ["ArtistfyHQ/team-skills"]
+			},
+			"recap": {
+				"version": "v2.0.0",
+				"source": "github:ArtistfyHQ/team-skills@v2.0.0",
+				"installed_at": "2026-03-10T12:00:00Z",
+				"targets": ["claude"],
+				"paths": [],
+				"registries": ["ArtistfyHQ/team-skills"]
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Bare keys should be namespaced using Registries[0].
+	if _, ok := s.Installed["ArtistfyHQ/deploy"]; !ok {
+		t.Errorf("expected namespaced key ArtistfyHQ/deploy, got keys: %v", installedKeys(s))
+	}
+	if _, ok := s.Installed["ArtistfyHQ/recap"]; !ok {
+		t.Errorf("expected namespaced key ArtistfyHQ/recap, got keys: %v", installedKeys(s))
+	}
+
+	// Bare keys should be gone.
+	if _, ok := s.Installed["deploy"]; ok {
+		t.Error("bare key 'deploy' should have been removed after namespacing")
+	}
+}
+
+func TestStateNamespaceKeysNoRegistries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"team": {},
+		"installed": {
+			"my-local-skill": {
+				"version": "v1.0.0",
+				"source": "",
+				"installed_at": "2026-03-10T12:00:00Z",
+				"targets": ["claude"],
+				"paths": []
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// No registries -- should namespace as "local/<name>".
+	if _, ok := s.Installed["local/my-local-skill"]; !ok {
+		t.Errorf("expected namespaced key local/my-local-skill, got keys: %v", installedKeys(s))
+	}
+}
+
+func TestStateMigrateIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	// Already-migrated state: tools field, namespaced keys, top-level last_sync.
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"last_sync": "2026-03-15T10:00:00Z",
+		"installed": {
+			"ArtistfyHQ/deploy": {
+				"version": "v1.0.0",
+				"source": "github:ArtistfyHQ/team-skills@v1.0.0",
+				"installed_at": "2026-03-10T12:00:00Z",
+				"tools": ["claude"],
+				"paths": []
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Should not double-namespace.
+	if _, ok := s.Installed["ArtistfyHQ/deploy"]; !ok {
+		t.Errorf("expected key to remain ArtistfyHQ/deploy, got keys: %v", installedKeys(s))
+	}
+	if len(s.Installed) != 1 {
+		t.Errorf("expected 1 installed skill, got %d", len(s.Installed))
+	}
+}
+
+func TestStateToolsRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	s, _ := state.Load()
+	s.RecordInstall("ArtistfyHQ/deploy", state.InstalledSkill{
+		Version: "v1.0.0",
+		Source:  "github:ArtistfyHQ/team-skills@v1.0.0",
+		Tools:   []string{"claude", "cursor"},
+		Paths:   []string{"/test"},
+	})
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	skill := loaded.Installed["ArtistfyHQ/deploy"]
+	if len(skill.Tools) != 2 || skill.Tools[0] != "claude" {
+		t.Errorf("Tools round-trip: got %v", skill.Tools)
+	}
+}
+
+// installedKeys is a test helper that returns the keys of the Installed map.
+func installedKeys(s *state.State) []string {
+	keys := make([]string, 0, len(s.Installed))
+	for k := range s.Installed {
+		keys = append(keys, k)
+	}
+	return keys
+}
