@@ -33,6 +33,22 @@ type Syncer struct {
 	Emit    func(any) // receives events defined in events.go
 }
 
+// FetchManifest tries scribe.yaml first, falls back to scribe.toml with warning.
+func (s *Syncer) FetchManifest(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
+	raw, err := s.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
+	if err == nil {
+		return manifest.Parse(raw)
+	}
+
+	raw, legacyErr := s.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
+	if legacyErr != nil {
+		return nil, fmt.Errorf("fetch manifest: %w", err)
+	}
+
+	s.emit(LegacyFormatMsg{Repo: owner + "/" + repo})
+	return manifest.Parse(raw)
+}
+
 // Diff fetches the team loadout and computes status for every skill
 // without making any changes. Used by `scribe list`.
 // Returns the parsed manifest alongside statuses so callers can reuse it.
@@ -42,66 +58,58 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		return nil, nil, err
 	}
 
-	raw, err := s.Client.FetchFile(ctx, owner, repo, "scribe.toml", "HEAD")
-	if err != nil {
-		return nil, nil, fmt.Errorf("fetch loadout: %w", err)
-	}
-
-	m, err := manifest.Parse(raw)
+	m, err := s.FetchManifest(ctx, owner, repo)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse loadout: %w", err)
 	}
 	if !m.IsLoadout() {
-		return nil, nil, fmt.Errorf("%s/scribe.toml has no [team] section", teamRepo)
+		return nil, nil, fmt.Errorf("%s has no team section", teamRepo)
 	}
 
 	var statuses []SkillStatus
 
-	// Sort skill names for deterministic output.
-	names := make([]string, 0, len(m.Skills))
-	for name := range m.Skills {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	// Skills in the loadout.
-	for _, name := range names {
-		skill := m.Skills[name]
-		installed := st.Installed[name]
-		installedPtr := &installed
-		if _, ok := st.Installed[name]; !ok {
-			installedPtr = nil
-		}
+	for _, entry := range m.Catalog {
+		installedPtr := lookupInstalled(st, entry.Name)
 
 		latestSHA := ""
-		src, err := manifest.ParseSource(skill.Source)
-		if err == nil && src.IsBranch() {
+		src, err := manifest.ParseSource(entry.Source)
+		if err == nil && (src.IsBranch() || entry.IsPackage()) {
 			sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
 			if err == nil {
 				latestSHA = sha
 			}
 		}
 
-		status := compareSkill(skill, installedPtr, latestSHA)
+		status := compareEntry(entry, installedPtr, latestSHA)
 		statuses = append(statuses, SkillStatus{
-			Name:       name,
+			Name:       entry.Name,
 			Status:     status,
 			Installed:  installedPtr,
-			LoadoutRef: loadoutRef(skill),
-			Maintainer: skill.Maintainer(),
+			LoadoutRef: loadoutRef(entry),
+			Maintainer: entry.Maintainer(),
+			IsPackage:  entry.IsPackage(),
 		})
 	}
 
-	// Skills installed locally but not in the loadout.
-	for name, installed := range st.Installed {
-		if _, inLoadout := m.Skills[name]; !inLoadout {
-			cp := installed
-			statuses = append(statuses, SkillStatus{
-				Name:      name,
-				Status:    StatusExtra,
-				Installed: &cp,
-			})
+	// Extra skills (installed but not in catalog).
+	catalogNames := make(map[string]bool, len(m.Catalog))
+	for _, e := range m.Catalog {
+		catalogNames[e.Name] = true
+	}
+	extraNames := make([]string, 0)
+	for name := range st.Installed {
+		if !catalogNames[name] {
+			extraNames = append(extraNames, name)
 		}
+	}
+	sort.Strings(extraNames)
+	for _, name := range extraNames {
+		cp := st.Installed[name]
+		statuses = append(statuses, SkillStatus{
+			Name:      name,
+			Status:    StatusExtra,
+			Installed: &cp,
+		})
 	}
 
 	return statuses, m, nil
@@ -139,17 +147,29 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, m *manifest.
 			summary.Skipped++
 
 		case StatusMissing, StatusOutdated:
+			if sk.IsPackage {
+				s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "package install not yet implemented"})
+				summary.Skipped++
+				continue
+			}
+
 			s.emit(SkillDownloadingMsg{Name: sk.Name})
 
-			skill := m.Skills[sk.Name]
-			src, err := manifest.ParseSource(skill.Source)
+			entry := m.FindByName(sk.Name)
+			if entry == nil {
+				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("entry %q not found in manifest", sk.Name)})
+				summary.Failed++
+				continue
+			}
+
+			src, err := manifest.ParseSource(entry.Source)
 			if err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
 				summary.Failed++
 				continue
 			}
 
-			skillPath := skill.Path
+			skillPath := entry.Path
 			if skillPath == "" {
 				skillPath = sk.Name
 			}
@@ -196,10 +216,7 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, m *manifest.
 			latestSHA := ""
 			if src.IsBranch() {
 				sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
-				if err != nil {
-					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("latest SHA for %s: %w", sk.Name, err)})
-					// Non-fatal: continue with empty SHA.
-				} else {
+				if err == nil {
 					latestSHA = sha
 				}
 			}
@@ -207,7 +224,7 @@ func (s *Syncer) apply(ctx context.Context, statuses []SkillStatus, m *manifest.
 			st.RecordInstall(sk.Name, state.InstalledSkill{
 				Version:   src.Ref,
 				CommitSHA: latestSHA,
-				Source:    skill.Source,
+				Source:    entry.Source,
 				Targets:   targetNames,
 				Paths:     paths,
 			})
@@ -245,11 +262,20 @@ func (s *Syncer) emit(msg any) {
 	}
 }
 
-// loadoutRef extracts the human-readable version ref from a skill entry.
-func loadoutRef(skill manifest.Skill) string {
-	src, err := manifest.ParseSource(skill.Source)
+// loadoutRef extracts the human-readable version ref from a catalog entry.
+func loadoutRef(entry manifest.Entry) string {
+	src, err := manifest.ParseSource(entry.Source)
 	if err != nil {
 		return "?"
 	}
 	return src.Ref
+}
+
+// lookupInstalled returns a pointer to the installed skill, or nil if not found.
+func lookupInstalled(st *state.State, name string) *state.InstalledSkill {
+	installed, ok := st.Installed[name]
+	if !ok {
+		return nil
+	}
+	return &installed
 }
