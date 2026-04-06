@@ -229,16 +229,7 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 
 // fetchManifest tries scribe.yaml first, falls back to scribe.toml (converting via migrate).
 func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
-	raw, err := a.Client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
-	if err == nil {
-		return manifest.Parse(raw)
-	}
-
-	raw, legacyErr := a.Client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
-	if legacyErr != nil {
-		return nil, fmt.Errorf("fetch manifest: %w", err)
-	}
-
-	return migrate.Convert(raw)
+	m, _, err := manifest.FetchWithFallback(ctx, a.Client, owner, repo, migrate.Convert)
+	return m, err
 }
 

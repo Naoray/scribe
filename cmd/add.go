@@ -420,15 +420,6 @@ func autoSync(ctx context.Context, targetRepo string, st *state.State, client *g
 // fetchRegistryManifest fetches a manifest, trying scribe.yaml first then
 // falling back to scribe.toml (converting TOML to the new format via migrate).
 func fetchRegistryManifest(ctx context.Context, client *gh.Client, owner, repo string) (*manifest.Manifest, error) {
-	raw, err := client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
-	if err == nil {
-		return manifest.Parse(raw)
-	}
-
-	raw, legacyErr := client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
-	if legacyErr != nil {
-		return nil, fmt.Errorf("fetch manifest: %w", err)
-	}
-
-	return migrate.Convert(raw)
+	m, _, err := manifest.FetchWithFallback(ctx, client, owner, repo, migrate.Convert)
+	return m, err
 }
