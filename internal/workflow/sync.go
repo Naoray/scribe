@@ -57,26 +57,26 @@ func StepLoadState(_ context.Context, b *Bag) error {
 }
 
 func StepCheckConnected(_ context.Context, b *Bag) error {
-	if len(b.Config.TeamRepos) == 0 {
+	if len(b.Config.TeamRepos()) == 0 {
 		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
 	return nil
 }
 
 func StepMigrateRegistries(_ context.Context, b *Bag) error {
-	b.State.MigrateRegistries(b.Config.TeamRepos[0])
+	b.State.MigrateRegistries(b.Config.TeamRepos()[0])
 	return nil
 }
 
 func StepFilterRegistries(_ context.Context, b *Bag) error {
 	if b.FilterRegistries != nil {
-		repos, err := b.FilterRegistries(b.RepoFlag, b.Config.TeamRepos)
+		repos, err := b.FilterRegistries(b.RepoFlag, b.Config.TeamRepos())
 		if err != nil {
 			return err
 		}
 		b.Repos = repos
 	} else {
-		b.Repos = b.Config.TeamRepos
+		b.Repos = b.Config.TeamRepos()
 	}
 	return nil
 }

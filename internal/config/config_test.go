@@ -26,14 +26,25 @@ func writeConfig(t *testing.T, home, content string) {
 	}
 }
 
+func writeYAMLConfig(t *testing.T, home, content string) {
+	t.Helper()
+	dir := filepath.Join(home, ".scribe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadMissing(t *testing.T) {
 	setupHome(t)
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("Load on missing file: %v", err)
 	}
-	if len(cfg.TeamRepos) != 0 {
-		t.Errorf("expected empty TeamRepos, got %v", cfg.TeamRepos)
+	if len(cfg.TeamRepos()) != 0 {
+		t.Errorf("expected empty TeamRepos, got %v", cfg.TeamRepos())
 	}
 }
 
@@ -48,14 +59,14 @@ token = "ghp_test"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(cfg.TeamRepos) != 2 {
-		t.Fatalf("expected 2 team repos, got %d", len(cfg.TeamRepos))
+	if len(cfg.TeamRepos()) != 2 {
+		t.Fatalf("expected 2 team repos, got %d", len(cfg.TeamRepos()))
 	}
-	if cfg.TeamRepos[0] != "ArtistfyHQ/team-skills" {
-		t.Errorf("first repo: got %q", cfg.TeamRepos[0])
+	if cfg.TeamRepos()[0] != "ArtistfyHQ/team-skills" {
+		t.Errorf("first repo: got %q", cfg.TeamRepos()[0])
 	}
-	if cfg.TeamRepos[1] != "vercel/skills" {
-		t.Errorf("second repo: got %q", cfg.TeamRepos[1])
+	if cfg.TeamRepos()[1] != "vercel/skills" {
+		t.Errorf("second repo: got %q", cfg.TeamRepos()[1])
 	}
 	if cfg.Token != "ghp_test" {
 		t.Errorf("token: got %q", cfg.Token)
@@ -73,11 +84,11 @@ token = "ghp_legacy"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(cfg.TeamRepos) != 1 {
-		t.Fatalf("expected 1 team repo from legacy migration, got %d", len(cfg.TeamRepos))
+	if len(cfg.TeamRepos()) != 1 {
+		t.Fatalf("expected 1 team repo from legacy migration, got %d", len(cfg.TeamRepos()))
 	}
-	if cfg.TeamRepos[0] != "ArtistfyHQ/team-skills" {
-		t.Errorf("migrated repo: got %q", cfg.TeamRepos[0])
+	if cfg.TeamRepos()[0] != "ArtistfyHQ/team-skills" {
+		t.Errorf("migrated repo: got %q", cfg.TeamRepos()[0])
 	}
 }
 
@@ -93,8 +104,8 @@ team_repos = ["new/repo"]
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(cfg.TeamRepos) != 1 || cfg.TeamRepos[0] != "new/repo" {
-		t.Errorf("expected [new/repo], got %v", cfg.TeamRepos)
+	if len(cfg.TeamRepos()) != 1 || cfg.TeamRepos()[0] != "new/repo" {
+		t.Errorf("expected [new/repo], got %v", cfg.TeamRepos())
 	}
 }
 
@@ -102,8 +113,10 @@ func TestSave(t *testing.T) {
 	home := setupHome(t)
 
 	cfg := &config.Config{
-		TeamRepos: []string{"ArtistfyHQ/team-skills"},
-		Token:     "ghp_test",
+		Registries: []config.RegistryConfig{
+			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: "github"},
+		},
+		Token: "ghp_test",
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -121,15 +134,15 @@ func TestSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after save: %v", err)
 	}
-	if len(loaded.TeamRepos) != 1 || loaded.TeamRepos[0] != "ArtistfyHQ/team-skills" {
-		t.Errorf("TeamRepos: got %v", loaded.TeamRepos)
+	if len(loaded.TeamRepos()) != 1 || loaded.TeamRepos()[0] != "ArtistfyHQ/team-skills" {
+		t.Errorf("TeamRepos: got %v", loaded.TeamRepos())
 	}
 	if loaded.Token != "ghp_test" {
 		t.Errorf("Token: got %q", loaded.Token)
 	}
 
 	// Verify file exists on disk.
-	data, err := os.ReadFile(filepath.Join(home, ".scribe", "config.toml"))
+	data, err := os.ReadFile(filepath.Join(home, ".scribe", "config.yaml"))
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
 	}
@@ -142,8 +155,11 @@ func TestSaveRoundTrip(t *testing.T) {
 	setupHome(t)
 
 	original := &config.Config{
-		TeamRepos: []string{"a/b", "c/d"},
-		Token:     "tok",
+		Registries: []config.RegistryConfig{
+			{Repo: "a/b", Enabled: true, Type: "github"},
+			{Repo: "c/d", Enabled: true, Type: "github"},
+		},
+		Token: "tok",
 	}
 	if err := original.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -153,18 +169,15 @@ func TestSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(loaded.TeamRepos) != 2 {
-		t.Fatalf("expected 2 repos, got %d", len(loaded.TeamRepos))
+	if len(loaded.TeamRepos()) != 2 {
+		t.Fatalf("expected 2 repos, got %d", len(loaded.TeamRepos()))
 	}
-	if loaded.TeamRepos[0] != "a/b" || loaded.TeamRepos[1] != "c/d" {
-		t.Errorf("repos: got %v", loaded.TeamRepos)
+	if loaded.TeamRepos()[0] != "a/b" || loaded.TeamRepos()[1] != "c/d" {
+		t.Errorf("repos: got %v", loaded.TeamRepos())
 	}
 }
 
 // --- Migration tests (Task 1) ---
-// These tests reference types/fields that don't exist yet (RegistryConfig,
-// ToolConfig, cfg.Registries, cfg.TeamRepos(), etc.). They are expected to
-// fail with compilation errors until Tasks 2-3 are implemented.
 
 func TestMigrateTOMLToYAML(t *testing.T) {
 	home := setupHome(t)

@@ -48,8 +48,8 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	var repo string
 	if len(args) > 0 {
 		repo = args[0]
-	} else if len(cfg.TeamRepos) == 1 {
-		repo = cfg.TeamRepos[0]
+	} else if len(cfg.TeamRepos()) == 1 {
+		repo = cfg.TeamRepos()[0]
 	} else {
 		return fmt.Errorf("specify a registry: scribe migrate owner/repo")
 	}

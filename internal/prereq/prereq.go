@@ -84,5 +84,5 @@ func checkConnections(cfg *config.Config) ConnectionsResult {
 	if cfg == nil {
 		return ConnectionsResult{}
 	}
-	return ConnectionsResult{Repos: cfg.TeamRepos}
+	return ConnectionsResult{Repos: cfg.TeamRepos()}
 }

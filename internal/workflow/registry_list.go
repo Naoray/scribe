@@ -27,7 +27,7 @@ func RegistryListSteps() []Step {
 // stepMigrateRegistriesSafe wraps StepMigrateRegistries with a guard
 // for empty TeamRepos (avoids index-out-of-range on TeamRepos[0]).
 func stepMigrateRegistriesSafe(_ context.Context, b *Bag) error {
-	if len(b.Config.TeamRepos) == 0 {
+	if len(b.Config.TeamRepos()) == 0 {
 		return nil
 	}
 	return StepMigrateRegistries(nil, b)
@@ -64,7 +64,7 @@ func StepPrintRegistryList(_ context.Context, b *Bag) error {
 	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	w := os.Stdout
 
-	repos := b.Config.TeamRepos
+	repos := b.Config.TeamRepos()
 
 	if len(repos) == 0 {
 		if useJSON {

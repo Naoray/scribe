@@ -33,7 +33,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 	w := os.Stdout
 
 	// Local view: explicit --local flag or no registries connected.
-	if b.LocalFlag || len(b.Config.TeamRepos) == 0 {
+	if b.LocalFlag || len(b.Config.TeamRepos()) == 0 {
 		return listLocal(w, b.State, useJSON, b.ListTUI)
 	}
 

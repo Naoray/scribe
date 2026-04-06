@@ -68,7 +68,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(cfg.TeamRepos) == 0 {
+	if len(cfg.TeamRepos()) == 0 {
 		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
 	}
 
@@ -86,7 +86,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	adder := &add.Adder{Client: client, Targets: tgts}
 
 	// Resolve target registry.
-	targetRepo, err := resolveTargetRegistry(addRegistry, cfg.TeamRepos, isTTY)
+	targetRepo, err := resolveTargetRegistry(addRegistry, cfg.TeamRepos(), isTTY)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	// Fetch other registries for remote discovery.
 	otherManifests := map[string]*manifest.Manifest{}
-	for _, repo := range cfg.TeamRepos {
+	for _, repo := range cfg.TeamRepos() {
 		if repo == targetRepo {
 			continue
 		}

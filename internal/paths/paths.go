@@ -41,6 +41,15 @@ func ConfigPath() (string, error) {
 	return filepath.Join(home, ".scribe", "config.toml"), nil
 }
 
+// ConfigYAMLPath returns the path to ~/.scribe/config.yaml.
+func ConfigYAMLPath() (string, error) {
+	home, err := homeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".scribe", "config.yaml"), nil
+}
+
 // StatePath returns the path to ~/.scribe/state.json.
 func StatePath() (string, error) {
 	home, err := homeDir()
