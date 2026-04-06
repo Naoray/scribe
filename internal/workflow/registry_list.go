@@ -3,12 +3,10 @@ package workflow
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/state"
@@ -40,14 +38,9 @@ func CountSkillsPerRegistry(repos []string, st *state.State) map[string]int {
 	return counts
 }
 
-// list styles
-var (
-	regNameStyle  = lipgloss.NewStyle().Bold(true)
-	regCountStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	regFootStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-)
-
-// StepPrintRegistryList renders connected registries as styled text or JSON.
+// StepPrintRegistryList computes connected registry data for rendering.
+// For JSON output it writes directly; for styled output it populates Bag
+// fields for the cmd/ layer to render.
 func StepPrintRegistryList(_ context.Context, b *Bag) error {
 	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	w := os.Stdout
@@ -58,9 +51,8 @@ func StepPrintRegistryList(_ context.Context, b *Bag) error {
 		if useJSON {
 			return PrintRegistryJSON(w, nil, b.State)
 		}
-		fmt.Fprintln(w, "No registries connected.")
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "  Connect a registry:  scribe connect <owner/repo>")
+		// Populate empty slice so cmd/ knows to render the empty state.
+		b.RegistryRepos = []string{}
 		return nil
 	}
 
@@ -69,28 +61,10 @@ func StepPrintRegistryList(_ context.Context, b *Bag) error {
 	if useJSON {
 		return PrintRegistryJSON(w, repos, b.State)
 	}
-	return printRegistryTable(w, repos, counts, b.State)
-}
 
-func printRegistryTable(w io.Writer, repos []string, counts map[string]int, st *state.State) error {
-	for _, repo := range repos {
-		count := regCountStyle.Render(fmt.Sprintf("(%d)", counts[repo]))
-		fmt.Fprintf(w, "%s %s\n", regNameStyle.Render(repo), count)
-	}
-
-	fmt.Fprintln(w)
-
-	footer := fmt.Sprintf("%d registries connected", len(repos))
-	if len(repos) == 1 {
-		footer = "1 registry connected"
-	}
-	if st.LastSync.IsZero() {
-		footer += " · never synced"
-	} else {
-		footer += " · last sync " + TimeAgo(st.LastSync)
-	}
-
-	fmt.Fprintln(w, regFootStyle.Render(footer))
+	// Populate Bag for cmd/ to render.
+	b.RegistryRepos = repos
+	b.RegistryCounts = counts
 	return nil
 }
 
