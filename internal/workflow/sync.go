@@ -120,6 +120,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 				b.Formatter.OnSkillInstalled(m.Name, m.Version, m.Updated)
 			case sync.SkillErrorMsg:
 				b.Formatter.OnSkillError(m.Name, m.Err)
+			case sync.LegacyFormatMsg:
+				b.Formatter.OnLegacyFormat(m.Repo)
 			case sync.SyncCompleteMsg:
 				b.Formatter.OnSyncComplete(m)
 			}
