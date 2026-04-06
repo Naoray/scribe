@@ -88,7 +88,7 @@ func (s InstalledSkill) DisplayVersion() string {
 func Load() (*State, error) {
 	path, err := statePath()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve state path: %w", err)
 	}
 
 	// Ensure the state directory exists so the lockfile can be created.
@@ -189,7 +189,7 @@ func namespaceKey(name string, registries []string) string {
 func (s *State) Save() error {
 	path, err := statePath()
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve state path: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
@@ -249,7 +249,7 @@ func Dir() (string, error) {
 func lockFile(path string, exclusive bool) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o644)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open lock file %s: %w", path, err)
 	}
 	lockType := syscall.LOCK_SH
 	if exclusive {
@@ -257,7 +257,7 @@ func lockFile(path string, exclusive bool) (*os.File, error) {
 	}
 	if err := syscall.Flock(int(f.Fd()), lockType); err != nil {
 		f.Close()
-		return nil, err
+		return nil, fmt.Errorf("flock %s: %w", path, err)
 	}
 	return f, nil
 }

@@ -66,7 +66,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 	if len(cfg.TeamRepos()) == 0 {
 		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
@@ -74,7 +74,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	st, err := state.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load state: %w", err)
 	}
 
 	client := gh.NewClient(cmd.Context(), cfg.Token)
@@ -88,7 +88,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	// Resolve target registry.
 	targetRepo, err := resolveTargetRegistry(addRegistry, cfg.TeamRepos(), isTTY)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve target registry: %w", err)
 	}
 
 	// Mode 3: no args, non-TTY.
@@ -99,7 +99,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	// Discover candidates.
 	localCandidates, err := adder.DiscoverLocal(st)
 	if err != nil {
-		return err
+		return fmt.Errorf("discover local skills: %w", err)
 	}
 
 	// Fetch target registry manifest to filter already-added skills.

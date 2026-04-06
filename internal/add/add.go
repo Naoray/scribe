@@ -156,7 +156,7 @@ func ReadLocalSkillFiles(c Candidate) (map[string]string, error) {
 func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candidate) error {
 	owner, repo, err := manifest.ParseOwnerRepo(targetRepo)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse target registry %q: %w", targetRepo, err)
 	}
 
 	// Fetch the current manifest with fallback.
@@ -219,7 +219,7 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 
 	encoded, err := m.Encode()
 	if err != nil {
-		return err
+		return fmt.Errorf("encode manifest: %w", err)
 	}
 	pushFiles[manifest.ManifestFilename] = string(encoded)
 

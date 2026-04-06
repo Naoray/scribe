@@ -154,7 +154,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) error {
 	statuses, _, err := s.Diff(ctx, teamRepo, st)
 	if err != nil {
-		return err
+		return fmt.Errorf("sync %s: %w", teamRepo, err)
 	}
 	return s.apply(ctx, teamRepo, statuses, st)
 }
