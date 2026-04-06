@@ -3,6 +3,7 @@ package sync
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os/exec"
 	"syscall"
@@ -38,4 +39,14 @@ func (e *ShellExecutor) Execute(ctx context.Context, command string, timeout tim
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), err
+}
+
+// CommandHash returns a deterministic hash of install+update commands.
+// Used for TOFU: if the hash changes, the user must re-approve.
+func CommandHash(install, update string) string {
+	h := sha256.New()
+	h.Write([]byte(install))
+	h.Write([]byte{0})
+	h.Write([]byte(update))
+	return fmt.Sprintf("%x", h.Sum(nil))[:16]
 }
