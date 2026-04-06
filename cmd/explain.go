@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +10,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
+	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 	"github.com/mattn/go-isatty"
@@ -89,15 +93,23 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return renderSkillBody(w, content)
 	}
 
+	// Always show the rendered skill file first — instant feedback.
+	if err := explainRendered(w, skill, content); err != nil {
+		return err
+	}
+
 	if rawFlag {
-		return explainRendered(w, skill, content)
+		return nil
 	}
 
+	// Offer AI explanation if an LLM CLI is available and stdin is interactive.
 	if _, err := detectLLMCLI(); err == nil {
-		return explainWithAI(w, cmd.Context(), skill, content)
+		if isatty.IsTerminal(os.Stdin.Fd()) {
+			return offerAIExplanation(w, cmd.Context(), content)
+		}
 	}
 
-	return explainRendered(w, skill, content)
+	return nil
 }
 
 // findSkill looks up a skill by exact name or suffix match.
@@ -218,7 +230,68 @@ Rules:
 - If the skill has specific triggers or flags, mention them briefly
 - End with a one-liner on when NOT to use it (if applicable)`
 
-func explainWithAI(w io.Writer, ctx context.Context, skill discovery.Skill, content string) error {
+const (
+	spinnerInterval = 80 * time.Millisecond
+	clearLine       = "\r\033[K"
+)
+
+// spinState drives a braille spinner on an io.Writer until stop() is called.
+type spinState struct {
+	once   sync.Once
+	stopCh chan struct{}
+	done   chan struct{}
+}
+
+func startSpinner(w io.Writer, label string) *spinState {
+	s := &spinState{stopCh: make(chan struct{}), done: make(chan struct{})}
+	go func() {
+		defer close(s.done)
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		i := 0
+		ticker := time.NewTicker(spinnerInterval)
+		defer ticker.Stop()
+		fmt.Fprintf(w, "  %s  %s", frames[0], label)
+		for {
+			select {
+			case <-s.stopCh:
+				fmt.Fprint(w, clearLine) // erase spinner line
+				return
+			case <-ticker.C:
+				i++
+				fmt.Fprintf(w, "\r  %s  %s", frames[i%len(frames)], label)
+			}
+		}
+	}()
+	return s
+}
+
+func (s *spinState) stop() {
+	s.once.Do(func() {
+		close(s.stopCh)
+		<-s.done
+	})
+}
+
+// offerAIExplanation prompts the user to optionally get an AI-generated explanation.
+// The skill file has already been rendered above; this is an opt-in upgrade.
+func offerAIExplanation(w io.Writer, ctx context.Context, content string) error {
+	var want bool
+	err := huh.NewConfirm().
+		Title("✨ Get a better explanation with AI?").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&want).
+		Run()
+	if err != nil || !want {
+		return nil
+	}
+	fmt.Fprintln(w)
+	return runAIExplanation(w, ctx, content)
+}
+
+// runAIExplanation calls the LLM, buffers the output, and renders it as markdown.
+// If the LLM fails, it returns nil — the caller has already shown the skill file.
+func runAIExplanation(w io.Writer, ctx context.Context, content string) error {
 	prompt := fmt.Sprintf(
 		"%s\n\nHere's the skill file:\n\n---\n%s",
 		explainSystemPrompt,
@@ -226,22 +299,29 @@ func explainWithAI(w io.Writer, ctx context.Context, skill discovery.Skill, cont
 	)
 
 	c := buildLLMCmd(ctx, prompt)
-	c.Stdout = w
-	c.Stderr = os.Stderr
+	var buf bytes.Buffer
+	c.Stdout = &buf
+	c.Stderr = io.Discard // avoid concurrent writes with spinner on os.Stderr
 
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, explNameStyle.Render(skill.Name))
-	if skill.Description != "" {
-		fmt.Fprintln(w, explDimStyle.Render(skill.Description))
+	var spin *spinState
+	if isatty.IsTerminal(os.Stderr.Fd()) {
+		spin = startSpinner(os.Stderr, "Thinking...")
 	}
-	fmt.Fprintln(w)
+	runErr := c.Run()
+	if spin != nil {
+		spin.stop()
+	}
 
-	if err := c.Run(); err != nil {
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, explDimStyle.Render("LLM unavailable, showing skill file instead..."))
-		fmt.Fprintln(os.Stderr)
-		return renderSkillBody(w, content)
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, explDimStyle.Render("AI explanation unavailable."))
+		return nil
 	}
-	fmt.Fprintln(w)
+
+	rendered, renderErr := glamour.Render(buf.String(), "auto")
+	if renderErr != nil {
+		fmt.Fprint(w, buf.String())
+	} else {
+		fmt.Fprint(w, rendered)
+	}
 	return nil
 }
