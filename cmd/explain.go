@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -268,11 +267,25 @@ func renderMarkdownString(md string) (string, error) {
 }
 
 // promptExpand shows a hint and waits for the user to press Enter or q.
+// Returns false on EOF/error (e.g. Ctrl-D) so closing stdin skips the pager.
 func promptExpand(w io.Writer) bool {
 	fmt.Fprintln(w, explDimStyle.Render("  ↵ Enter to read more · q to skip"))
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
-	return strings.TrimSpace(line) != "q"
+	// Read a single line without buffering ahead — a bufio.NewReader would
+	// consume bytes past the newline, stealing input from the huh prompt
+	// that may follow (offerAIExplanation).
+	buf := make([]byte, 0, 64)
+	b := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(b)
+		if err != nil || n == 0 {
+			return false // EOF or error → skip
+		}
+		if b[0] == '\n' {
+			break
+		}
+		buf = append(buf, b[0])
+	}
+	return strings.TrimSpace(string(buf)) != "q"
 }
 
 // showInPager pipes content through the system pager (less, more, or $PAGER).
