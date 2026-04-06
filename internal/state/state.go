@@ -239,11 +239,6 @@ func statePath() (string, error) {
 	return paths.StatePath()
 }
 
-// Dir returns the path to the ~/.scribe directory.
-func Dir() (string, error) {
-	return paths.ScribeDir()
-}
-
 // lockFile acquires an advisory flock on the given path.
 // Use exclusive=true for writes, exclusive=false (shared) for reads.
 func lockFile(path string, exclusive bool) (*os.File, error) {
