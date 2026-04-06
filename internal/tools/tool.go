@@ -30,8 +30,3 @@ func DetectTools() []Tool {
 	}
 	return detected
 }
-
-// AllTools returns all known tools regardless of detection.
-func AllTools() []Tool {
-	return []Tool{ClaudeTool{}, CursorTool{}}
-}

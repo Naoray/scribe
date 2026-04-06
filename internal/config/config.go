@@ -27,16 +27,9 @@ type RegistryConfig struct {
 	Writable bool   `yaml:"writable,omitempty"`
 }
 
-// ToolConfig describes an AI tool target (claude, cursor, etc.).
-type ToolConfig struct {
-	Name    string `yaml:"name"`
-	Enabled bool   `yaml:"enabled"`
-}
-
 // Config holds user preferences from ~/.scribe/config.yaml.
 type Config struct {
 	Registries []RegistryConfig `yaml:"registries,omitempty"`
-	Tools      []ToolConfig     `yaml:"tools,omitempty"`
 	Token      string           `yaml:"token,omitempty"`
 }
 
@@ -186,7 +179,3 @@ func (c *Config) Save() error {
 	return nil
 }
 
-// Path returns the absolute path to the config file (YAML).
-func Path() (string, error) {
-	return paths.ConfigYAMLPath()
-}

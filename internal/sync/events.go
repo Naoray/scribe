@@ -131,34 +131,8 @@ type LegacyFormatMsg struct{ Repo string }
 
 // --- Package events ---
 
-// PackageInstallPromptMsg asks the user to approve a package's install command.
-type PackageInstallPromptMsg struct {
-	Name    string
-	Command string
-	Source  string
-}
-
-// PackageApprovedMsg is sent when the user approves a package install.
-type PackageApprovedMsg struct{ Name string }
-
-// PackageDeniedMsg is sent when the user denies a package install.
-type PackageDeniedMsg struct{ Name string }
-
 // PackageSkippedMsg is sent when a package is skipped (e.g. already approved).
 type PackageSkippedMsg struct {
 	Name   string
 	Reason string
-}
-
-// PackageInstallingMsg is sent when a package install command begins.
-type PackageInstallingMsg struct{ Name string }
-
-// PackageInstalledMsg is sent when a package is successfully installed.
-type PackageInstalledMsg struct{ Name string }
-
-// PackageErrorMsg is sent when a package install fails.
-type PackageErrorMsg struct {
-	Name   string
-	Err    error
-	Stderr string
 }

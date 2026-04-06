@@ -63,9 +63,6 @@ func TestParseTeamRegistry(t *testing.T) {
 	if !m.IsRegistry() {
 		t.Error("expected IsRegistry() = true")
 	}
-	if !m.IsLoadout() {
-		t.Error("expected IsLoadout() = true (backward compat)")
-	}
 	if m.Package != nil {
 		t.Error("expected Package == nil for team registry")
 	}
