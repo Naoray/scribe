@@ -45,7 +45,9 @@ func NewClient(ctx context.Context, configToken string) *Client {
 }
 
 func resolveToken(configToken string) string {
-	if out, err := exec.Command("gh", "auth", "token").Output(); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
 		if token := strings.TrimSpace(string(out)); token != "" {
 			return token
 		}

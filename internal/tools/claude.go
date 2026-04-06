@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -47,7 +49,7 @@ func (t ClaudeTool) Uninstall(skillName string) error {
 		return err
 	}
 	link := filepath.Join(skillsDir, skillName)
-	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove claude/%s: %w", skillName, err)
 	}
 	// Clean up empty parent directories left after removing namespaced symlinks.

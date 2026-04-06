@@ -2,7 +2,9 @@ package discovery
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -69,7 +71,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir.path)
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
