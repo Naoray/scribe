@@ -2,13 +2,11 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"time"
 
-	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -52,13 +50,10 @@ func runHub(cmd *cobra.Command, args []string) error {
 	logo.Render(os.Stdout, Version, width)
 	writeStatusStyled(os.Stdout, cfg, st)
 
-	// Stdin must be a TTY for the interactive menu.
-	if !isatty.IsTerminal(os.Stdin.Fd()) {
-		fmt.Fprintln(os.Stdout, "Run 'scribe --help' to see available commands.")
-		return nil
-	}
-
-	return showActionMenu()
+	// Show the standard cobra help below the logo + status so users see every
+	// available command at a glance.
+	cmd.SetOut(os.Stdout)
+	return cmd.Help()
 }
 
 func writeHubJSON(w io.Writer, version string, cfg *config.Config, st *state.State) error {
@@ -136,30 +131,3 @@ func writeStatusStyled(w io.Writer, cfg *config.Config, st *state.State) {
 	fmt.Fprintln(w)
 }
 
-func showActionMenu() error {
-	var action string
-	err := huh.NewSelect[string]().
-		Title("What would you like to do?").
-		Options(
-			huh.NewOption("Sync skills from registries", "sync"),
-			huh.NewOption("List installed skills", "list"),
-			huh.NewOption("Connect a registry", "connect"),
-			huh.NewOption("Interactive setup guide", "guide"),
-			huh.NewOption("Show help", "help"),
-		).
-		Value(&action).
-		Run()
-
-	if err != nil {
-		// Ctrl+C or other interrupt — exit cleanly.
-		if errors.Is(err, huh.ErrUserAborted) {
-			os.Exit(130)
-		}
-		return err
-	}
-
-	// Dispatch to the selected subcommand via SetArgs so Cobra parses the
-	// action name instead of falling back to os.Args (which would re-enter runHub).
-	rootCmd.SetArgs([]string{action})
-	return rootCmd.Execute()
-}
