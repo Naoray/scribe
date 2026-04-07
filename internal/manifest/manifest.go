@@ -31,12 +31,14 @@ type Team struct {
 }
 
 type Package struct {
-	Name        string   `yaml:"name"`
-	Version     string   `yaml:"version"`
-	Description string   `yaml:"description,omitempty"`
-	License     string   `yaml:"license,omitempty"`
-	Authors     []string `yaml:"authors,omitempty"`
-	Repository  string   `yaml:"repository,omitempty"`
+	Name        string            `yaml:"name"`
+	Version     string            `yaml:"version"`
+	Description string            `yaml:"description,omitempty"`
+	License     string            `yaml:"license,omitempty"`
+	Authors     []string          `yaml:"authors,omitempty"`
+	Repository  string            `yaml:"repository,omitempty"`
+	Installs    map[string]string `yaml:"installs,omitempty"` // per-tool install commands
+	Updates     map[string]string `yaml:"updates,omitempty"`  // per-tool update commands
 }
 
 // EntryTypePackage is the type value for package catalog entries.
@@ -44,16 +46,36 @@ const EntryTypePackage = "package"
 
 // Entry represents one item in the catalog list.
 type Entry struct {
-	Name        string `yaml:"name"`
-	Source      string `yaml:"source,omitempty"`
-	Path        string `yaml:"path,omitempty"`
-	Type        string `yaml:"type,omitempty"`
-	Install     string `yaml:"install,omitempty"`
-	Update      string `yaml:"update,omitempty"`
-	Author      string `yaml:"author,omitempty"`
-	Description string `yaml:"description,omitempty"`
-	Timeout     int    `yaml:"timeout,omitempty"`
-	Group       string `yaml:"-"` // display-only, set by marketplace discovery
+	Name        string            `yaml:"name"`
+	Source      string            `yaml:"source,omitempty"`
+	Path        string            `yaml:"path,omitempty"`
+	Type        string            `yaml:"type,omitempty"`
+	Install     string            `yaml:"install,omitempty"`            // global fallback install command
+	Update      string            `yaml:"update,omitempty"`             // global fallback update command
+	Installs    map[string]string `yaml:"installs,omitempty"`           // per-tool install commands; override Install
+	Updates     map[string]string `yaml:"updates,omitempty"`            // per-tool update commands; override Update
+	Author      string            `yaml:"author,omitempty"`
+	Description string            `yaml:"description,omitempty"`
+	Timeout     int               `yaml:"timeout,omitempty"`
+	Group       string            `yaml:"-"` // display-only, set by marketplace discovery
+}
+
+// InstallFor returns the install command for toolName. Per-tool commands take
+// precedence over the global Install fallback.
+func (e Entry) InstallFor(toolName string) string {
+	if cmd, ok := e.Installs[toolName]; ok {
+		return cmd
+	}
+	return e.Install
+}
+
+// UpdateFor returns the update command for toolName. Per-tool commands take
+// precedence over the global Update fallback.
+func (e Entry) UpdateFor(toolName string) string {
+	if cmd, ok := e.Updates[toolName]; ok {
+		return cmd
+	}
+	return e.Update
 }
 
 // Maintainer returns the entry's author.
