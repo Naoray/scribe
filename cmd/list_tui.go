@@ -190,6 +190,11 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 		Tools:    []tools.Tool{},
 	}
 
+	// matchedLocal records which locally-discovered skills have already
+	// been represented by a registry row, so we can append the rest as
+	// untracked rows below.
+	matchedLocal := make(map[string]bool, len(localSkills))
+
 	var rows []listRow
 	for _, repo := range repos {
 		statuses, _, derr := syncer.Diff(ctx, repo, bag.State)
@@ -197,6 +202,10 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 			return nil, fmt.Errorf("%s: %w", repo, derr)
 		}
 		for _, ss := range statuses {
+			local := localByName[ss.Name]
+			if local != nil {
+				matchedLocal[local.Name] = true
+			}
 			row := listRow{
 				Name:      ss.Name,
 				Group:     repo,
@@ -204,7 +213,7 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 				HasStatus: true,
 				Version:   ss.DisplayVersion(),
 				Author:    ss.Maintainer,
-				Local:     localByName[ss.Name],
+				Local:     local,
 			}
 			if ss.Installed != nil {
 				row.Targets = ss.Installed.Tools
@@ -213,7 +222,26 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 			rows = append(rows, row)
 		}
 	}
+
+	// Append every local skill that didn't surface through any team registry.
+	// These show up under their package (or "uncategorized") with no status
+	// column — they're outside the team-registry concept entirely.
+	rows = append(rows, buildLocalRowsExcluding(localSkills, matchedLocal)...)
 	return rows, nil
+}
+
+// buildLocalRowsExcluding returns local rows for every skill whose name is
+// not present in the matched set, grouped/sorted the same way as the
+// local-only fallback view.
+func buildLocalRowsExcluding(skills []discovery.Skill, matched map[string]bool) []listRow {
+	var remaining []discovery.Skill
+	for _, sk := range skills {
+		if matched[sk.Name] {
+			continue
+		}
+		remaining = append(remaining, sk)
+	}
+	return buildLocalRows(remaining)
 }
 
 func buildLocalRows(skills []discovery.Skill) []listRow {
@@ -667,6 +695,36 @@ func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, c
 		return
 	}
 
+	// Pre-compute the max name width across all filtered rows so the status
+	// column lines up neatly two cells after the longest name. Capped so a
+	// single very long name can't push the status off-screen.
+	nameCol := 0
+	for _, r := range m.filtered {
+		w := runewidth.StringWidth(r.Name)
+		if w > nameCol {
+			nameCol = w
+		}
+	}
+	// Reserve cells for the status text: icon (1) + space (1) + longest
+	// label "current" (7) = 9 cells, plus prefix (2) and a little breathing
+	// room.
+	statusReserve := 0
+	if !compact {
+		statusReserve = 12
+	} else {
+		statusReserve = 4 // icon + padding only
+	}
+	maxNameCol := maxWidth - statusReserve - 2 // -2 for the row prefix
+	if maxNameCol < 8 {
+		maxNameCol = 8
+	}
+	if nameCol > maxNameCol {
+		nameCol = maxNameCol
+	}
+	if nameCol < 8 {
+		nameCol = 8
+	}
+
 	// Determine which rows are visible based on offset/contentHeight.
 	linesUsed := 0
 	if m.offset > 0 {
@@ -692,12 +750,12 @@ func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, c
 			if linesUsed+1 >= contentHeight {
 				break
 			}
-			b.WriteString(m.formatGroupHeader(row.Group, maxWidth) + "\n")
+			b.WriteString(m.formatGroupHeader(row.Group) + "\n")
 			linesUsed++
 			prevGroup = row.Group
 		}
 		isCursor := i == m.cursor
-		b.WriteString(m.formatRow(row, isCursor, maxWidth, compact) + "\n")
+		b.WriteString(m.formatRow(row, isCursor, nameCol, compact) + "\n")
 		linesUsed++
 		end = i + 1
 	}
@@ -708,7 +766,7 @@ func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, c
 	}
 }
 
-func (m listModel) formatGroupHeader(group string, maxWidth int) string {
+func (m listModel) formatGroupHeader(group string) string {
 	count := 0
 	for _, r := range m.filtered {
 		if r.Group == group {
@@ -719,11 +777,13 @@ func (m listModel) formatGroupHeader(group string, maxWidth int) string {
 	if label == "" {
 		label = "(local)"
 	}
-	header := ltGroupStyle.Render(label) + " " + ltCountStyle.Render(fmt.Sprintf("(%d)", count))
-	return header
+	return ltGroupStyle.Render(label) + " " + ltCountStyle.Render(fmt.Sprintf("(%d)", count))
 }
 
-func (m listModel) formatRow(row listRow, isCursor bool, maxWidth int, compact bool) string {
+// formatRow renders a single row with name padded to nameCol so the status
+// column aligns across all visible rows. Status sits two cells right of the
+// longest name in view.
+func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bool) string {
 	prefix := "  "
 	nameStyle := ltNameStyle
 	if isCursor {
@@ -731,16 +791,8 @@ func (m listModel) formatRow(row listRow, isCursor bool, maxWidth int, compact b
 		nameStyle = ltCursorStyle
 	}
 
-	// Reserve space for status icon (~2 cells) plus padding.
-	nameMax := maxWidth - 4
-	if row.HasStatus {
-		nameMax -= 3
-	}
-	if nameMax < 4 {
-		nameMax = 4
-	}
-	name := runewidth.Truncate(row.Name, nameMax, "…")
-	name = runewidth.FillRight(name, nameMax)
+	name := runewidth.Truncate(row.Name, nameCol, "…")
+	name = runewidth.FillRight(name, nameCol)
 
 	if !row.HasStatus {
 		return prefix + nameStyle.Render(name)
@@ -748,10 +800,10 @@ func (m listModel) formatRow(row listRow, isCursor bool, maxWidth int, compact b
 
 	icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
 	if compact {
-		return prefix + nameStyle.Render(name) + " " + icon
+		return prefix + nameStyle.Render(name) + "  " + icon
 	}
 	label := statusStyles[row.Status].Render(row.Status.Display().Label)
-	return prefix + nameStyle.Render(name) + " " + icon + " " + label
+	return prefix + nameStyle.Render(name) + "  " + icon + " " + label
 }
 
 // renderSummary builds the colored "N current · N update · N missing" footer.
