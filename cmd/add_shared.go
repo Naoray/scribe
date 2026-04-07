@@ -11,7 +11,6 @@ import (
 	"charm.land/huh/v2"
 
 	"github.com/Naoray/scribe/internal/add"
-	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
@@ -36,7 +35,6 @@ func runAddByName(
 	candidates []add.Candidate,
 	adder *add.Adder,
 	targetRepo string,
-	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
 	targets []tools.Tool,
@@ -90,7 +88,6 @@ func runAddInteractive(
 	candidates []add.Candidate,
 	adder *add.Adder,
 	targetRepo string,
-	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
 	targets []tools.Tool,

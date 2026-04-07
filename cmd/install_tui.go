@@ -62,6 +62,11 @@ func (m installModel) Init() tea.Cmd {
 
 func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.InterruptMsg:
+		// ctrl+c always quits, even mid-search (raw-mode TUI requirement).
+		m.quitting = true
+		return m, tea.Quit
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -69,9 +74,14 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "ctrl+c":
+			// Handled by InterruptMsg above; this branch is a belt-and-suspenders
+			// fallback for terminals that send the key event instead.
+			m.quitting = true
+			return m, tea.Quit
+		case "q":
 			if m.search != "" {
-				// Clear search (don't quit while searching)
+				// Clear search rather than quit (q is a typeable search char when searching).
 				m.search = ""
 				m.cursor = 0
 				m.offset = 0

@@ -18,6 +18,50 @@ Skills grouped by registry in list output. `--registry` filter flag available.
 
 ---
 
+## Parallelize multi-registry API calls in `scribe add` and `scribe registry add`
+
+**What:** `discoverEntries` (cmd/add.go) and the `otherManifests` fetch loop in `runRegistryAdd` (cmd/registry_add.go) make N sequential GitHub API calls. Parallelize with `errgroup`.
+
+**Why:** With several connected registries, `scribe add` blocks for N round-trips before the TUI appears. Each `syncer.Diff` call is independent.
+
+**Fix:** Replace the sequential loops with `golang.org/x/sync/errgroup` + goroutines, merging results after all calls complete.
+
+**Context:** Identified during PR #69 review (2026-04-07).
+
+---
+
+## Add test coverage for new `scribe add` / install browser functions
+
+**What:** Zero test coverage for: `parseSkillRef`, `filterEntries`, `sortEntries`, `isPackageManifestMissingErr`, `collectInstallCommands`, and `installModel` TUI helpers (`filteredItems`, `selectedCount`, `selectedEntries`, viewport math).
+
+**Why:** Pure functions with multiple guard clauses, no tests. `isPackageManifestMissingErr` has brittle string-matching that especially needs exercising.
+
+**Fix:** Table-driven tests in `cmd/add_test.go` and `cmd/install_tui_test.go`, mirroring existing `list_tui_test.go` style. Use `t.Setenv("HOME", t.TempDir())` for filesystem isolation.
+
+**Context:** Identified during PR #69 review (2026-04-07).
+
+---
+
+## Replace `isPackageManifestMissingErr` string matching with sentinel errors
+
+**What:** `isPackageManifestMissingErr` in `cmd/registry_add.go` detects error types by matching substrings of `err.Error()`. Any wording change in `internal/add` silently breaks the fallback-to-prompt path.
+
+**Fix:** Define typed errors in `internal/add` (`ErrNoPackageManifest`, `ErrNotAPackage`, `ErrNoInstallCommands`) and replace string matching with `errors.Is`. TODO comment already added at the call site.
+
+**Context:** Identified during PR #69 review (2026-04-07).
+
+---
+
+## TUI: selected-but-filtered items install silently
+
+**What:** In the install browser, items selected before a search filter is applied remain selected when hidden by search. Pressing enter installs them. A user can select 5 items, search-narrow to 0 visible, and get all 5 installed.
+
+**Fix:** Show a "N selected (X hidden)" indicator in the footer, or restrict installs to items visible in the current filter.
+
+**Context:** Identified during PR #69 review (2026-04-07).
+
+---
+
 ## Guide command: table-driven path dispatch
 
 **What:** Replace the options-list + switch-case pair in `runGuideInteractive` with a single `[]guidePath` slice that co-locates each path's label, availability predicate, and handler.

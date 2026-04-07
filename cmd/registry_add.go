@@ -137,10 +137,10 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 	)
 
 	if len(args) == 1 {
-		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, isTTY, addYes)
+		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, st, client, targets, useJSON, isTTY, addYes)
 	}
 
-	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, addYes)
+	return runAddInteractive(ctx, allCandidates, adder, targetRepo, st, client, targets, useJSON, addYes)
 }
 
 // runRegistryAddPackageRef adds an owner/repo reference to the target registry.
@@ -190,6 +190,11 @@ func runRegistryAddPackageRef(
 
 // isPackageManifestMissingErr returns true when AddPackageRef failed because
 // the upstream repo doesn't expose a scribe.yaml package manifest.
+//
+// TODO: Replace with sentinel error detection (errors.Is) once internal/add
+// defines typed errors (e.g. add.ErrNoPackageManifest, add.ErrNotAPackage,
+// add.ErrNoInstallCommands). String matching is fragile — any wording change
+// in internal/add silently breaks the fallback-to-prompt path.
 func isPackageManifestMissingErr(err error) bool {
 	if err == nil {
 		return false

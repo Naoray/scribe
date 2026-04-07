@@ -186,7 +186,8 @@ func parseSkillRef(ref string) (registryRepo, skillName string, err error) {
 }
 
 // runAddDirectInstall installs a single skill from owner/repo:skillname.
-// Auto-connects the registry if it isn't already in config.
+// Auto-connects the registry if it isn't already in config, but only after
+// validating that the skill actually exists in the registry.
 func runAddDirectInstall(
 	ctx context.Context,
 	registryRepo, skillName string,
@@ -197,17 +198,6 @@ func runAddDirectInstall(
 	useJSON bool,
 	skipConfirm bool,
 ) error {
-	// Auto-connect if missing.
-	if cfg.FindRegistry(registryRepo) == nil {
-		cfg.AddRegistry(config.RegistryConfig{Repo: registryRepo})
-		if err := cfg.Save(); err != nil {
-			return fmt.Errorf("save config: %w", err)
-		}
-		if !useJSON {
-			fmt.Printf("connected %s\n", registryRepo)
-		}
-	}
-
 	syncer := newInstallSyncer(client, targets)
 	statuses, _, err := syncer.Diff(ctx, registryRepo, st)
 	if err != nil {
@@ -223,6 +213,17 @@ func runAddDirectInstall(
 	}
 	if target == nil {
 		return fmt.Errorf("skill %q not found in %s", skillName, registryRepo)
+	}
+
+	// Skill exists — safe to auto-connect the registry now.
+	if cfg.FindRegistry(registryRepo) == nil {
+		cfg.AddRegistry(config.RegistryConfig{Repo: registryRepo})
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		if !useJSON {
+			fmt.Printf("connected %s\n", registryRepo)
+		}
 	}
 
 	if target.Status == sync.StatusCurrent {
@@ -307,6 +308,7 @@ func installSelected(
 
 	syncer := newInstallSyncer(client, targets)
 
+	var installErr error
 	for _, registryRepo := range order {
 		// Auto-connect if needed.
 		if cfg.FindRegistry(registryRepo) == nil {
@@ -334,9 +336,10 @@ func installSelected(
 		_ = wireInstallSyncer(syncer, registryRepo, false)
 		if err := syncer.RunWithDiff(ctx, registryRepo, toInstall, st); err != nil {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", err)
+			installErr = err
 		}
 	}
-	return nil
+	return installErr
 }
 
 // newInstallSyncer constructs a Syncer ready to install skills.
