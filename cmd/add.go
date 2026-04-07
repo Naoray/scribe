@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -13,64 +14,70 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/add"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
-	"github.com/Naoray/scribe/internal/migrate"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
-type addResult struct {
+// skillRefPattern matches "owner/repo:skillname" — direct install reference.
+var skillRefPattern = regexp.MustCompile(`^\w[\w.-]*/[\w.-]+:\S+$`)
+
+// installResult is the per-skill JSON output for `scribe add`.
+type installResult struct {
 	Name     string `json:"name"`
 	Registry string `json:"registry"`
-	Source   string `json:"source,omitempty"`
-	Uploaded bool   `json:"uploaded"`
+	Status   string `json:"status"`
+	Version  string `json:"version,omitempty"`
 	Error    string `json:"error,omitempty"`
+}
+
+// browseEntry pairs a SkillStatus with the registry it came from.
+type browseEntry struct {
+	Status   sync.SkillStatus
+	Registry string
 }
 
 func newAddCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "add [name]",
-		Short: "Add a skill to a team registry",
-		Long: `Add a skill to a team registry on GitHub.
+		Use:   "add [query]",
+		Short: "Find and install skills from connected registries",
+		Long: `Browse, search, and install skills from connected registries.
 
-If the skill has a known source (synced from another registry), adds a
-source reference. If it's a local-only skill, uploads the files to the
-registry.
-
-With no arguments in a terminal, shows an interactive browser to select
-skills. In non-TTY mode, the skill name is required.
+With no argument, opens an interactive browser of every skill across
+every connected registry. With a query, filters by name and description.
+With "owner/repo:skillname", installs that specific skill directly,
+auto-connecting the registry first if needed.
 
 Examples:
-  scribe add cleanup
-  scribe add gstack --registry ArtistfyHQ/team-skills
-  scribe add --yes cleanup`,
+  scribe add                          # browse everything
+  scribe add react                    # search "react"
+  scribe add antfu/skills:nuxt        # direct install
+  scribe add antfu/skills:nuxt --yes  # non-interactive
+  scribe add react --json             # machine-readable search`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runAdd,
 	}
-	cmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	cmd.Flags().String("registry", "", "Target registry (owner/repo)")
+	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
 	return cmd
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
-	addYes, _ := cmd.Flags().GetBool("yes")
-	addJSON, _ := cmd.Flags().GetBool("json")
-	addRegistry, _ := cmd.Flags().GetString("registry")
+	skipConfirm, _ := cmd.Flags().GetBool("yes")
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	registryFilter, _ := cmd.Flags().GetString("registry")
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
-	useJSON := addJSON || !isatty.IsTerminal(os.Stdout.Fd())
+	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
-	}
-	if len(cfg.TeamRepos()) == 0 {
-		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
 	}
 
 	st, err := state.Load()
@@ -78,136 +85,165 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load state: %w", err)
 	}
 
-	client := gh.NewClient(cmd.Context(), cfg.Token)
+	ctx := cmd.Context()
+	client := gh.NewClient(ctx, cfg.Token)
+	targets := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
+
+	// Direct install: owner/repo:skillname.
+	if len(args) == 1 && skillRefPattern.MatchString(args[0]) {
+		registryRepo, skillName, err := parseSkillRef(args[0])
+		if err != nil {
+			return err
+		}
+		if !client.IsAuthenticated() {
+			return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
+		}
+		return runAddDirectInstall(ctx, registryRepo, skillName, cfg, st, client, targets, useJSON, skipConfirm)
+	}
+
+	// Need at least one connected registry to search/browse.
+	if len(cfg.TeamRepos()) == 0 {
+		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
+	}
 	if !client.IsAuthenticated() {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}
 
-	targets := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
-	adder := &add.Adder{Client: client, Tools: targets}
-
-	// Resolve target registry.
-	targetRepo, err := resolveTargetRegistry(addRegistry, cfg.TeamRepos(), isTTY)
-	if err != nil {
-		return fmt.Errorf("resolve target registry: %w", err)
-	}
-
-	// Mode 3: no args, non-TTY.
-	if len(args) == 0 && !isTTY {
-		return fmt.Errorf("skill name required when not running interactively")
-	}
-
-	// Discover candidates.
-	localCandidates, err := adder.DiscoverLocal(st)
-	if err != nil {
-		return fmt.Errorf("discover local skills: %w", err)
-	}
-
-	// Fetch target registry manifest to filter already-added skills.
-	ctx := cmd.Context()
-	targetOwner, targetRepoName, err := manifest.ParseOwnerRepo(targetRepo)
-	if err != nil {
-		return fmt.Errorf("invalid target registry: %w", err)
-	}
-	targetManifest, err := fetchRegistryManifest(ctx, client, targetOwner, targetRepoName)
-	if err != nil {
-		return fmt.Errorf("fetch target registry: %w", err)
-	}
-
-	// Fetch other registries for remote discovery.
-	otherManifests := map[string]*manifest.Manifest{}
-	for _, repo := range cfg.TeamRepos() {
-		if repo == targetRepo {
-			continue
-		}
-		o, r, err := manifest.ParseOwnerRepo(repo)
+	// Determine which registries to browse.
+	repos := cfg.TeamRepos()
+	if registryFilter != "" {
+		repo, err := resolveRegistry(registryFilter, repos)
 		if err != nil {
-			continue // skip malformed registry entries
+			return err
 		}
-		m, err := fetchRegistryManifest(ctx, client, o, r)
-		if err != nil || !m.IsRegistry() {
-			continue
-		}
-		otherManifests[repo] = m
+		repos = []string{repo}
 	}
 
-	remoteCandidates := adder.DiscoverRemote(targetManifest, otherManifests)
-
-	// Merge and filter: remove skills already in target.
-	allCandidates := filterAlreadyInTarget(
-		append(localCandidates, remoteCandidates...),
-		targetManifest,
-	)
-
+	// Build query from arg.
+	query := ""
 	if len(args) == 1 {
-		// owner/repo arg → package-add flow; bare skill name → skill-add flow.
-		if strings.Contains(args[0], "/") {
-			return runAddPackageRef(ctx, args[0], adder, targetRepo, st, client, targets, useJSON)
-		}
-		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, isTTY, addYes)
+		query = args[0]
 	}
 
-	// Mode 2: interactive browse (TTY, no args) — Task 7.
-	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, addYes)
-}
+	// Non-TTY without JSON requires either a direct ref or --json.
+	if !isTTY && !useJSON {
+		return fmt.Errorf("interactive browse requires a terminal — pass owner/repo:skillname or --json")
+	}
 
-func runAddPackageRef(
-	ctx context.Context,
-	packageRepo string,
-	adder *add.Adder,
-	targetRepo string,
-	st *state.State,
-	client *gh.Client,
-	targets []tools.Tool,
-	useJSON bool,
-) error {
-	results := wireAddEmit(adder, targetRepo, useJSON)
+	// Discover all skills across the selected registries.
+	entries, errs := discoverEntries(ctx, repos, client, targets, st)
+	for _, e := range errs {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", e)
+	}
 
-	if err := adder.AddPackageRef(ctx, targetRepo, packageRepo); err != nil {
+	// Filter by query.
+	if query != "" {
+		entries = filterEntries(entries, query)
+	}
+
+	// JSON or non-TTY: just emit results.
+	if useJSON {
+		return emitBrowseJSON(entries)
+	}
+
+	if len(entries) == 0 {
+		if query != "" {
+			fmt.Printf("No skills matching %q in connected registries.\n", query)
+		} else {
+			fmt.Println("No skills found in connected registries.")
+		}
+		return nil
+	}
+
+	// Interactive browser.
+	sortEntries(entries)
+	selected, err := runInstallBrowser(entries, query)
+	if err != nil {
 		return err
 	}
+	if len(selected) == 0 {
+		return nil
+	}
 
-	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
+	return installSelected(ctx, selected, cfg, st, client, targets, skipConfirm)
 }
 
-func runAddByName(
+// parseSkillRef parses "owner/repo:skillname" into its parts.
+func parseSkillRef(ref string) (registryRepo, skillName string, err error) {
+	idx := strings.LastIndex(ref, ":")
+	if idx < 0 {
+		return "", "", fmt.Errorf("invalid skill reference %q: expected owner/repo:skillname", ref)
+	}
+	registryRepo = ref[:idx]
+	skillName = ref[idx+1:]
+	if _, _, perr := manifest.ParseOwnerRepo(registryRepo); perr != nil {
+		return "", "", fmt.Errorf("invalid skill reference %q: %w", ref, perr)
+	}
+	if skillName == "" {
+		return "", "", fmt.Errorf("invalid skill reference %q: skill name is empty", ref)
+	}
+	return registryRepo, skillName, nil
+}
+
+// runAddDirectInstall installs a single skill from owner/repo:skillname.
+// Auto-connects the registry if it isn't already in config.
+func runAddDirectInstall(
 	ctx context.Context,
-	name string,
-	candidates []add.Candidate,
-	adder *add.Adder,
-	targetRepo string,
+	registryRepo, skillName string,
 	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
 	targets []tools.Tool,
 	useJSON bool,
-	isTTY bool,
 	skipConfirm bool,
 ) error {
-	// Find the candidate.
-	var found *add.Candidate
-	for _, c := range candidates {
-		if c.Name == name {
-			found = &c
+	// Auto-connect if missing.
+	if cfg.FindRegistry(registryRepo) == nil {
+		cfg.AddRegistry(config.RegistryConfig{Repo: registryRepo})
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		if !useJSON {
+			fmt.Printf("connected %s\n", registryRepo)
+		}
+	}
+
+	syncer := newInstallSyncer(client, targets)
+	statuses, _, err := syncer.Diff(ctx, registryRepo, st)
+	if err != nil {
+		return fmt.Errorf("diff %s: %w", registryRepo, err)
+	}
+
+	var target *sync.SkillStatus
+	for i := range statuses {
+		if statuses[i].Name == skillName {
+			target = &statuses[i]
 			break
 		}
 	}
-	if found == nil {
-		return fmt.Errorf("skill %q not found locally or in connected registries", name)
+	if target == nil {
+		return fmt.Errorf("skill %q not found in %s", skillName, registryRepo)
+	}
+
+	if target.Status == sync.StatusCurrent {
+		if useJSON {
+			return emitInstallJSON([]installResult{{
+				Name: target.Name, Registry: registryRepo, Status: "already-installed",
+				Version: target.DisplayVersion(),
+			}})
+		}
+		fmt.Printf("%s is already installed (current).\n", skillName)
+		return nil
 	}
 
 	// Confirmation.
-	if !skipConfirm && isTTY {
-		action := "add reference"
-		if found.NeedsUpload() {
-			action = "upload files"
-		}
+	if !skipConfirm && !useJSON {
 		var confirm bool
-		err := huh.NewConfirm().
-			Title(fmt.Sprintf("%s %q to %s?", action, name, targetRepo)).
-			Value(&confirm).
-			Run()
-		if err != nil {
+		title := fmt.Sprintf("Install %s from %s?", skillName, registryRepo)
+		if target.Status == sync.StatusOutdated {
+			title = fmt.Sprintf("Update %s from %s?", skillName, registryRepo)
+		}
+		if err := huh.NewConfirm().Title(title).Value(&confirm).Run(); err != nil {
 			return err
 		}
 		if !confirm {
@@ -215,64 +251,51 @@ func runAddByName(
 		}
 	}
 
-	results := wireAddEmit(adder, targetRepo, useJSON)
-
-	if err := adder.Add(ctx, targetRepo, []add.Candidate{*found}); err != nil {
-		return err
+	results := wireInstallSyncer(syncer, registryRepo, useJSON)
+	if err := syncer.RunWithDiff(ctx, registryRepo, []sync.SkillStatus{*target}, st); err != nil {
+		return fmt.Errorf("install %s: %w", skillName, err)
 	}
 
-	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
+	if useJSON {
+		return emitInstallJSON(*results)
+	}
+	return nil
 }
 
-func runAddInteractive(
+// installSelected installs the user-selected entries from the browser. Each
+// entry may belong to a different registry; auto-connects as needed.
+func installSelected(
 	ctx context.Context,
-	candidates []add.Candidate,
-	adder *add.Adder,
-	targetRepo string,
+	selected []browseEntry,
 	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
 	targets []tools.Tool,
-	useJSON bool,
 	skipConfirm bool,
 ) error {
-	if len(candidates) == 0 {
-		fmt.Printf("All available skills are already in %s.\n", targetRepo)
-		return nil
-	}
-
-	// Sort: local first, then remote, alphabetical within each.
-	sortCandidates(candidates)
-
-	m := newAddModel(candidates, targetRepo)
-	p := tea.NewProgram(m)
-
-	finalModel, err := p.Run()
-	if err != nil {
-		return fmt.Errorf("TUI error: %w", err)
-	}
-
-	fm, ok := finalModel.(addModel)
-	if !ok || fm.quitting || !fm.confirmed {
-		return nil
-	}
-
-	selected := fm.selectedCandidates()
-	if len(selected) == 0 {
-		return nil
-	}
-
-	// Confirmation (unless --yes).
-	if !skipConfirm {
-		fmt.Printf("\nAdding %d skill(s) to %s:\n", len(selected), targetRepo)
-		for _, c := range selected {
-			action := "reference"
-			if c.NeedsUpload() {
-				action = "upload"
-			}
-			fmt.Printf("  • %s (%s)\n", c.Name, action)
+	// Group by registry.
+	byRegistry := map[string][]sync.SkillStatus{}
+	order := []string{}
+	for _, e := range selected {
+		if _, seen := byRegistry[e.Registry]; !seen {
+			order = append(order, e.Registry)
 		}
+		byRegistry[e.Registry] = append(byRegistry[e.Registry], e.Status)
+	}
 
+	// Confirmation summary.
+	if !skipConfirm {
+		fmt.Printf("\nInstalling %d skill(s):\n", len(selected))
+		for _, e := range selected {
+			marker := "install"
+			switch e.Status.Status {
+			case sync.StatusCurrent:
+				marker = "already current — skip"
+			case sync.StatusOutdated:
+				marker = "update"
+			}
+			fmt.Printf("  • %s  (%s)  [%s]\n", e.Status.Name, e.Registry, marker)
+		}
 		var confirm bool
 		if err := huh.NewConfirm().Title("Proceed?").Value(&confirm).Run(); err != nil {
 			return err
@@ -282,166 +305,192 @@ func runAddInteractive(
 		}
 	}
 
-	results := wireAddEmit(adder, targetRepo, useJSON)
+	syncer := newInstallSyncer(client, targets)
 
-	if err := adder.Add(ctx, targetRepo, selected); err != nil {
-		return err
-	}
-
-	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
-}
-
-// sortCandidates groups by origin (local first, then remote), then by package,
-// alphabetical within each group.
-func sortCandidates(candidates []add.Candidate) {
-	sort.Slice(candidates, func(i, j int) bool {
-		iLocal := candidates[i].Origin == "local"
-		jLocal := candidates[j].Origin == "local"
-		if iLocal != jLocal {
-			return iLocal
-		}
-		// Within local: standalone first, then by package name.
-		pkgI, pkgJ := candidates[i].Package, candidates[j].Package
-		if pkgI != pkgJ {
-			if pkgI == "" {
-				return true
+	for _, registryRepo := range order {
+		// Auto-connect if needed.
+		if cfg.FindRegistry(registryRepo) == nil {
+			cfg.AddRegistry(config.RegistryConfig{Repo: registryRepo})
+			if err := cfg.Save(); err != nil {
+				return fmt.Errorf("save config: %w", err)
 			}
-			if pkgJ == "" {
-				return false
-			}
-			return pkgI < pkgJ
+			fmt.Printf("connected %s\n", registryRepo)
 		}
-		return candidates[i].Name < candidates[j].Name
-	})
-}
 
-// resolveTargetRegistry determines which registry to add skills to.
-func resolveTargetRegistry(flag string, repos []string, isTTY bool) (string, error) {
-	if flag != "" {
-		return resolveRegistry(flag, repos)
-	}
-	if len(repos) == 1 {
-		return repos[0], nil
-	}
-	// Multiple registries, no flag.
-	if !isTTY {
-		return "", fmt.Errorf("multiple registries connected — pass --registry owner/repo")
-	}
-	// Interactive picker.
-	var selected string
-	opts := make([]huh.Option[string], len(repos))
-	for i, r := range repos {
-		opts[i] = huh.NewOption(r, r)
-	}
-	err := huh.NewSelect[string]().
-		Title("Which registry?").
-		Options(opts...).
-		Value(&selected).
-		Run()
-	if err != nil {
-		return "", err
-	}
-	return selected, nil
-}
-
-// filterAlreadyInTarget removes candidates that are already in the target registry.
-func filterAlreadyInTarget(candidates []add.Candidate, targetManifest *manifest.Manifest) []add.Candidate {
-	// Also deduplicate by name (local wins — it appears first).
-	seen := map[string]bool{}
-	var filtered []add.Candidate
-	for _, c := range candidates {
-		if seen[c.Name] {
+		// Filter out already-current skills.
+		var toInstall []sync.SkillStatus
+		for _, s := range byRegistry[registryRepo] {
+			if s.Status == sync.StatusCurrent {
+				fmt.Printf("  - %s already installed, skipping\n", s.Name)
+				continue
+			}
+			toInstall = append(toInstall, s)
+		}
+		if len(toInstall) == 0 {
 			continue
 		}
-		if targetManifest.FindByName(c.Name) != nil {
-			continue
+
+		fmt.Printf("\ninstalling from %s...\n\n", registryRepo)
+		_ = wireInstallSyncer(syncer, registryRepo, false)
+		if err := syncer.RunWithDiff(ctx, registryRepo, toInstall, st); err != nil {
+			fmt.Fprintf(os.Stderr, "  error: %v\n", err)
 		}
-		seen[c.Name] = true
-		filtered = append(filtered, c)
 	}
-	return filtered
+	return nil
 }
 
-// wireAddEmit sets up the Adder's Emit callback to collect results. Returns
-// a pointer to the results slice so the caller can read it after Add completes.
-func wireAddEmit(adder *add.Adder, targetRepo string, useJSON bool) *[]addResult {
-	results := &[]addResult{}
-	adder.Emit = func(msg any) {
+// newInstallSyncer constructs a Syncer ready to install skills.
+func newInstallSyncer(client *gh.Client, targets []tools.Tool) *sync.Syncer {
+	return &sync.Syncer{
+		Client:   sync.WrapGitHubClient(client),
+		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
+		Tools:    targets,
+		Executor: &sync.ShellExecutor{},
+	}
+}
+
+// wireInstallSyncer attaches an Emit callback that prints progress (or
+// collects results for JSON output) and returns the result slice pointer.
+func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *[]installResult {
+	results := &[]installResult{}
+	syncer.Emit = func(msg any) {
 		switch m := msg.(type) {
-		case add.SkillAddingMsg:
-			if !useJSON {
-				verb := "adding reference"
-				if m.Upload {
-					verb = "uploading"
-				}
-				fmt.Printf("  %s %s...\n", verb, m.Name)
-			}
-		case add.SkillAddedMsg:
+		case sync.SkillInstalledMsg:
 			if useJSON {
-				*results = append(*results, addResult{
-					Name: m.Name, Registry: m.Registry, Source: m.Source, Uploaded: m.Upload,
+				status := "installed"
+				if m.Updated {
+					status = "updated"
+				}
+				*results = append(*results, installResult{
+					Name: m.Name, Registry: registryRepo, Status: status, Version: m.Version,
 				})
 			} else {
-				fmt.Printf("  ✓ %s added to %s\n", m.Name, m.Registry)
+				verb := "installed"
+				if m.Updated {
+					verb = "updated to"
+				}
+				fmt.Printf("  ✓ %-24s %s %s\n", m.Name, verb, m.Version)
 			}
-		case add.SkillAddErrorMsg:
+		case sync.SkillErrorMsg:
 			if useJSON {
-				*results = append(*results, addResult{Name: m.Name, Registry: targetRepo, Error: m.Err.Error()})
+				*results = append(*results, installResult{
+					Name: m.Name, Registry: registryRepo, Status: "error", Error: m.Err.Error(),
+				})
 			} else {
-				fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", m.Name, m.Err)
+				fmt.Fprintf(os.Stderr, "  ✗ %-24s error: %v\n", m.Name, m.Err)
 			}
 		}
 	}
 	return results
 }
 
-// finishAdd runs auto-sync and optionally outputs JSON after add completes.
-func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) error {
-	synced := autoSync(ctx, targetRepo, st, client, targets, useJSON)
-	if useJSON {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"added":  results,
-			"synced": synced,
+// discoverEntries fetches the diff for each registry and tags every result
+// with its source registry.
+func discoverEntries(
+	ctx context.Context,
+	repos []string,
+	client *gh.Client,
+	targets []tools.Tool,
+	st *state.State,
+) ([]browseEntry, []error) {
+	syncer := &sync.Syncer{
+		Client:   sync.WrapGitHubClient(client),
+		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
+		Tools:    targets,
+	}
+
+	var entries []browseEntry
+	var errs []error
+	for _, repo := range repos {
+		statuses, _, err := syncer.Diff(ctx, repo, st)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", repo, err))
+			continue
+		}
+		for _, s := range statuses {
+			// Skip extras (local-only) — `add` is for installing FROM registries.
+			if s.Status == sync.StatusExtra {
+				continue
+			}
+			entries = append(entries, browseEntry{Status: s, Registry: repo})
+		}
+	}
+	return entries, errs
+}
+
+// filterEntries returns entries whose name or description contains the query
+// (case-insensitive).
+func filterEntries(entries []browseEntry, query string) []browseEntry {
+	q := strings.ToLower(query)
+	var out []browseEntry
+	for _, e := range entries {
+		name := strings.ToLower(e.Status.Name)
+		desc := ""
+		if e.Status.Entry != nil {
+			desc = strings.ToLower(e.Status.Entry.Description)
+		}
+		if strings.Contains(name, q) || strings.Contains(desc, q) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// sortEntries orders entries by registry, then alphabetically by name.
+func sortEntries(entries []browseEntry) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Registry != entries[j].Registry {
+			return entries[i].Registry < entries[j].Registry
+		}
+		return entries[i].Status.Name < entries[j].Status.Name
+	})
+}
+
+// emitBrowseJSON emits the discovered entries as JSON for non-TTY/--json mode.
+func emitBrowseJSON(entries []browseEntry) error {
+	type row struct {
+		Name        string `json:"name"`
+		Registry    string `json:"registry"`
+		Status      string `json:"status"`
+		Version     string `json:"version,omitempty"`
+		Description string `json:"description,omitempty"`
+		Author      string `json:"author,omitempty"`
+	}
+	rows := make([]row, 0, len(entries))
+	for _, e := range entries {
+		desc := ""
+		if e.Status.Entry != nil {
+			desc = e.Status.Entry.Description
+		}
+		rows = append(rows, row{
+			Name:        e.Status.Name,
+			Registry:    e.Registry,
+			Status:      e.Status.Status.String(),
+			Version:     e.Status.DisplayVersion(),
+			Description: desc,
+			Author:      e.Status.Maintainer,
 		})
 	}
-	return nil
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"results": rows})
 }
 
-// autoSync runs a sync for the target registry after adding skills.
-func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) bool {
-	syncer := &sync.Syncer{
-		Client: sync.WrapGitHubClient(client),
-		Tools:  targets,
-		Emit: func(msg any) {
-			if useJSON {
-				return
-			}
-			switch m := msg.(type) {
-			case sync.SkillInstalledMsg:
-				verb := "installed"
-				if m.Updated {
-					verb = "updated to"
-				}
-				fmt.Printf("  %-20s %s %s\n", m.Name, verb, m.Version)
-			case sync.SkillErrorMsg:
-				fmt.Fprintf(os.Stderr, "  %-20s error: %v\n", m.Name, m.Err)
-			}
-		},
-	}
-
-	if !useJSON {
-		fmt.Printf("\nsyncing %s...\n\n", targetRepo)
-	}
-	if err := syncer.Run(ctx, targetRepo, st); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: sync failed: %v\nrun `scribe sync` to retry\n", err)
-		return false
-	}
-	return true
+// emitInstallJSON emits per-skill install results as JSON.
+func emitInstallJSON(results []installResult) error {
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"installed": results})
 }
 
-// fetchRegistryManifest fetches a manifest, trying scribe.yaml first then
-// falling back to scribe.toml (converting TOML to the new format via migrate).
-func fetchRegistryManifest(ctx context.Context, client *gh.Client, owner, repo string) (*manifest.Manifest, error) {
-	m, _, err := manifest.FetchWithFallback(ctx, client, owner, repo, migrate.Convert)
-	return m, err
+// runInstallBrowser launches the interactive install browser.
+func runInstallBrowser(entries []browseEntry, initialQuery string) ([]browseEntry, error) {
+	m := newInstallModel(entries, initialQuery)
+	p := tea.NewProgram(m)
+
+	finalModel, err := p.Run()
+	if err != nil {
+		return nil, fmt.Errorf("TUI error: %w", err)
+	}
+	fm, ok := finalModel.(installModel)
+	if !ok || fm.quitting || !fm.confirmed {
+		return nil, nil
+	}
+	return fm.selectedEntries(), nil
 }
