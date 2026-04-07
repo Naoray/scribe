@@ -69,8 +69,9 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "q", "ctrl+c":
 			if m.search != "" {
+				// Clear search (don't quit while searching)
 				m.search = ""
 				m.cursor = 0
 				m.offset = 0
@@ -87,16 +88,37 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.quitting = true
 				return m, tea.Quit
 			}
-		case "up", "k":
+		case "up":
 			if m.cursor > 0 {
 				m.cursor--
 				m = m.ensureCursorVisible()
 			}
-		case "down", "j":
+		case "down":
 			filtered := m.filteredItems()
 			if m.cursor < len(filtered)-1 {
 				m.cursor++
 				m = m.ensureCursorVisible()
+			}
+		case "k":
+			if m.search != "" {
+				m.search += "k"
+				m.cursor = 0
+				m.offset = 0
+			} else if m.cursor > 0 {
+				m.cursor--
+				m = m.ensureCursorVisible()
+			}
+		case "j":
+			if m.search != "" {
+				m.search += "j"
+				m.cursor = 0
+				m.offset = 0
+			} else {
+				filtered := m.filteredItems()
+				if m.cursor < len(filtered)-1 {
+					m.cursor++
+					m = m.ensureCursorVisible()
+				}
 			}
 		case "space":
 			filtered := m.filteredItems()
