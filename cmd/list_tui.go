@@ -36,6 +36,15 @@ const (
 	listSubstateConfirm
 )
 
+// detailFocus indicates which pane has keyboard focus while the split-screen
+// detail view is open. The user can toggle between them with tab/←/→.
+type detailFocus int
+
+const (
+	focusList detailFocus = iota
+	focusActions
+)
+
 // ── Styles ──────────────────────────────────────────────────────────────────
 
 var (
@@ -111,7 +120,8 @@ type listModel struct {
 	cursor        int
 	offset        int
 	search        string
-	selected      bool // true when right-side detail/action pane is open
+	selected      bool        // true when right-side detail/action pane is open
+	focus         detailFocus // which pane is focused while selected
 	actionCursor  int
 	substate      listSubstate
 	statusMsg     string
@@ -201,11 +211,19 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 		if derr != nil {
 			return nil, fmt.Errorf("%s: %w", repo, derr)
 		}
+		slug := tools.SlugifyRegistry(repo)
 		for _, ss := range statuses {
+			// A local skill may be discovered under either its bare name
+			// (e.g. "ascii" if installed at ~/.claude/skills/ascii) or its
+			// slug-qualified name (e.g. "Artistfy-hq/ascii" if it lives at
+			// ~/.scribe/skills/Artistfy-hq/ascii). Mark both forms as
+			// matched so the untracked-pass below doesn't re-emit them.
 			local := localByName[ss.Name]
-			if local != nil {
-				matchedLocal[local.Name] = true
+			if local == nil {
+				local = localByName[slug+"/"+ss.Name]
 			}
+			matchedLocal[ss.Name] = true
+			matchedLocal[slug+"/"+ss.Name] = true
 			row := listRow{
 				Name:      ss.Name,
 				Group:     repo,
@@ -377,6 +395,7 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if len(m.filtered) > 0 {
 			m.selected = true
+			m.focus = focusActions
 			m.actionCursor = 0
 			m.statusMsg = ""
 		}
@@ -405,16 +424,68 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.selected = false
 		return m, nil
 	}
-	actions := actionsForRow(m.filtered[m.cursor])
 
-	switch msg.String() {
+	key := msg.String()
+
+	// Global keys regardless of focus.
+	switch key {
 	case "ctrl+c", "q":
 		m.quitting = true
 		return m, tea.Quit
 	case "escape":
 		m.selected = false
+		m.focus = focusList
 		m.actionCursor = 0
 		m.statusMsg = ""
+		return m, nil
+	case "tab":
+		if m.focus == focusList {
+			m.focus = focusActions
+			m.actionCursor = 0
+		} else {
+			m.focus = focusList
+		}
+		return m, nil
+	case "shift+tab":
+		if m.focus == focusActions {
+			m.focus = focusList
+		} else {
+			m.focus = focusActions
+			m.actionCursor = 0
+		}
+		return m, nil
+	}
+
+	if m.focus == focusList {
+		// Browsing the list with the detail pane open: arrow keys move
+		// the row cursor and the right pane refreshes live. Right/enter
+		// hands focus to the action menu.
+		switch key {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+				m = m.ensureCursorVisible()
+				m.actionCursor = 0
+				m.statusMsg = ""
+			}
+		case "down", "j":
+			if m.cursor < len(m.filtered)-1 {
+				m.cursor++
+				m = m.ensureCursorVisible()
+				m.actionCursor = 0
+				m.statusMsg = ""
+			}
+		case "right", "l", "enter":
+			m.focus = focusActions
+			m.actionCursor = 0
+		}
+		return m, nil
+	}
+
+	// focusActions: arrow keys move within the action list, left returns
+	// focus to the row list, enter executes.
+	actions := actionsForRow(m.filtered[m.cursor])
+	switch key {
 	case "up", "k":
 		if m.actionCursor > 0 {
 			m.actionCursor--
@@ -423,6 +494,8 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.actionCursor < len(actions)-1 {
 			m.actionCursor++
 		}
+	case "left", "h":
+		m.focus = focusList
 	case "enter":
 		action := actions[m.actionCursor]
 		if action.disabled {
@@ -664,10 +737,13 @@ func (m listModel) viewSplit() string {
 	b.WriteString(body)
 
 	b.WriteString("\n\n")
-	if m.substate == listSubstateConfirm {
+	switch {
+	case m.substate == listSubstateConfirm:
 		b.WriteString(ltDimStyle.Render("y confirm · n cancel") + "\n")
-	} else {
-		b.WriteString(ltDimStyle.Render("↑↓ navigate actions · enter execute · esc back · q quit") + "\n")
+	case m.focus == focusList:
+		b.WriteString(ltDimStyle.Render("↑↓ browse skills · →/enter actions · esc close · q quit") + "\n")
+	default:
+		b.WriteString(ltDimStyle.Render("↑↓ pick action · enter run · ←/tab back to list · esc close") + "\n")
 	}
 	return b.String()
 }
@@ -888,7 +964,7 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 
 	actions := actionsForRow(row)
 	for i, a := range actions {
-		isCursor := i == m.actionCursor
+		isCursor := i == m.actionCursor && m.focus == focusActions
 		prefix := "  "
 		if isCursor {
 			prefix = ltCursorStyle.Render("▸") + " "
