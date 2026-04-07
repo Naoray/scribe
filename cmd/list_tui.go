@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,17 +15,18 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/Naoray/scribe/internal/discovery"
-	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/tools"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
-// ── Phase ───────────────────────────────────────────────────────────────────
+// ── Stages / substates ──────────────────────────────────────────────────────
 
-type listPhase int
+type listStage int
 
 const (
-	listPhaseGroups listPhase = iota
-	listPhaseSkills
-	listPhaseActions
+	stageLoading listStage = iota
+	stageBrowse
 )
 
 type listSubstate int
@@ -37,41 +39,31 @@ const (
 // ── Styles ──────────────────────────────────────────────────────────────────
 
 var (
-	ltNameStyle   = lipgloss.NewStyle().Bold(true)
-	ltDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	ltHeaderStyle = lipgloss.NewStyle().Bold(true)
-	ltCountStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	ltCursorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00BFFF"))
-	ltDivStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	ltNameStyle    = lipgloss.NewStyle().Bold(true)
+	ltDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	ltHeaderStyle  = lipgloss.NewStyle().Bold(true)
+	ltCountStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	ltCursorStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00BFFF"))
+	ltDivStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	ltGroupStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
+	ltSpinnerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF"))
 )
 
-// ── Group item ──────────────────────────────────────────────────────────────
+// ── Row data ────────────────────────────────────────────────────────────────
 
-type listGroupItem struct {
-	name  string
-	key   string // "" for "all"
-	count int
-}
-
-// ── Model ───────────────────────────────────────────────────────────────────
-
-type listModel struct {
-	phase         listPhase
-	groups        []listGroupItem
-	skills        []discovery.Skill
-	filtered      []discovery.Skill
-	state         *state.State
-	groupKey      string // active group filter
-	search        string
-	cursor        int
-	offset        int
-	actionCursor  int
-	substate      listSubstate
-	pendingTickID int
-	statusMsg     string
-	quitting      bool
-	width         int
-	height        int
+// listRow is the unified display unit consumed by the TUI. It flattens
+// either a sync.SkillStatus (registry mode) or a discovery.Skill (local-only
+// mode) into a single shape so the view layer never branches on data source.
+type listRow struct {
+	Name      string
+	Group     string // registry name (e.g. "owner/repo") or package name in local mode
+	Status    sync.Status
+	HasStatus bool // true in registry mode, false in local-only mode
+	Version   string
+	Author    string
+	Source    string
+	Targets   []string
+	Local     *discovery.Skill // populated when the skill exists on disk
 }
 
 // ── Action items ───────────────────────────────────────────────────────────
@@ -84,82 +76,187 @@ type actionItem struct {
 	style    lipgloss.Style
 }
 
-func actionsForSkill(sk discovery.Skill) []actionItem {
-	isGhost := sk.LocalPath == ""
+func actionsForRow(row listRow) []actionItem {
+	hasLocal := row.Local != nil && row.Local.LocalPath != ""
 	return []actionItem{
 		{label: "update", key: "update", disabled: true, reason: "source unknown", style: ltDimStyle},
-		{label: "remove", key: "remove", disabled: false, style: lipgloss.NewStyle().Foreground(lipgloss.Color("#e06060"))},
+		{label: "remove", key: "remove", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#e06060"))},
 		{label: "add to category", key: "category", disabled: true, reason: "coming soon", style: ltDimStyle},
-		{label: "copy path", key: "copy", disabled: isGhost, reason: "no local path", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
-		{label: "open in $EDITOR", key: "edit", disabled: isGhost, reason: "no local path", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
+		{label: "copy path", key: "copy", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
+		{label: "open in $EDITOR", key: "edit", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
 	}
 }
 
 // ── Messages ───────────────────────────────────────────────────────────────
 
+type tickSpinnerMsg struct{}
+type rowsLoadedMsg struct{ rows []listRow }
+type loadErrMsg struct{ err error }
 type clipboardTickMsg struct{ id int }
 type editorDoneMsg struct{ err error }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-func resolveEditor() string {
-	if e := os.Getenv("VISUAL"); e != "" {
-		return e
-	}
-	if e := os.Getenv("EDITOR"); e != "" {
-		return e
-	}
-	return "vi"
+func tickSpinnerCmd() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return tickSpinnerMsg{} })
 }
 
-func newListModel(skills []discovery.Skill, groupFlag string, st *state.State) listModel {
-	// Build group list.
-	counts := map[string]int{}
-	for _, sk := range skills {
+// ── Model ───────────────────────────────────────────────────────────────────
+
+type listModel struct {
+	stage         listStage
+	spinnerFrame  int
+	rows          []listRow
+	filtered      []listRow
+	cursor        int
+	offset        int
+	search        string
+	selected      bool // true when right-side detail/action pane is open
+	actionCursor  int
+	substate      listSubstate
+	statusMsg     string
+	pendingTickID int
+
+	ctx context.Context
+	bag *workflow.Bag
+
+	width  int
+	height int
+
+	err      error
+	quitting bool
+}
+
+func newListModel(ctx context.Context, bag *workflow.Bag) listModel {
+	return listModel{
+		stage: stageLoading,
+		ctx:   ctx,
+		bag:   bag,
+	}
+}
+
+func (m listModel) Init() tea.Cmd {
+	return tea.Batch(
+		tea.RequestWindowSize,
+		tickSpinnerCmd(),
+		loadRowsCmd(m.ctx, m.bag),
+	)
+}
+
+// ── Loader ──────────────────────────────────────────────────────────────────
+
+func loadRowsCmd(ctx context.Context, bag *workflow.Bag) tea.Cmd {
+	return func() tea.Msg {
+		rows, err := buildRows(ctx, bag)
+		if err != nil {
+			return loadErrMsg{err: err}
+		}
+		return rowsLoadedMsg{rows: rows}
+	}
+}
+
+func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
+	// Always discover local skills — we need them to enable copy/edit/remove
+	// actions on registry rows that happen to be installed.
+	localSkills, err := discovery.OnDisk(bag.State)
+	if err != nil {
+		return nil, err
+	}
+	localByName := make(map[string]*discovery.Skill, len(localSkills))
+	for i := range localSkills {
+		sk := &localSkills[i]
+		localByName[sk.Name] = sk
+	}
+
+	repos := bag.Config.TeamRepos()
+
+	// Local-only mode: no team registries connected.
+	if len(repos) == 0 {
+		return buildLocalRows(localSkills), nil
+	}
+
+	// Registry mode: filter, then diff per repo.
+	if bag.FilterRegistries != nil {
+		filtered, ferr := bag.FilterRegistries(bag.RepoFlag, repos)
+		if ferr != nil {
+			return nil, ferr
+		}
+		repos = filtered
+	}
+
+	syncer := &sync.Syncer{
+		Client:   sync.WrapGitHubClient(bag.Client),
+		Provider: bag.Provider,
+		Tools:    []tools.Tool{},
+	}
+
+	var rows []listRow
+	for _, repo := range repos {
+		statuses, _, derr := syncer.Diff(ctx, repo, bag.State)
+		if derr != nil {
+			return nil, fmt.Errorf("%s: %w", repo, derr)
+		}
+		for _, ss := range statuses {
+			row := listRow{
+				Name:      ss.Name,
+				Group:     repo,
+				Status:    ss.Status,
+				HasStatus: true,
+				Version:   ss.DisplayVersion(),
+				Author:    ss.Maintainer,
+				Local:     localByName[ss.Name],
+			}
+			if ss.Installed != nil {
+				row.Targets = ss.Installed.Tools
+				row.Source = ss.Installed.Source
+			}
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
+func buildLocalRows(skills []discovery.Skill) []listRow {
+	groups := map[string][]listRow{}
+	for i := range skills {
+		sk := &skills[i]
 		g := sk.Package
 		if g == "" {
 			g = "uncategorized"
 		}
-		counts[g]++
+		groups[g] = append(groups[g], listRow{
+			Name:    sk.Name,
+			Group:   g,
+			Version: sk.Version,
+			Source:  sk.Source,
+			Targets: sk.Targets,
+			Local:   sk,
+		})
 	}
 
-	groups := []listGroupItem{
-		{name: "all", key: "", count: len(skills)},
-	}
-	// Uncategorized first, then packages alphabetically.
-	if n, ok := counts["uncategorized"]; ok {
-		groups = append(groups, listGroupItem{name: "uncategorized", key: "uncategorized", count: n})
-	}
-	var pkgs []string
-	for k := range counts {
+	// Sort: "uncategorized" first, then alphabetical group names; rows
+	// within a group sorted by name.
+	var keys []string
+	for k := range groups {
 		if k != "uncategorized" {
-			pkgs = append(pkgs, k)
+			keys = append(keys, k)
 		}
 	}
-	sort.Strings(pkgs)
-	for _, k := range pkgs {
-		groups = append(groups, listGroupItem{name: k, key: k, count: counts[k]})
+	sort.Strings(keys)
+
+	var ordered []string
+	if _, ok := groups["uncategorized"]; ok {
+		ordered = append(ordered, "uncategorized")
 	}
+	ordered = append(ordered, keys...)
 
-	m := listModel{
-		phase:  listPhaseGroups,
-		groups: groups,
-		skills: skills,
-		state:  st,
+	var rows []listRow
+	for _, g := range ordered {
+		gs := groups[g]
+		sort.SliceStable(gs, func(i, j int) bool { return gs[i].Name < gs[j].Name })
+		rows = append(rows, gs...)
 	}
-
-	// If --group flag is set, skip to skills phase.
-	if groupFlag != "" {
-		m.groupKey = groupFlag
-		m.filtered = m.filterSkills()
-		m.phase = listPhaseSkills
-	}
-
-	return m
-}
-
-func (m listModel) Init() tea.Cmd {
-	return tea.RequestWindowSize
+	return rows
 }
 
 // ── Update ──────────────────────────────────────────────────────────────────
@@ -170,13 +267,27 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m = m.ensureCursorVisible()
+		return m, nil
 	case tea.InterruptMsg:
 		m.quitting = true
 		return m, tea.Quit
+	case tickSpinnerMsg:
+		if m.stage == stageLoading {
+			m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
+			return m, tickSpinnerCmd()
+		}
+		return m, nil
+	case rowsLoadedMsg:
+		m.stage = stageBrowse
+		m.rows = msg.rows
+		m.filtered = m.applyFilter()
+		return m, nil
+	case loadErrMsg:
+		m.stage = stageBrowse
+		m.err = msg.err
+		return m, nil
 	case clipboardTickMsg:
 		if msg.id == m.pendingTickID {
-			m.phase = listPhaseSkills
-			m.actionCursor = 0
 			m.statusMsg = ""
 		}
 		return m, nil
@@ -184,53 +295,30 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.statusMsg = "Editor exited with error"
 		}
-		m.phase = listPhaseSkills
-		m.actionCursor = 0
 		return m, nil
 	case tea.KeyPressMsg:
-		switch m.phase {
-		case listPhaseGroups:
-			return m.updateGroups(msg)
-		case listPhaseSkills:
-			return m.updateSkills(msg)
-		case listPhaseActions:
-			return m.updateActions(msg)
+		if m.stage == stageLoading {
+			if msg.String() == "ctrl+c" || msg.String() == "q" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			return m, nil
 		}
+		if m.selected {
+			return m.updateDetail(msg)
+		}
+		return m.updateList(msg)
 	}
 	return m, nil
 }
 
-func (m listModel) updateGroups(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q", "escape":
-		m.quitting = true
-		return m, tea.Quit
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.groups)-1 {
-			m.cursor++
-		}
-	case "enter":
-		m.groupKey = m.groups[m.cursor].key
-		m.filtered = m.filterSkills()
-		m.phase = listPhaseSkills
-		m.cursor = 0
-		m.offset = 0
-	}
-	return m, nil
-}
-
-func (m listModel) updateSkills(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		if m.search != "" {
 			m.search = ""
-			m.filtered = m.filterSkills()
-			m.cursor = 0
-			m.offset = 0
+			m.filtered = m.applyFilter()
+			m.cursor, m.offset = 0, 0
 			return m, nil
 		}
 		m.quitting = true
@@ -238,15 +326,10 @@ func (m listModel) updateSkills(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "escape":
 		if m.search != "" {
 			m.search = ""
-			m.filtered = m.filterSkills()
-			m.cursor = 0
-			m.offset = 0
-		} else {
-			// Back to groups.
-			m.phase = listPhaseGroups
-			m.cursor = 0
-			m.offset = 0
+			m.filtered = m.applyFilter()
+			m.cursor, m.offset = 0, 0
 		}
+		return m, nil
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -265,41 +348,43 @@ func (m listModel) updateSkills(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m = m.ensureCursorVisible()
 	case "enter":
 		if len(m.filtered) > 0 {
-			m.phase = listPhaseActions
+			m.selected = true
 			m.actionCursor = 0
 			m.statusMsg = ""
 		}
 	case "backspace":
 		if len(m.search) > 0 {
 			m.search = m.search[:len(m.search)-1]
-			m.filtered = m.filterSkills()
-			m.cursor = 0
-			m.offset = 0
+			m.filtered = m.applyFilter()
+			m.cursor, m.offset = 0, 0
 		}
 	default:
 		if len(msg.String()) == 1 {
 			m.search += msg.String()
-			m.filtered = m.filterSkills()
-			m.cursor = 0
-			m.offset = 0
+			m.filtered = m.applyFilter()
+			m.cursor, m.offset = 0, 0
 		}
 	}
 	return m, nil
 }
 
-func (m listModel) updateActions(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.substate == listSubstateConfirm {
 		return m.updateConfirm(msg)
 	}
 
-	actions := actionsForSkill(m.filtered[m.cursor])
+	if m.cursor >= len(m.filtered) {
+		m.selected = false
+		return m, nil
+	}
+	actions := actionsForRow(m.filtered[m.cursor])
 
 	switch msg.String() {
 	case "ctrl+c", "q":
 		m.quitting = true
 		return m, tea.Quit
 	case "escape":
-		m.phase = listPhaseSkills
+		m.selected = false
 		m.actionCursor = 0
 		m.statusMsg = ""
 	case "up", "k":
@@ -324,7 +409,7 @@ func (m listModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
 		return m.executeRemove()
-	case "n":
+	case "n", "escape":
 		m.substate = listSubstateNone
 		m.statusMsg = ""
 	}
@@ -332,7 +417,11 @@ func (m listModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
-	sk := m.filtered[m.cursor]
+	row := m.filtered[m.cursor]
+	if row.Local == nil {
+		return m, nil
+	}
+	sk := row.Local
 	switch key {
 	case "copy":
 		m.statusMsg = "Copied!"
@@ -360,7 +449,12 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
-	sk := m.filtered[m.cursor]
+	row := m.filtered[m.cursor]
+	if row.Local == nil {
+		m.substate = listSubstateNone
+		return m, nil
+	}
+	sk := row.Local
 
 	home, _ := os.UserHomeDir()
 	allowedPrefixes := []string{
@@ -382,8 +476,8 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.state.Remove(sk.Name)
-	if err := m.state.Save(); err != nil {
+	m.bag.State.Remove(sk.Name)
+	if err := m.bag.State.Save(); err != nil {
 		m.statusMsg = fmt.Sprintf("Save failed: %v", err)
 		m.substate = listSubstateNone
 		return m, nil
@@ -403,10 +497,11 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Drop the row from both filtered and rows.
 	m.filtered = append(m.filtered[:m.cursor], m.filtered[m.cursor+1:]...)
-	for i, s := range m.skills {
-		if s.Name == sk.Name {
-			m.skills = append(m.skills[:i], m.skills[i+1:]...)
+	for i, r := range m.rows {
+		if r.Name == sk.Name && r.Group == row.Group {
+			m.rows = append(m.rows[:i], m.rows[i+1:]...)
 			break
 		}
 	}
@@ -418,12 +513,28 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 		m.cursor = 0
 	}
 
-	m.phase = listPhaseSkills
+	m.selected = false
 	m.substate = listSubstateNone
 	m.actionCursor = 0
 	m.statusMsg = ""
-
 	return m, nil
+}
+
+// ── Filter ──────────────────────────────────────────────────────────────────
+
+func (m listModel) applyFilter() []listRow {
+	if m.search == "" {
+		return m.rows
+	}
+	lower := strings.ToLower(m.search)
+	var out []listRow
+	for _, r := range m.rows {
+		if strings.Contains(strings.ToLower(r.Name), lower) ||
+			strings.Contains(strings.ToLower(r.Group), lower) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // ── View ────────────────────────────────────────────────────────────────────
@@ -434,10 +545,17 @@ func (m listModel) View() tea.View {
 	}
 
 	var s string
-	if m.phase == listPhaseGroups {
-		s = m.viewGroups()
-	} else {
-		s = m.viewSkills()
+	switch m.stage {
+	case stageLoading:
+		s = m.viewLoading()
+	case stageBrowse:
+		if m.err != nil {
+			s = m.viewError()
+		} else if m.selected {
+			s = m.viewSplit()
+		} else {
+			s = m.viewListFull()
+		}
 	}
 
 	v := tea.NewView(s)
@@ -445,59 +563,122 @@ func (m listModel) View() tea.View {
 	return v
 }
 
-func (m listModel) viewGroups() string {
-	var b strings.Builder
-
-	total := ltCountStyle.Render(fmt.Sprintf("%d skills", len(m.skills)))
-	b.WriteString(ltHeaderStyle.Render("Installed Skills") + "  " + total + "\n")
-	b.WriteString(ltDivStyle.Render(strings.Repeat("─", 40)) + "\n\n")
-
-	for i, g := range m.groups {
-		isCursor := i == m.cursor
-		count := ltCountStyle.Render(fmt.Sprintf("(%d)", g.count))
-
-		if isCursor {
-			b.WriteString(ltCursorStyle.Render("▸") + " " + ltCursorStyle.Render(g.name) + " " + count + "\n")
-		} else {
-			b.WriteString("  " + g.name + " " + count + "\n")
-		}
+func (m listModel) viewLoading() string {
+	frame := spinnerFrames[m.spinnerFrame]
+	msg := "Fetching team skills…"
+	if m.bag != nil && m.bag.Config != nil && len(m.bag.Config.TeamRepos()) == 0 {
+		msg = "Discovering local skills…"
 	}
-
-	b.WriteString("\n")
-	b.WriteString(ltDimStyle.Render("↑↓ navigate · enter browse · q quit") + "\n")
-
-	return b.String()
+	return "\n  " + ltSpinnerStyle.Render(frame) + "  " + ltDimStyle.Render(msg) + "\n"
 }
 
-func (m listModel) viewSkills() string {
-	if m.width < 80 {
-		return m.viewSkillsSingleColumn()
-	}
-	return m.viewSkillsSplitPane()
+func (m listModel) viewError() string {
+	return "\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render("Error: "+m.err.Error()) + "\n"
 }
 
-func (m listModel) viewSkillsSingleColumn() string {
+// viewListFull is the default browse view: full-width list with status icons
+// and a status-count footer.
+func (m listModel) viewListFull() string {
 	var b strings.Builder
 
-	label := m.groupKey
-	if label == "" {
-		label = "all"
-	}
-	title := ltHeaderStyle.Render("Installed Skills")
-	group := ltCountStyle.Render(fmt.Sprintf("%s · %d skills", label, len(m.filtered)))
-	b.WriteString(title + "  " + group + "\n")
-	b.WriteString(ltDivStyle.Render(strings.Repeat("─", 40)) + "\n")
+	b.WriteString(m.renderHeader())
 
 	if m.search != "" {
 		b.WriteString(fmt.Sprintf("> %s\n", m.search))
 	}
 
 	contentHeight := m.contentHeight()
-	linesUsed := 0
+	m.renderRows(&b, contentHeight, m.width-4, false)
 
+	b.WriteString("\n")
+	b.WriteString(m.renderSummary() + "\n")
+	b.WriteString(ltDimStyle.Render("↑↓ navigate · enter detail · type to search · q quit") + "\n")
+	return b.String()
+}
+
+// viewSplit is the detail view: compact list on the left, detail + action
+// menu on the right. Triggered by pressing Enter on a row.
+func (m listModel) viewSplit() string {
+	var b strings.Builder
+
+	b.WriteString(m.renderHeader())
+	if m.search != "" {
+		b.WriteString(fmt.Sprintf("> %s\n", m.search))
+	}
+
+	contentHeight := m.contentHeight()
+	leftWidth, rightWidth := m.paneWidths()
+
+	var leftBuf strings.Builder
+	m.renderRows(&leftBuf, contentHeight, leftWidth-2, true)
+	leftLines := strings.Split(strings.TrimRight(leftBuf.String(), "\n"), "\n")
+	for len(leftLines) < contentHeight {
+		leftLines = append(leftLines, "")
+	}
+	leftContent := strings.Join(leftLines[:contentHeight], "\n")
+
+	var rightContent string
+	if m.cursor < len(m.filtered) {
+		rightContent = m.renderDetailPane(m.filtered[m.cursor], rightWidth)
+	}
+	rightLines := strings.Split(rightContent, "\n")
+	for len(rightLines) < contentHeight {
+		rightLines = append(rightLines, "")
+	}
+	rightContent = strings.Join(rightLines[:contentHeight], "\n")
+
+	leftRendered := lipgloss.NewStyle().Width(leftWidth).Height(contentHeight).Render(leftContent)
+	divider := strings.TrimRight(strings.Repeat("│\n", contentHeight), "\n")
+	divRendered := lipgloss.NewStyle().Height(contentHeight).Foreground(lipgloss.Color("#555555")).Render(divider)
+	rightRendered := lipgloss.NewStyle().Width(rightWidth).Height(contentHeight).Render(rightContent)
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, divRendered, rightRendered)
+	b.WriteString(body)
+
+	b.WriteString("\n\n")
+	if m.substate == listSubstateConfirm {
+		b.WriteString(ltDimStyle.Render("y confirm · n cancel") + "\n")
+	} else {
+		b.WriteString(ltDimStyle.Render("↑↓ navigate actions · enter execute · esc back · q quit") + "\n")
+	}
+	return b.String()
+}
+
+// renderHeader prints the title row "Installed Skills · N skills".
+func (m listModel) renderHeader() string {
+	var b strings.Builder
+	total := ltCountStyle.Render(fmt.Sprintf("%d skills", len(m.rows)))
+	b.WriteString(ltHeaderStyle.Render("Installed Skills") + "  " + total + "\n")
+	width := m.width
+	if width < 40 {
+		width = 40
+	}
+	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width)) + "\n")
+	return b.String()
+}
+
+// renderRows writes up to contentHeight lines (including group headers and
+// scroll indicators) into b, computing offset from m.cursor and m.offset.
+// When compact=true, only the name + status icon is rendered (used by the
+// split-pane left column).
+func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, compact bool) {
+	if len(m.filtered) == 0 {
+		b.WriteString(ltDimStyle.Render("  (no skills match)") + "\n")
+		return
+	}
+
+	// Determine which rows are visible based on offset/contentHeight.
+	linesUsed := 0
 	if m.offset > 0 {
 		b.WriteString(ltDimStyle.Render(fmt.Sprintf("  ↑ %d more above", m.offset)) + "\n")
 		linesUsed++
+	}
+
+	prevGroup := ""
+	// Look backwards to find what group the offset row belongs to so we can
+	// emit the group header even if the cursor scrolled past the original.
+	if m.offset > 0 && m.offset < len(m.filtered) {
+		prevGroup = m.filtered[m.offset-1].Group
 	}
 
 	end := m.offset
@@ -505,11 +686,18 @@ func (m listModel) viewSkillsSingleColumn() string {
 		if linesUsed >= contentHeight {
 			break
 		}
-		sk := m.filtered[i]
+		row := m.filtered[i]
+		if row.Group != prevGroup {
+			// Reserve a line for group header. Skip if not enough room.
+			if linesUsed+1 >= contentHeight {
+				break
+			}
+			b.WriteString(m.formatGroupHeader(row.Group, maxWidth) + "\n")
+			linesUsed++
+			prevGroup = row.Group
+		}
 		isCursor := i == m.cursor
-
-		line := m.formatSkillLine(sk, isCursor, m.width-4)
-		b.WriteString(line + "\n")
+		b.WriteString(m.formatRow(row, isCursor, maxWidth, compact) + "\n")
 		linesUsed++
 		end = i + 1
 	}
@@ -518,156 +706,170 @@ func (m listModel) viewSkillsSingleColumn() string {
 	if remaining > 0 {
 		b.WriteString(ltDimStyle.Render(fmt.Sprintf("  ↓ %d more below", remaining)) + "\n")
 	}
-
-	b.WriteString("\n")
-	b.WriteString(ltDimStyle.Render("↑↓ navigate · type to search · esc back · q quit") + "\n")
-	return b.String()
 }
 
-func (m listModel) viewSkillsSplitPane() string {
-	var b strings.Builder
-
-	// Header.
-	label := m.groupKey
+func (m listModel) formatGroupHeader(group string, maxWidth int) string {
+	count := 0
+	for _, r := range m.filtered {
+		if r.Group == group {
+			count++
+		}
+	}
+	label := group
 	if label == "" {
-		label = "all"
+		label = "(local)"
 	}
-	title := ltHeaderStyle.Render("Installed Skills")
-	group := ltCountStyle.Render(fmt.Sprintf("%s · %d skills", label, len(m.filtered)))
-	b.WriteString(title + "  " + group + "\n")
-	b.WriteString(ltDivStyle.Render(strings.Repeat("─", m.width)) + "\n")
-
-	if m.search != "" {
-		b.WriteString(fmt.Sprintf("> %s\n", m.search))
-	}
-
-	contentHeight := m.contentHeight()
-	leftWidth, rightWidth := m.paneWidths()
-
-	// Left pane: skill list.
-	var leftLines []string
-	if m.offset > 0 {
-		leftLines = append(leftLines, ltDimStyle.Render(fmt.Sprintf("  ↑ %d more", m.offset)))
-	}
-
-	end := m.offset
-	maxItems := contentHeight
-	if m.offset > 0 {
-		maxItems-- // scroll indicator takes a line
-	}
-
-	for i := m.offset; i < len(m.filtered) && len(leftLines) < maxItems; i++ {
-		sk := m.filtered[i]
-		isCursor := i == m.cursor
-		leftLines = append(leftLines, m.formatSkillLine(sk, isCursor, leftWidth-2))
-		end = i + 1
-	}
-
-	remaining := len(m.filtered) - end
-	if remaining > 0 {
-		leftLines = append(leftLines, ltDimStyle.Render(fmt.Sprintf("  ↓ %d more", remaining)))
-	}
-
-	// Pad left pane to contentHeight.
-	for len(leftLines) < contentHeight {
-		leftLines = append(leftLines, "")
-	}
-	leftContent := strings.Join(leftLines[:contentHeight], "\n")
-
-	// Right pane: detail or action menu.
-	rightContent := ""
-	if m.cursor < len(m.filtered) {
-		sk := m.filtered[m.cursor]
-		if m.phase == listPhaseActions {
-			rightContent = m.renderActions(sk, rightWidth)
-		} else {
-			rightContent = m.renderDetail(sk, rightWidth)
-		}
-	}
-
-	// Pad right pane to contentHeight.
-	rightLines := strings.Split(rightContent, "\n")
-	for len(rightLines) < contentHeight {
-		rightLines = append(rightLines, "")
-	}
-	rightContent = strings.Join(rightLines[:contentHeight], "\n")
-
-	// Join panes.
-	leftStyle := lipgloss.NewStyle().Width(leftWidth).Height(contentHeight)
-	if m.phase == listPhaseActions {
-		leftStyle = leftStyle.Foreground(lipgloss.Color("#444444"))
-	}
-	leftRendered := leftStyle.Render(leftContent)
-	divider := strings.TrimRight(strings.Repeat("│\n", contentHeight), "\n")
-	divRendered := lipgloss.NewStyle().Height(contentHeight).Foreground(lipgloss.Color("#555555")).Render(divider)
-	rightRendered := lipgloss.NewStyle().Width(rightWidth).Height(contentHeight).Render(rightContent)
-
-	body := lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, divRendered, rightRendered)
-	b.WriteString(body)
-
-	// Footer.
-	b.WriteString("\n\n")
-	if m.phase == listPhaseActions {
-		b.WriteString(ltDimStyle.Render("↑↓ navigate · enter select · esc back to list") + "\n")
-	} else {
-		b.WriteString(ltDimStyle.Render("↑↓ navigate · enter actions · type to search · esc back · q quit") + "\n")
-	}
-	return b.String()
+	header := ltGroupStyle.Render(label) + " " + ltCountStyle.Render(fmt.Sprintf("(%d)", count))
+	return header
 }
 
-func (m listModel) renderActions(sk discovery.Skill, width int) string {
-	var b strings.Builder
+func (m listModel) formatRow(row listRow, isCursor bool, maxWidth int, compact bool) string {
+	prefix := "  "
+	nameStyle := ltNameStyle
+	if isCursor {
+		prefix = ltCursorStyle.Render("▸") + " "
+		nameStyle = ltCursorStyle
+	}
 
-	b.WriteString(ltCursorStyle.Render(sk.Name))
-	meta := ""
-	if sk.Package != "" {
-		meta += sk.Package
+	// Reserve space for status icon (~2 cells) plus padding.
+	nameMax := maxWidth - 4
+	if row.HasStatus {
+		nameMax -= 3
 	}
-	if sk.Version != "" {
-		if meta != "" {
-			meta += " · "
+	if nameMax < 4 {
+		nameMax = 4
+	}
+	name := runewidth.Truncate(row.Name, nameMax, "…")
+	name = runewidth.FillRight(name, nameMax)
+
+	if !row.HasStatus {
+		return prefix + nameStyle.Render(name)
+	}
+
+	icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
+	if compact {
+		return prefix + nameStyle.Render(name) + " " + icon
+	}
+	label := statusStyles[row.Status].Render(row.Status.Display().Label)
+	return prefix + nameStyle.Render(name) + " " + icon + " " + label
+}
+
+// renderSummary builds the colored "N current · N update · N missing" footer.
+func (m listModel) renderSummary() string {
+	if len(m.rows) == 0 {
+		return ""
+	}
+	hasStatus := false
+	counts := map[sync.Status]int{}
+	for _, r := range m.rows {
+		if r.HasStatus {
+			hasStatus = true
+			counts[r.Status]++
 		}
-		meta += sk.Version
 	}
-	if meta != "" {
-		b.WriteString(" " + ltCountStyle.Render(meta))
+	if !hasStatus {
+		return ltDimStyle.Render(fmt.Sprintf("%d skills total", len(m.rows)))
 	}
-	b.WriteString("\n")
+	order := []sync.Status{sync.StatusCurrent, sync.StatusOutdated, sync.StatusMissing, sync.StatusExtra}
+	var parts []string
+	for _, s := range order {
+		if part := renderStatusCount(s, counts[s]); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, ltDimStyle.Render(" · "))
+}
+
+// renderDetailPane draws the right side of the split view: metadata block
+// followed by an inline action menu.
+func (m listModel) renderDetailPane(row listRow, width int) string {
+	var b strings.Builder
+	b.WriteString(ltCursorStyle.Render(row.Name) + "\n")
+
+	if row.Local != nil && row.Local.Description != "" {
+		descStyle := lipgloss.NewStyle().Width(width - 2).Foreground(lipgloss.Color("#aaaaaa"))
+		b.WriteString(descStyle.Render(row.Local.Description) + "\n")
+	}
+	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
+
+	type kv struct{ key, value string }
+	var pairs []kv
+
+	if row.HasStatus {
+		pairs = append(pairs, kv{"Status", row.Status.Display().Label})
+	}
+	if row.Version != "" {
+		pairs = append(pairs, kv{"Version", row.Version})
+	}
+	if row.Author != "" {
+		pairs = append(pairs, kv{"Author", row.Author})
+	}
+	if row.Group != "" {
+		pairs = append(pairs, kv{"Group", row.Group})
+	}
+	if row.Source != "" {
+		pairs = append(pairs, kv{"Source", row.Source})
+	}
+	if len(row.Targets) > 0 {
+		pairs = append(pairs, kv{"Targets", strings.Join(row.Targets, ", ")})
+	}
+	if row.Local != nil && row.Local.LocalPath != "" {
+		path := row.Local.LocalPath
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home) {
+			path = "~" + strings.TrimPrefix(path, home)
+		}
+		pairs = append(pairs, kv{"Path", path})
+	}
+
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Width(10)
+	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
+	for _, p := range pairs {
+		b.WriteString(keyStyle.Render(p.key) + valueStyle.Render(p.value) + "\n")
+	}
+
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
 
 	if m.statusMsg != "" {
-		b.WriteString("\n" + m.statusMsg + "\n")
+		b.WriteString(m.statusMsg + "\n")
 		return b.String()
 	}
 
-	actions := actionsForSkill(sk)
-	for i, action := range actions {
+	actions := actionsForRow(row)
+	for i, a := range actions {
 		isCursor := i == m.actionCursor
 		prefix := "  "
 		if isCursor {
 			prefix = ltCursorStyle.Render("▸") + " "
 		}
-
-		if action.disabled {
-			label := ltDimStyle.Render(action.label)
+		if a.disabled {
+			label := ltDimStyle.Render(a.label)
 			reason := ""
-			if action.reason != "" {
-				reason = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Italic(true).Render(action.reason)
+			if a.reason != "" {
+				reason = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Italic(true).Render(a.reason)
 			}
 			b.WriteString(prefix + label + reason + "\n")
 		} else {
-			label := action.style.Render(action.label)
+			label := a.style.Render(a.label)
 			if isCursor {
-				label = ltCursorStyle.Render(action.label)
+				label = ltCursorStyle.Render(a.label)
 			}
 			b.WriteString(prefix + label + "\n")
 		}
 	}
-
 	return b.String()
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+func resolveEditor() string {
+	if e := os.Getenv("VISUAL"); e != "" {
+		return e
+	}
+	if e := os.Getenv("EDITOR"); e != "" {
+		return e
+	}
+	return "vi"
+}
 
 func (m listModel) contentHeight() int {
 	if m.height == 0 {
@@ -678,7 +880,7 @@ func (m listModel) contentHeight() int {
 	if m.search != "" {
 		searchHeight = 1
 	}
-	footerHeight := 2 // blank + help
+	footerHeight := 3 // blank + summary/help + help
 	h := m.height - headerHeight - searchHeight - footerHeight
 	if h < 5 {
 		h = 5
@@ -716,95 +918,4 @@ func (m listModel) paneWidths() (int, int) {
 		right = 20
 	}
 	return left, right
-}
-
-func (m listModel) formatSkillLine(sk discovery.Skill, isCursor bool, maxWidth int) string {
-	prefix := "  "
-	nameStyle := ltNameStyle
-	if isCursor {
-		prefix = ltCursorStyle.Render("▸") + " "
-		nameStyle = ltCursorStyle
-	}
-
-	name := runewidth.Truncate(sk.Name, maxWidth-2, "...")
-	return prefix + nameStyle.Render(name)
-}
-
-func (m listModel) renderDetail(sk discovery.Skill, width int) string {
-	var b strings.Builder
-
-	b.WriteString(ltCursorStyle.Render(sk.Name) + "\n")
-
-	if sk.Description != "" {
-		descStyle := lipgloss.NewStyle().Width(width - 2).Foreground(lipgloss.Color("#aaaaaa"))
-		b.WriteString(descStyle.Render(sk.Description) + "\n")
-	}
-
-	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
-
-	type kv struct{ key, value string }
-	var pairs []kv
-
-	if sk.Version != "" {
-		pairs = append(pairs, kv{"Version", sk.Version})
-	}
-	if sk.ContentHash != "" {
-		pairs = append(pairs, kv{"Hash", sk.ContentHash})
-	}
-	if sk.Package != "" {
-		pairs = append(pairs, kv{"Package", sk.Package})
-	}
-	if sk.Source != "" {
-		pairs = append(pairs, kv{"Source", sk.Source})
-	}
-	if len(sk.Targets) > 0 {
-		pairs = append(pairs, kv{"Targets", strings.Join(sk.Targets, ", ")})
-	}
-	if sk.LocalPath != "" {
-		path := sk.LocalPath
-		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home) {
-			path = "~" + strings.TrimPrefix(path, home)
-		}
-		pairs = append(pairs, kv{"Path", path})
-	}
-
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Width(10)
-	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
-
-	for _, p := range pairs {
-		b.WriteString(keyStyle.Render(p.key) + valueStyle.Render(p.value) + "\n")
-	}
-
-	return b.String()
-}
-
-func (m listModel) filterSkills() []discovery.Skill {
-	var result []discovery.Skill
-	lower := strings.ToLower(m.search)
-
-	for _, sk := range m.skills {
-		// Group filter.
-		if m.groupKey != "" {
-			g := sk.Package
-			if g == "" {
-				g = "uncategorized"
-			}
-			if g != m.groupKey {
-				continue
-			}
-		}
-		// Search filter.
-		if m.search != "" {
-			if !strings.Contains(strings.ToLower(sk.Name), lower) &&
-				!strings.Contains(strings.ToLower(sk.Description), lower) {
-				continue
-			}
-		}
-		result = append(result, sk)
-	}
-
-	if m.groupKey == "" && m.search == "" {
-		return m.skills
-	}
-	return result
 }

@@ -17,7 +17,6 @@ type Bag struct {
 	// Inputs (set by cmd/ before Run)
 	Args         []string
 	JSONFlag     bool
-	LocalFlag    bool   // --local: show local inventory only
 	RepoFlag     string // --registry filter
 	TrustAllFlag bool   // --trust-all: approve all package commands without prompting
 
@@ -39,12 +38,8 @@ type Bag struct {
 	// If nil, defaults to returning all repos.
 	FilterRegistries func(flag string, repos []string) ([]string, error)
 
-	// ListTUI is injected by cmd/ to launch an interactive TUI for local skill list.
-	// If nil, falls back to static table output.
-	ListTUI func(skills []discovery.Skill) error
-
 	// Results populated by steps for cmd/ to render.
-	// List command results:
+	// List command results (JSON path only — TUI loads its own data):
 	LocalSkills   []discovery.Skill             // populated when listing local skills
 	RegistryDiffs map[string][]sync.SkillStatus // repo → skill statuses (remote list)
 	MultiRegistry bool                          // whether multiple registries are shown

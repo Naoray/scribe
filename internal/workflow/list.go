@@ -6,35 +6,47 @@ import (
 	"io"
 	"os"
 
-	"github.com/mattn/go-isatty"
-
 	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
-// ListSteps returns the step list for the list command.
-func ListSteps() []Step {
+// ListLoadSteps returns the minimal step list needed before launching the
+// list TUI: it loads config and state, then leaves rendering to cmd/.
+func ListLoadSteps() []Step {
 	return []Step{
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
-		{"BranchLocalOrRemote", StepBranchLocalOrRemote},
 	}
 }
 
-// StepBranchLocalOrRemote handles both the local-only view and the
-// remote diff view, keeping the workflow linear.
-func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
-	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
+// ListJSONSteps returns the step list for `scribe list --json` (or any
+// non-TTY invocation): it loads, branches local-vs-remote, and writes JSON
+// to stdout. Used only for the machine-readable output path.
+func ListJSONSteps() []Step {
+	return []Step{
+		{"LoadConfig", StepLoadConfig},
+		{"LoadState", StepLoadState},
+		{"WriteListJSON", StepWriteListJSON},
+	}
+}
+
+// StepWriteListJSON emits the JSON form of the list command. It mirrors
+// the loader logic the TUI runs (in cmd/) but writes structured output to
+// stdout instead of rendering a TUI.
+func StepWriteListJSON(ctx context.Context, b *Bag) error {
 	w := os.Stdout
 
-	// Local view: explicit --local flag or no registries connected.
-	if b.LocalFlag || len(b.Config.TeamRepos()) == 0 {
-		return listLocal(w, b, useJSON)
+	// Local view: no registries connected.
+	if len(b.Config.TeamRepos()) == 0 {
+		skills, err := discovery.OnDisk(b.State)
+		if err != nil {
+			return err
+		}
+		return printLocalJSON(w, skills, b.State)
 	}
 
-	// Reuse shared steps for filtering.
 	if err := StepFilterRegistries(ctx, b); err != nil {
 		return err
 	}
@@ -45,38 +57,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 		Tools:    []tools.Tool{},
 	}
 
-	if useJSON {
-		return printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
-	}
-
-	// Populate results on Bag for cmd/ to render.
-	b.MultiRegistry = len(b.Repos) > 1
-	b.RegistryDiffs = make(map[string][]sync.SkillStatus, len(b.Repos))
-	for _, teamRepo := range b.Repos {
-		statuses, _, err := syncer.Diff(ctx, teamRepo, b.State)
-		if err != nil {
-			return err
-		}
-		b.RegistryDiffs[teamRepo] = statuses
-	}
-	return nil
-}
-
-func listLocal(w io.Writer, b *Bag, useJSON bool) error {
-	skills, err := discovery.OnDisk(b.State)
-	if err != nil {
-		return err
-	}
-
-	if useJSON {
-		return printLocalJSON(w, skills, b.State)
-	}
-	if b.ListTUI != nil {
-		return b.ListTUI(skills)
-	}
-	// Populate results on Bag for cmd/ to render.
-	b.LocalSkills = skills
-	return nil
+	return printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
 }
 
 func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) error {
