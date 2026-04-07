@@ -136,3 +136,43 @@ type PackageSkippedMsg struct {
 	Name   string
 	Reason string
 }
+
+// PackageInstallPromptMsg is sent when a package requires user approval.
+type PackageInstallPromptMsg struct {
+	Name    string
+	Command string
+	Source  string
+}
+
+// PackageApprovedMsg is sent when a user approves a package install.
+type PackageApprovedMsg struct{ Name string }
+
+// PackageDeniedMsg is sent when a user denies a package install.
+type PackageDeniedMsg struct{ Name string }
+
+// PackageInstallingMsg is sent when a package install command begins.
+type PackageInstallingMsg struct{ Name string }
+
+// PackageInstalledMsg is sent when a package install completes successfully.
+type PackageInstalledMsg struct{ Name string }
+
+// PackageErrorMsg is sent when a package install or update fails.
+type PackageErrorMsg struct {
+	Name   string
+	Err    error
+	Stderr string
+}
+
+// PackageHashMismatchMsg is sent when a previously approved command has changed.
+type PackageHashMismatchMsg struct {
+	Name       string
+	OldCommand string
+	NewCommand string
+	Source     string
+}
+
+// PackageUpdateMsg is sent when a package update command begins.
+type PackageUpdateMsg struct{ Name string }
+
+// PackageUpdatedMsg is sent when a package update completes successfully.
+type PackageUpdatedMsg struct{ Name string }

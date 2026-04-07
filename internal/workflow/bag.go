@@ -15,10 +15,11 @@ import (
 // Each step reads/writes only its relevant fields.
 type Bag struct {
 	// Inputs (set by cmd/ before Run)
-	Args      []string
-	JSONFlag  bool
-	LocalFlag bool   // --local: show local inventory only
-	RepoFlag  string // --registry filter
+	Args         []string
+	JSONFlag     bool
+	LocalFlag    bool   // --local: show local inventory only
+	RepoFlag     string // --registry filter
+	TrustAllFlag bool   // --trust-all: approve all package commands without prompting
 
 	// Populated by steps
 	Config    *config.Config
@@ -44,9 +45,9 @@ type Bag struct {
 
 	// Results populated by steps for cmd/ to render.
 	// List command results:
-	LocalSkills    []discovery.Skill               // populated when listing local skills
-	RegistryDiffs  map[string][]sync.SkillStatus   // repo → skill statuses (remote list)
-	MultiRegistry  bool                            // whether multiple registries are shown
+	LocalSkills   []discovery.Skill             // populated when listing local skills
+	RegistryDiffs map[string][]sync.SkillStatus // repo → skill statuses (remote list)
+	MultiRegistry bool                          // whether multiple registries are shown
 
 	// Registry list command results:
 	RegistryRepos  []string       // connected registries

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
@@ -31,6 +32,15 @@ type Syncer struct {
 	Provider provider.Provider // optional — if set, used for discovery and fetch
 	Tools    []tools.Tool
 	Emit     func(any) // receives events defined in events.go
+	Executor CommandExecutor
+
+	// TrustAll skips approval prompts for packages (--trust-all flag).
+	TrustAll bool
+
+	// ApprovalFunc is called when a package needs interactive approval.
+	// Returns true if approved, false if denied.
+	// If nil and TrustAll is false, packages needing approval are skipped.
+	ApprovalFunc func(name, command, source string) bool
 }
 
 // FetchManifest tries Provider.Discover first (if set), then falls back to
@@ -176,8 +186,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 		case StatusMissing, StatusOutdated:
 			if sk.IsPackage {
-				s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "package install not yet implemented"})
-				summary.Skipped++
+				s.applyPackage(ctx, sk, registrySlug, st, &summary)
 				continue
 			}
 
@@ -300,6 +309,165 @@ func (s *Syncer) emit(msg any) {
 	if s.Emit != nil {
 		s.Emit(msg)
 	}
+}
+
+// RunWithDiff applies a pre-computed diff (statuses) directly.
+// Used by tests and callers that already have statuses from Diff().
+func (s *Syncer) RunWithDiff(ctx context.Context, teamRepo string, statuses []SkillStatus, st *state.State) error {
+	return s.apply(ctx, teamRepo, statuses, st)
+}
+
+const defaultPackageTimeout = 5 * time.Minute
+
+func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug string, st *state.State, summary *SyncCompleteMsg) {
+	if s.Executor == nil {
+		s.emit(PackageErrorMsg{
+			Name: sk.Name,
+			Err:  fmt.Errorf("no command executor configured"),
+		})
+		summary.Failed++
+		return
+	}
+
+	installCmd := sk.Entry.Install
+	updateCmd := sk.Entry.Update
+	newHash := CommandHash(installCmd, updateCmd)
+	qualifiedName := registrySlug + "/" + sk.Name
+
+	switch sk.Status {
+	case StatusMissing:
+		approved := s.checkApproval(sk, qualifiedName, st, newHash, installCmd)
+		if !approved {
+			s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "approval_required"})
+			summary.Skipped++
+			return
+		}
+
+		s.emit(PackageInstallingMsg{Name: sk.Name})
+
+		timeout := time.Duration(sk.Entry.Timeout) * time.Second
+		if timeout == 0 {
+			timeout = defaultPackageTimeout
+		}
+
+		_, stderr, err := s.Executor.Execute(ctx, installCmd, timeout)
+		if err != nil {
+			// Install failed — do NOT persist approval. The user only
+			// authorized this specific attempt; a future run must re-prompt.
+			s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
+			summary.Failed++
+			return
+		}
+
+		version := "unknown"
+		src, parseErr := manifest.ParseSource(sk.Entry.Source)
+		if parseErr == nil {
+			version = src.Ref
+		}
+
+		st.RecordInstall(qualifiedName, state.InstalledSkill{
+			Version:    version,
+			CommitSHA:  sk.LatestSHA,
+			Source:     sk.Entry.Source,
+			Type:       "package",
+			InstallCmd: installCmd,
+			UpdateCmd:  updateCmd,
+			CmdHash:    newHash,
+			Approval:   "approved",
+			ApprovedAt: time.Now().UTC(),
+		})
+		if err := st.Save(); err != nil {
+			s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
+		}
+
+		s.emit(PackageInstalledMsg{Name: sk.Name})
+		summary.Installed++
+
+	case StatusOutdated:
+		if updateCmd == "" {
+			s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "no update command"})
+			summary.Skipped++
+			return
+		}
+
+		installed := st.Installed[qualifiedName]
+		if installed.CmdHash != "" && installed.CmdHash != newHash {
+			s.emit(PackageHashMismatchMsg{
+				Name:       sk.Name,
+				OldCommand: installed.InstallCmd,
+				NewCommand: installCmd,
+				Source:     sk.Entry.Source,
+			})
+			approved := s.checkApproval(sk, qualifiedName, st, newHash, installCmd)
+			if !approved {
+				s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "approval_required"})
+				summary.Skipped++
+				return
+			}
+		}
+
+		s.emit(PackageUpdateMsg{Name: sk.Name})
+
+		timeout := time.Duration(sk.Entry.Timeout) * time.Second
+		if timeout == 0 {
+			timeout = defaultPackageTimeout
+		}
+
+		_, stderr, err := s.Executor.Execute(ctx, updateCmd, timeout)
+		if err != nil {
+			// Update failed — do NOT persist the new approval/hash. The
+			// existing approval (for the prior commands) stays intact.
+			s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
+			summary.Failed++
+			return
+		}
+
+		existing := st.Installed[qualifiedName]
+		existing.CommitSHA = sk.LatestSHA
+		existing.InstallCmd = installCmd
+		existing.UpdateCmd = updateCmd
+		existing.CmdHash = newHash
+		existing.Approval = "approved"
+		existing.ApprovedAt = time.Now().UTC()
+		st.Installed[qualifiedName] = existing
+		if err := st.Save(); err != nil {
+			s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
+		}
+
+		s.emit(PackageUpdatedMsg{Name: sk.Name})
+		summary.Updated++
+	}
+}
+
+// checkApproval is pure: it returns whether the command is authorized to run,
+// without mutating state. The caller persists approval ONLY after the command
+// actually succeeds (see applyPackage).
+func (s *Syncer) checkApproval(sk SkillStatus, qualifiedName string, st *state.State, newHash, installCmd string) bool {
+	if s.TrustAll {
+		return true
+	}
+
+	if installed, ok := st.Installed[qualifiedName]; ok {
+		if installed.Approval == "approved" && installed.CmdHash == newHash {
+			return true
+		}
+	}
+
+	if s.ApprovalFunc != nil {
+		s.emit(PackageInstallPromptMsg{
+			Name:    sk.Name,
+			Command: installCmd,
+			Source:  sk.Entry.Source,
+		})
+		if s.ApprovalFunc(sk.Name, installCmd, sk.Entry.Source) {
+			s.emit(PackageApprovedMsg{Name: sk.Name})
+			return true
+		}
+		s.emit(PackageDeniedMsg{Name: sk.Name})
+		return false
+	}
+
+	return false
 }
 
 // loadoutRef extracts the human-readable version ref from a catalog entry.

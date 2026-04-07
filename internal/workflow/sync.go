@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -107,6 +108,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		Client:   sync.WrapGitHubClient(b.Client),
 		Provider: b.Provider,
 		Tools:    b.Tools,
+		Executor: &sync.ShellExecutor{},
+		TrustAll: b.TrustAllFlag,
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:
@@ -124,8 +127,50 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 				b.Formatter.OnLegacyFormat(m.Repo)
 			case sync.SyncCompleteMsg:
 				b.Formatter.OnSyncComplete(m)
+
+			// Package events
+			case sync.PackageInstallPromptMsg:
+				b.Formatter.OnPackageInstallPrompt(m.Name, m.Command, m.Source)
+			case sync.PackageApprovedMsg:
+				b.Formatter.OnPackageApproved(m.Name)
+			case sync.PackageDeniedMsg:
+				b.Formatter.OnPackageDenied(m.Name)
+			case sync.PackageSkippedMsg:
+				b.Formatter.OnPackageSkipped(m.Name, m.Reason)
+			case sync.PackageInstallingMsg:
+				b.Formatter.OnPackageInstalling(m.Name)
+			case sync.PackageInstalledMsg:
+				b.Formatter.OnPackageInstalled(m.Name)
+			case sync.PackageUpdateMsg:
+				b.Formatter.OnPackageUpdating(m.Name)
+			case sync.PackageUpdatedMsg:
+				b.Formatter.OnPackageUpdated(m.Name)
+			case sync.PackageErrorMsg:
+				b.Formatter.OnPackageError(m.Name, m.Err, m.Stderr)
+			case sync.PackageHashMismatchMsg:
+				b.Formatter.OnPackageHashMismatch(m.Name, m.OldCommand, m.NewCommand, m.Source)
 			}
 		},
+	}
+
+	// Set interactive approval when in TTY mode.
+	// Skip in JSON mode — machine output cannot be interleaved with a blocking prompt.
+	isTTY := isatty.IsTerminal(os.Stdin.Fd())
+	if isTTY && !b.TrustAllFlag && !b.JSONFlag {
+		syncer.ApprovalFunc = func(name, command, source string) bool {
+			var approved bool
+			err := huh.NewConfirm().
+				Title(fmt.Sprintf("Package %q wants to run a shell command", name)).
+				Description(fmt.Sprintf("source:  %s\ncommand: %s", source, command)).
+				Affirmative("Approve").
+				Negative("Deny").
+				Value(&approved).
+				Run()
+			if err != nil {
+				return false
+			}
+			return approved
+		}
 	}
 
 	for _, teamRepo := range b.Repos {

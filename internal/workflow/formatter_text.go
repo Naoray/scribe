@@ -70,6 +70,54 @@ func (f *textFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	}
 }
 
+func (f *textFormatter) OnPackageInstallPrompt(name, command, source string) {
+	fmt.Fprintf(f.errOut, "  %-20s requires approval\n", name)
+	fmt.Fprintf(f.errOut, "    source:  %s\n", source)
+	fmt.Fprintf(f.errOut, "    command: %s\n", command)
+}
+
+func (f *textFormatter) OnPackageApproved(name string) {
+	fmt.Fprintf(f.out, "  %-20s approved\n", name)
+}
+
+func (f *textFormatter) OnPackageDenied(name string) {
+	fmt.Fprintf(f.out, "  %-20s denied, skipping\n", name)
+}
+
+func (f *textFormatter) OnPackageSkipped(name, reason string) {
+	fmt.Fprintf(f.out, "  %-20s skipped (%s)\n", name, reason)
+}
+
+func (f *textFormatter) OnPackageInstalling(name string) {
+	fmt.Fprintf(f.out, "  %-20s installing...\n", name)
+}
+
+func (f *textFormatter) OnPackageInstalled(name string) {
+	fmt.Fprintf(f.out, "  %-20s installed\n", name)
+}
+
+func (f *textFormatter) OnPackageUpdating(name string) {
+	fmt.Fprintf(f.out, "  %-20s updating...\n", name)
+}
+
+func (f *textFormatter) OnPackageUpdated(name string) {
+	fmt.Fprintf(f.out, "  %-20s updated\n", name)
+}
+
+func (f *textFormatter) OnPackageError(name string, err error, stderr string) {
+	msg := err.Error()
+	if stderr != "" {
+		msg += ": " + stderr
+	}
+	fmt.Fprintf(f.errOut, "  %-20s error: %s\n", name, msg)
+}
+
+func (f *textFormatter) OnPackageHashMismatch(name, oldCmd, newCmd, source string) {
+	fmt.Fprintf(f.errOut, "  %-20s command changed:\n", name)
+	fmt.Fprintf(f.errOut, "    was: %s\n", oldCmd)
+	fmt.Fprintf(f.errOut, "    now: %s\n", newCmd)
+}
+
 func (f *textFormatter) OnConnectDuplicate(repo string) {
 	fmt.Fprintf(f.out, "Already connected to %s\n", repo)
 }

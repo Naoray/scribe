@@ -98,6 +98,72 @@ func (f *jsonFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	}
 }
 
+func (f *jsonFormatter) OnPackageInstallPrompt(name, command, source string) {}
+
+func (f *jsonFormatter) OnPackageApproved(name string) {}
+
+func (f *jsonFormatter) OnPackageDenied(name string) {
+	if f.current == nil {
+		return
+	}
+	f.current.Skills = append(f.current.Skills, skillResult{
+		Name:   name,
+		Action: "denied",
+	})
+}
+
+func (f *jsonFormatter) OnPackageSkipped(name, reason string) {
+	if f.current == nil {
+		return
+	}
+	f.current.Skills = append(f.current.Skills, skillResult{
+		Name:   name,
+		Action: "skipped",
+		Status: reason,
+	})
+}
+
+func (f *jsonFormatter) OnPackageInstalling(name string) {}
+
+func (f *jsonFormatter) OnPackageInstalled(name string) {
+	if f.current == nil {
+		return
+	}
+	f.current.Skills = append(f.current.Skills, skillResult{
+		Name:   name,
+		Action: "package_installed",
+	})
+}
+
+func (f *jsonFormatter) OnPackageUpdating(name string) {}
+
+func (f *jsonFormatter) OnPackageUpdated(name string) {
+	if f.current == nil {
+		return
+	}
+	f.current.Skills = append(f.current.Skills, skillResult{
+		Name:   name,
+		Action: "package_updated",
+	})
+}
+
+func (f *jsonFormatter) OnPackageError(name string, err error, stderr string) {
+	if f.current == nil {
+		return
+	}
+	errMsg := err.Error()
+	if stderr != "" {
+		errMsg += ": " + stderr
+	}
+	f.current.Skills = append(f.current.Skills, skillResult{
+		Name:   name,
+		Action: "error",
+		Error:  errMsg,
+	})
+}
+
+func (f *jsonFormatter) OnPackageHashMismatch(name, oldCmd, newCmd, source string) {}
+
 func (f *jsonFormatter) OnConnectDuplicate(_ string) {
 	// JSON mode: handled by caller via exit code / structured output.
 }
