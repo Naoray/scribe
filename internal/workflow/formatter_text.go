@@ -71,7 +71,9 @@ func (f *textFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 }
 
 func (f *textFormatter) OnPackageInstallPrompt(name, command, source string) {
-	fmt.Fprintf(f.errOut, "  %-20s requires approval: %s\n", name, command)
+	fmt.Fprintf(f.errOut, "  %-20s requires approval\n", name)
+	fmt.Fprintf(f.errOut, "    source:  %s\n", source)
+	fmt.Fprintf(f.errOut, "    command: %s\n", command)
 }
 
 func (f *textFormatter) OnPackageApproved(name string) {

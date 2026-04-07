@@ -320,6 +320,15 @@ func (s *Syncer) RunWithDiff(ctx context.Context, teamRepo string, statuses []Sk
 const defaultPackageTimeout = 5 * time.Minute
 
 func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug string, st *state.State, summary *SyncCompleteMsg) {
+	if s.Executor == nil {
+		s.emit(PackageErrorMsg{
+			Name: sk.Name,
+			Err:  fmt.Errorf("no command executor configured"),
+		})
+		summary.Failed++
+		return
+	}
+
 	installCmd := sk.Entry.Install
 	updateCmd := sk.Entry.Update
 	newHash := CommandHash(installCmd, updateCmd)
@@ -327,7 +336,7 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 
 	switch sk.Status {
 	case StatusMissing:
-		approved := s.checkApproval(sk, qualifiedName, st, newHash, installCmd, updateCmd)
+		approved := s.checkApproval(sk, qualifiedName, st, newHash, installCmd)
 		if !approved {
 			s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "approval_required"})
 			summary.Skipped++
@@ -343,6 +352,8 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 
 		_, stderr, err := s.Executor.Execute(ctx, installCmd, timeout)
 		if err != nil {
+			// Install failed — do NOT persist approval. The user only
+			// authorized this specific attempt; a future run must re-prompt.
 			s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
 			summary.Failed++
 			return
@@ -387,7 +398,7 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 				NewCommand: installCmd,
 				Source:     sk.Entry.Source,
 			})
-			approved := s.checkApproval(sk, qualifiedName, st, newHash, installCmd, updateCmd)
+			approved := s.checkApproval(sk, qualifiedName, st, newHash, installCmd)
 			if !approved {
 				s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "approval_required"})
 				summary.Skipped++
@@ -404,6 +415,8 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 
 		_, stderr, err := s.Executor.Execute(ctx, updateCmd, timeout)
 		if err != nil {
+			// Update failed — do NOT persist the new approval/hash. The
+			// existing approval (for the prior commands) stays intact.
 			s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
 			summary.Failed++
 			return
@@ -414,6 +427,8 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 		existing.InstallCmd = installCmd
 		existing.UpdateCmd = updateCmd
 		existing.CmdHash = newHash
+		existing.Approval = "approved"
+		existing.ApprovedAt = time.Now().UTC()
 		st.Installed[qualifiedName] = existing
 		if err := st.Save(); err != nil {
 			s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
@@ -424,7 +439,10 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 	}
 }
 
-func (s *Syncer) checkApproval(sk SkillStatus, qualifiedName string, st *state.State, newHash, installCmd, updateCmd string) bool {
+// checkApproval is pure: it returns whether the command is authorized to run,
+// without mutating state. The caller persists approval ONLY after the command
+// actually succeeds (see applyPackage).
+func (s *Syncer) checkApproval(sk SkillStatus, qualifiedName string, st *state.State, newHash, installCmd string) bool {
 	if s.TrustAll {
 		return true
 	}
@@ -441,16 +459,8 @@ func (s *Syncer) checkApproval(sk SkillStatus, qualifiedName string, st *state.S
 			Command: installCmd,
 			Source:  sk.Entry.Source,
 		})
-		approved := s.ApprovalFunc(sk.Name, installCmd, sk.Entry.Source)
-		if approved {
+		if s.ApprovalFunc(sk.Name, installCmd, sk.Entry.Source) {
 			s.emit(PackageApprovedMsg{Name: sk.Name})
-			existing := st.Installed[qualifiedName]
-			existing.CmdHash = newHash
-			existing.Approval = "approved"
-			existing.ApprovedAt = time.Now().UTC()
-			existing.InstallCmd = installCmd
-			existing.UpdateCmd = updateCmd
-			st.Installed[qualifiedName] = existing
 			return true
 		}
 		s.emit(PackageDeniedMsg{Name: sk.Name})

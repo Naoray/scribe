@@ -154,13 +154,14 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	}
 
 	// Set interactive approval when in TTY mode.
+	// Skip in JSON mode — machine output cannot be interleaved with a blocking prompt.
 	isTTY := isatty.IsTerminal(os.Stdin.Fd())
-	if isTTY && !b.TrustAllFlag {
+	if isTTY && !b.TrustAllFlag && !b.JSONFlag {
 		syncer.ApprovalFunc = func(name, command, source string) bool {
 			var approved bool
 			err := huh.NewConfirm().
-				Title(fmt.Sprintf("Package %q wants to run:", name)).
-				Description(command).
+				Title(fmt.Sprintf("Package %q wants to run a shell command", name)).
+				Description(fmt.Sprintf("source:  %s\ncommand: %s", source, command)).
 				Affirmative("Approve").
 				Negative("Deny").
 				Value(&approved).
