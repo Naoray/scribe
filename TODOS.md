@@ -100,3 +100,44 @@ Skills grouped by registry in list output. `--registry` filter flag available.
 **Context:** Originally planned as part of `scribe init` before the command was split. `initCmd` is currently removed from root.go. Re-register when implemented.
 
 **Depends on:** Nothing blocking.
+
+---
+
+## `scribe registry remove` command
+
+**What:** Inverse of `scribe registry add`. Remove a catalog entry from a team registry's `scribe.yaml`. Should work for both skill entries and package entries (e.g. `scribe registry remove superpowers --registry artistfy/hq`).
+
+**Why:** Today, removing an entry requires hand-editing the manifest on GitHub (or via `gh api`). The CLI has an `add` half but no `remove` half.
+
+**Fix:** New subcommand in `cmd/registry_remove.go`. Fetch manifest, drop the entry from `catalog`, push back. Same auth/TTY plumbing as `registry add`. Add a `--yes` flag for non-interactive use.
+
+**Context:** Identified while removing `obra/superpowers` from `artistfy/hq` manually (2026-04-07).
+
+---
+
+## `scribe registry add`: paste keyboard shortcut doesn't work in install-command prompts
+
+**What:** When `scribe registry add owner/repo` falls through to the per-tool install command prompts (because the upstream package has no `scribe.yaml` or no declared installs), `ctrl+v` / `cmd+v` paste does not work in the Huh input fields.
+
+**Why:** Bubble Tea raw-mode terminals must forward paste events explicitly. Huh inputs likely aren't receiving `tea.PasteMsg` — or bracketed paste isn't being requested on the program.
+
+**Fix:** Investigate the Huh standalone `NewInput().Run()` path in `collectInstallCommands` (cmd/registry_add.go). May need to enable bracketed paste mode or switch to a full `huh.NewForm(...).RunWithContext(...)` that handles `PasteMsg` correctly. Verify against charm.md rule: "use `.Content`, not string(msg)" on `PasteMsg`.
+
+**Context:** Observed 2026-04-07 while trying to paste an install command into the prompt.
+
+---
+
+## `scribe registry add`: only prompts for claude + cursor, then no output after submit
+
+**What:** Two separate bugs in the per-tool install command flow of `scribe registry add owner/repo`:
+
+1. The prompt only iterates `claude` and `cursor` even if other tools are active/configured. Tool list appears hard-coded instead of derived from the caller's active `tools.Tool` set.
+2. After the user answers both prompts, the command produces no output — no success message, no error, no JSON result. The entry may or may not have been pushed; the user has no feedback.
+
+**Why:** Silent success is a worse UX failure than a loud error. And hard-coding the tool list means adding a new tool (e.g. `aider`, `copilot`) won't automatically show up in the prompt loop.
+
+**Fix:**
+- Derive the prompted tool list from the resolved `targets []tools.Tool` (same list `sync` uses), not a literal slice.
+- Wire the `SkillAddingMsg` / `SkillAddedMsg` events through the same formatter as the skill-add path so the success line renders. Check `wireAddEmit` / `finishAdd` in `cmd/registry_add.go` — the package-ref branch may be skipping the emit or the final `finishAdd` call.
+
+**Context:** Observed 2026-04-07 while testing `scribe registry add obra/superpowers --registry artistfy/hq`.
