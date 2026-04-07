@@ -3,8 +3,35 @@ package cmd
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/Naoray/scribe/internal/discovery"
 )
+
+// key builds a KeyPressMsg whose String() matches the given label. Letter/char
+// keys go through Text; named keys (tab, esc, up, ...) use Code with the
+// matching rune from bubbletea's key table.
+func key(label string) tea.KeyPressMsg {
+	switch label {
+	case "tab":
+		return tea.KeyPressMsg{Code: 0x09}
+	case "shift+tab":
+		return tea.KeyPressMsg{Code: 0x09, Mod: tea.ModShift}
+	case "enter":
+		return tea.KeyPressMsg{Code: 0x0d}
+	case "esc":
+		return tea.KeyPressMsg{Code: 0x1b}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
+	}
+	return tea.KeyPressMsg{Text: label}
+}
 
 func TestActionsForRow(t *testing.T) {
 	t.Run("row with local skill has copy and edit enabled", func(t *testing.T) {
@@ -121,4 +148,145 @@ func findAction(actions []actionItem, key string) actionItem {
 		}
 	}
 	return actionItem{}
+}
+
+// detailModel builds a listModel with two filtered rows in the detail state,
+// ready for exercising updateDetail.
+func detailModel(focus detailFocus) listModel {
+	return listModel{
+		selected: true,
+		focus:    focus,
+		cursor:   0,
+		filtered: []listRow{
+			{Name: "a", Local: &discovery.Skill{Name: "a", LocalPath: "/p/a"}},
+			{Name: "b", Local: &discovery.Skill{Name: "b", LocalPath: "/p/b"}},
+		},
+	}
+}
+
+func TestUpdateDetail_FocusToggle(t *testing.T) {
+	cases := []struct {
+		name      string
+		start     detailFocus
+		keyLabel  string
+		wantFocus detailFocus
+	}{
+		{"tab actions->list", focusActions, "tab", focusList},
+		{"tab list->actions", focusList, "tab", focusActions},
+		{"shift+tab actions->list", focusActions, "shift+tab", focusList},
+		{"shift+tab list->actions", focusList, "shift+tab", focusActions},
+		{"right from list -> actions", focusList, "right", focusActions},
+		{"l from list -> actions", focusList, "l", focusActions},
+		{"enter from list -> actions", focusList, "enter", focusActions},
+		{"left from actions -> list", focusActions, "left", focusList},
+		{"h from actions -> list", focusActions, "h", focusList},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := detailModel(tc.start)
+			nm, _ := m.updateDetail(key(tc.keyLabel))
+			lm := nm.(listModel)
+			if lm.focus != tc.wantFocus {
+				t.Fatalf("focus = %v, want %v", lm.focus, tc.wantFocus)
+			}
+		})
+	}
+}
+
+func TestUpdateDetail_EscapeResetsFocus(t *testing.T) {
+	m := detailModel(focusActions)
+	m.actionCursor = 3
+	m.statusMsg = "stale"
+	nm, _ := m.updateDetail(key("esc"))
+	lm := nm.(listModel)
+	if lm.selected {
+		t.Error("esc should clear selected")
+	}
+	if lm.focus != focusList {
+		t.Errorf("focus = %v, want focusList", lm.focus)
+	}
+	if lm.actionCursor != 0 {
+		t.Errorf("actionCursor = %d, want 0", lm.actionCursor)
+	}
+	if lm.statusMsg != "" {
+		t.Errorf("statusMsg = %q, want empty", lm.statusMsg)
+	}
+}
+
+func TestUpdateDetail_FocusListMovesRowCursor(t *testing.T) {
+	m := detailModel(focusList)
+	m.actionCursor = 2
+
+	nm, _ := m.updateDetail(key("j"))
+	lm := nm.(listModel)
+	if lm.cursor != 1 {
+		t.Fatalf("after j: cursor = %d, want 1", lm.cursor)
+	}
+	if lm.actionCursor != 0 {
+		t.Fatalf("after j: actionCursor = %d, want 0 (reset on row change)", lm.actionCursor)
+	}
+
+	nm, _ = lm.updateDetail(key("j"))
+	lm = nm.(listModel)
+	if lm.cursor != 1 {
+		t.Fatalf("j at last row should be no-op, cursor = %d, want 1", lm.cursor)
+	}
+
+	nm, _ = lm.updateDetail(key("k"))
+	lm = nm.(listModel)
+	if lm.cursor != 0 {
+		t.Fatalf("after k: cursor = %d, want 0", lm.cursor)
+	}
+}
+
+func TestUpdateDetail_FocusActionsMovesActionCursor(t *testing.T) {
+	m := detailModel(focusActions)
+	m.cursor = 0
+
+	nm, _ := m.updateDetail(key("j"))
+	lm := nm.(listModel)
+	if lm.cursor != 0 {
+		t.Errorf("focusActions j should not move row cursor, got %d", lm.cursor)
+	}
+	if lm.actionCursor != 1 {
+		t.Errorf("focusActions j should advance actionCursor, got %d", lm.actionCursor)
+	}
+}
+
+func TestBuildLocalRowsExcluding_DedupsSlugQualified(t *testing.T) {
+	skills := []discovery.Skill{
+		{Name: "Artistfy-hq/ascii", Package: "Artistfy-hq", LocalPath: "/home/u/.scribe/skills/Artistfy-hq/ascii"},
+		{Name: "other", Package: ""},
+	}
+	// Simulate buildRows having marked the slug-qualified form as matched
+	// (because a registry row was emitted for it).
+	matched := map[string]bool{
+		"Artistfy-hq/ascii": true,
+	}
+	rows := buildLocalRowsExcluding(skills, matched)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].Name != "other" {
+		t.Errorf("expected only 'other' to survive, got %q", rows[0].Name)
+	}
+}
+
+func TestBuildLocalRowsExcluding_PreservesUnmatchedSameName(t *testing.T) {
+	// A bare-name local skill should NOT be suppressed by a registry row
+	// that matched only its slug-qualified sibling. The new lookup order
+	// only marks the key that actually matched.
+	skills := []discovery.Skill{
+		{Name: "ascii", Package: ""},
+	}
+	matched := map[string]bool{
+		"Artistfy-hq/ascii": true, // bare "ascii" NOT in matched set
+	}
+	rows := buildLocalRowsExcluding(skills, matched)
+	if len(rows) != 1 {
+		t.Fatalf("expected bare-name 'ascii' to survive, got %d rows", len(rows))
+	}
+	if rows[0].Name != "ascii" {
+		t.Errorf("row name = %q, want 'ascii'", rows[0].Name)
+	}
 }

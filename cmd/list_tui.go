@@ -213,17 +213,22 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 		}
 		slug := tools.SlugifyRegistry(repo)
 		for _, ss := range statuses {
-			// A local skill may be discovered under either its bare name
-			// (e.g. "ascii" if installed at ~/.claude/skills/ascii) or its
-			// slug-qualified name (e.g. "Artistfy-hq/ascii" if it lives at
-			// ~/.scribe/skills/Artistfy-hq/ascii). Mark both forms as
-			// matched so the untracked-pass below doesn't re-emit them.
-			local := localByName[ss.Name]
-			if local == nil {
-				local = localByName[slug+"/"+ss.Name]
+			// A local skill may be discovered under either its slug-qualified
+			// name (e.g. "Artistfy-hq/ascii" if it lives at
+			// ~/.scribe/skills/Artistfy-hq/ascii) or its bare name
+			// (e.g. "ascii" if installed at ~/.claude/skills/ascii). Prefer
+			// the slug-qualified form so a same-named top-level skill from a
+			// different source can't be mis-attributed to this registry row.
+			// Only mark the matched key so unrelated same-named skills aren't
+			// suppressed from the untracked-pass below.
+			qualifiedKey := slug + "/" + ss.Name
+			local := localByName[qualifiedKey]
+			if local != nil {
+				matchedLocal[qualifiedKey] = true
+			} else if bare := localByName[ss.Name]; bare != nil {
+				local = bare
+				matchedLocal[ss.Name] = true
 			}
-			matchedLocal[ss.Name] = true
-			matchedLocal[slug+"/"+ss.Name] = true
 			row := listRow{
 				Name:      ss.Name,
 				Group:     repo,
@@ -369,7 +374,7 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.quitting = true
 		return m, tea.Quit
-	case "escape":
+	case "esc", "escape":
 		if m.search != "" {
 			m.search = ""
 			m.filtered = m.applyFilter()
@@ -422,6 +427,7 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.cursor >= len(m.filtered) {
 		m.selected = false
+		m.focus = focusList
 		return m, nil
 	}
 
@@ -432,7 +438,7 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		m.quitting = true
 		return m, tea.Quit
-	case "escape":
+	case "esc", "escape":
 		m.selected = false
 		m.focus = focusList
 		m.actionCursor = 0
@@ -510,7 +516,7 @@ func (m listModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
 		return m.executeRemove()
-	case "n", "escape":
+	case "n", "esc", "escape":
 		m.substate = listSubstateNone
 		m.statusMsg = ""
 	}
