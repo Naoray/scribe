@@ -19,6 +19,44 @@ func newRegistryCommand() *cobra.Command {
 	cmd.AddCommand(newConnectCommand()) // connect lives under registry
 	cmd.AddCommand(newRegistryEnableCommand())
 	cmd.AddCommand(newRegistryDisableCommand())
+	cmd.AddCommand(newRegistryAddCommand())
+	cmd.AddCommand(newRegistryCreateCommand())
+	cmd.AddCommand(newRegistryMigrateCommand())
+	return cmd
+}
+
+// newRegistryMigrateCommand wires `scribe registry migrate` to the existing
+// migrate workflow.
+func newRegistryMigrateCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate [owner/repo]",
+		Short: "Convert a scribe.toml registry to scribe.yaml",
+		Long: `Fetches the existing scribe.toml from a registry, converts it to the
+new scribe.yaml format, and pushes the change as a single commit
+(deleting scribe.toml and creating scribe.yaml).`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runMigrate,
+	}
+}
+
+// newRegistryCreateCommand wires `scribe registry create` to the existing
+// create-registry workflow.
+func newRegistryCreateCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Scaffold a new team skills registry on GitHub",
+		Long: `Create a new GitHub repository with a scribe.yaml manifest and connect to it.
+
+Examples:
+  scribe registry create                                    # interactive
+  scribe registry create -t myteam -o MyOrg                 # flags
+  scribe registry create -t myteam -o MyOrg -r skills-repo  # custom repo name`,
+		RunE: runCreateRegistry,
+	}
+	cmd.Flags().StringP("team", "t", "", "Team name")
+	cmd.Flags().StringP("owner", "o", "", "GitHub org or username")
+	cmd.Flags().StringP("repo", "r", "team-registry", "Repository name")
+	cmd.Flags().Bool("private", true, "Create a private repository")
 	return cmd
 }
 

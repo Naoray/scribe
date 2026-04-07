@@ -36,8 +36,9 @@ func newMigrateCommand() *cobra.Command {
 		Long: `Fetches the existing scribe.toml from a registry, converts it to the
 new scribe.yaml format, and pushes the change as a single commit
 (deleting scribe.toml and creating scribe.yaml).`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runMigrate,
+		Args:       cobra.MaximumNArgs(1),
+		RunE:       runMigrate,
+		Deprecated: "use 'scribe registry migrate' instead",
 	}
 }
 
