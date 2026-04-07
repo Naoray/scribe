@@ -227,6 +227,84 @@ func (a *Adder) Add(ctx context.Context, targetRepo string, candidates []Candida
 	return a.Client.PushFiles(ctx, owner, repo, pushFiles, msg)
 }
 
+// AddPackageRef fetches a package manifest from packageRepo and adds a
+// package catalog entry to the target registry's scribe.yaml. The package's
+// declared per-tool install commands (package.installs) are copied into the
+// catalog entry; the global install field is used as a fallback if no per-tool
+// commands are declared.
+func (a *Adder) AddPackageRef(ctx context.Context, targetRepo, packageRepo string) error {
+	targetOwner, targetRepoName, err := manifest.ParseOwnerRepo(targetRepo)
+	if err != nil {
+		return fmt.Errorf("parse target registry %q: %w", targetRepo, err)
+	}
+
+	pkgOwner, pkgRepoName, err := manifest.ParseOwnerRepo(packageRepo)
+	if err != nil {
+		return fmt.Errorf("parse package repo %q: %w", packageRepo, err)
+	}
+
+	// Fetch the package's own manifest to read metadata + install scripts.
+	pkgManifest, err := a.fetchManifest(ctx, pkgOwner, pkgRepoName)
+	if err != nil {
+		return fmt.Errorf("fetch package manifest for %s: %w", packageRepo, err)
+	}
+	if !pkgManifest.IsPackage() {
+		return fmt.Errorf("%s is not a package (kind: %s)", packageRepo, pkgManifest.Kind)
+	}
+
+	pkg := pkgManifest.Package
+	if len(pkg.Installs) == 0 && pkg.Updates == nil {
+		return fmt.Errorf("%s declares no install commands — add installs: to its package.installs section", packageRepo)
+	}
+
+	// Determine the author from the repo owner if not set in authors list.
+	author := pkgOwner
+	if len(pkg.Authors) > 0 {
+		author = pkg.Authors[0]
+	}
+
+	entry := manifest.Entry{
+		Name:     pkg.Name,
+		Source:   fmt.Sprintf("github:%s/%s@main", pkgOwner, pkgRepoName),
+		Type:     manifest.EntryTypePackage,
+		Installs: pkg.Installs,
+		Updates:  pkg.Updates,
+		Author:   author,
+	}
+
+	a.emit(SkillAddingMsg{Name: pkg.Name, Upload: false})
+
+	// Fetch and update the target registry manifest.
+	m, err := a.fetchManifest(ctx, targetOwner, targetRepoName)
+	if err != nil {
+		return fmt.Errorf("fetch manifest: %w", err)
+	}
+	if m.FindByName(pkg.Name) != nil {
+		return fmt.Errorf("%q is already in %s", pkg.Name, targetRepo)
+	}
+
+	m.Catalog = append(m.Catalog, entry)
+	encoded, err := m.Encode()
+	if err != nil {
+		return fmt.Errorf("encode manifest: %w", err)
+	}
+
+	msg := fmt.Sprintf("add package: %s", pkg.Name)
+	if err := a.Client.PushFiles(ctx, targetOwner, targetRepoName, map[string]string{
+		manifest.ManifestFilename: string(encoded),
+	}, msg); err != nil {
+		return err
+	}
+
+	a.emit(SkillAddedMsg{
+		Name:     pkg.Name,
+		Registry: targetRepo,
+		Source:   entry.Source,
+		Upload:   false,
+	})
+	return nil
+}
+
 // fetchManifest tries scribe.yaml first, falls back to scribe.toml (converting via migrate).
 func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
 	m, _, err := manifest.FetchWithFallback(ctx, a.Client, owner, repo, migrate.Convert)

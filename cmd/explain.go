@@ -70,7 +70,7 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	skill, ok := findSkill(skills, args[0])
 	if !ok {
-		return fmt.Errorf("skill %q not found — run `scribe list --local` to see installed skills", args[0])
+		return fmt.Errorf("skill %q not found — run `scribe list` to see installed skills", args[0])
 	}
 
 	if skill.LocalPath == "" {

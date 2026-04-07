@@ -319,6 +319,45 @@ func (s *Syncer) RunWithDiff(ctx context.Context, teamRepo string, statuses []Sk
 
 const defaultPackageTimeout = 5 * time.Minute
 
+// toolCmd holds the resolved install/update commands for one active tool.
+type toolCmd struct {
+	toolName   string
+	installCmd string
+	updateCmd  string
+}
+
+// resolveToolCmds returns the install/update commands for each active tool.
+// A tool is included if it has either an install or update command. Falls
+// back to the global Install/Update fields when no per-tool entry exists.
+// If no tools have any command, returns a single global entry (empty toolName).
+func resolveToolCmds(entry *manifest.Entry, activeTools []tools.Tool) []toolCmd {
+	var cmds []toolCmd
+	for _, t := range activeTools {
+		install := entry.InstallFor(t.Name())
+		update := entry.UpdateFor(t.Name())
+		if install != "" || update != "" {
+			cmds = append(cmds, toolCmd{toolName: t.Name(), installCmd: install, updateCmd: update})
+		}
+	}
+	// If no tool-specific commands, fall back to global (one unnamed entry).
+	if len(cmds) == 0 && (entry.Install != "" || entry.Update != "") {
+		cmds = append(cmds, toolCmd{installCmd: entry.Install, updateCmd: entry.Update})
+	}
+	return cmds
+}
+
+// formatCmds formats tool commands for display in approval prompts.
+func formatCmds(cmds []toolCmd) string {
+	if len(cmds) == 1 && cmds[0].toolName == "" {
+		return cmds[0].installCmd
+	}
+	parts := make([]string, 0, len(cmds))
+	for _, c := range cmds {
+		parts = append(parts, fmt.Sprintf("[%s] %s", c.toolName, c.installCmd))
+	}
+	return strings.Join(parts, "\n")
+}
+
 func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug string, st *state.State, summary *SyncCompleteMsg) {
 	if s.Executor == nil {
 		s.emit(PackageErrorMsg{
@@ -329,14 +368,25 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 		return
 	}
 
-	installCmd := sk.Entry.Install
-	updateCmd := sk.Entry.Update
-	newHash := CommandHash(installCmd, updateCmd)
+	cmds := resolveToolCmds(sk.Entry, s.Tools)
+	if len(cmds) == 0 {
+		s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "no install command"})
+		summary.Skipped++
+		return
+	}
+
+	newHash := CommandHash(sk.Entry.Install, sk.Entry.Update, sk.Entry.Installs, sk.Entry.Updates)
 	qualifiedName := registrySlug + "/" + sk.Name
+	displayCmd := formatCmds(cmds)
+
+	timeout := time.Duration(sk.Entry.Timeout) * time.Second
+	if timeout == 0 {
+		timeout = defaultPackageTimeout
+	}
 
 	switch sk.Status {
 	case StatusMissing:
-		approved := s.checkApproval(sk, qualifiedName, st, newHash, installCmd)
+		approved := s.checkApproval(sk, qualifiedName, st, newHash, displayCmd)
 		if !approved {
 			s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "approval_required"})
 			summary.Skipped++
@@ -345,18 +395,18 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 
 		s.emit(PackageInstallingMsg{Name: sk.Name})
 
-		timeout := time.Duration(sk.Entry.Timeout) * time.Second
-		if timeout == 0 {
-			timeout = defaultPackageTimeout
-		}
-
-		_, stderr, err := s.Executor.Execute(ctx, installCmd, timeout)
-		if err != nil {
-			// Install failed — do NOT persist approval. The user only
-			// authorized this specific attempt; a future run must re-prompt.
-			s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
-			summary.Failed++
-			return
+		for _, c := range cmds {
+			if c.installCmd == "" {
+				continue
+			}
+			_, stderr, err := s.Executor.Execute(ctx, c.installCmd, timeout)
+			if err != nil {
+				// Install failed — do NOT persist approval. The user only
+				// authorized this specific attempt; a future run must re-prompt.
+				s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
+				summary.Failed++
+				return
+			}
 		}
 
 		version := "unknown"
@@ -370,8 +420,8 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 			CommitSHA:  sk.LatestSHA,
 			Source:     sk.Entry.Source,
 			Type:       "package",
-			InstallCmd: installCmd,
-			UpdateCmd:  updateCmd,
+			InstallCmd: sk.Entry.Install,
+			UpdateCmd:  sk.Entry.Update,
 			CmdHash:    newHash,
 			Approval:   "approved",
 			ApprovedAt: time.Now().UTC(),
@@ -384,7 +434,14 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 		summary.Installed++
 
 	case StatusOutdated:
-		if updateCmd == "" {
+		hasUpdate := false
+		for _, c := range cmds {
+			if c.updateCmd != "" {
+				hasUpdate = true
+				break
+			}
+		}
+		if !hasUpdate {
 			s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "no update command"})
 			summary.Skipped++
 			return
@@ -395,10 +452,10 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 			s.emit(PackageHashMismatchMsg{
 				Name:       sk.Name,
 				OldCommand: installed.InstallCmd,
-				NewCommand: installCmd,
+				NewCommand: displayCmd,
 				Source:     sk.Entry.Source,
 			})
-			approved := s.checkApproval(sk, qualifiedName, st, newHash, installCmd)
+			approved := s.checkApproval(sk, qualifiedName, st, newHash, displayCmd)
 			if !approved {
 				s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "approval_required"})
 				summary.Skipped++
@@ -408,24 +465,24 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 
 		s.emit(PackageUpdateMsg{Name: sk.Name})
 
-		timeout := time.Duration(sk.Entry.Timeout) * time.Second
-		if timeout == 0 {
-			timeout = defaultPackageTimeout
-		}
-
-		_, stderr, err := s.Executor.Execute(ctx, updateCmd, timeout)
-		if err != nil {
-			// Update failed — do NOT persist the new approval/hash. The
-			// existing approval (for the prior commands) stays intact.
-			s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
-			summary.Failed++
-			return
+		for _, c := range cmds {
+			if c.updateCmd == "" {
+				continue
+			}
+			_, stderr, err := s.Executor.Execute(ctx, c.updateCmd, timeout)
+			if err != nil {
+				// Update failed — do NOT persist the new approval/hash. The
+				// existing approval (for the prior commands) stays intact.
+				s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
+				summary.Failed++
+				return
+			}
 		}
 
 		existing := st.Installed[qualifiedName]
 		existing.CommitSHA = sk.LatestSHA
-		existing.InstallCmd = installCmd
-		existing.UpdateCmd = updateCmd
+		existing.InstallCmd = sk.Entry.Install
+		existing.UpdateCmd = sk.Entry.Update
 		existing.CmdHash = newHash
 		existing.Approval = "approved"
 		existing.ApprovedAt = time.Now().UTC()

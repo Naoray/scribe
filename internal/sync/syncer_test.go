@@ -180,7 +180,7 @@ func TestApply_PackageOutdated_WithUpdateCmd(t *testing.T) {
 
 	installCmd := "claude plugin install superpowers"
 	updateCmd := "claude plugin update superpowers"
-	hash := sync.CommandHash(installCmd, updateCmd)
+	hash := sync.CommandHash(installCmd, updateCmd, nil, nil)
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
 		"test-repo/superpowers": {

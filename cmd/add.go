@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
@@ -139,11 +140,34 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	)
 
 	if len(args) == 1 {
+		// owner/repo arg → package-add flow; bare skill name → skill-add flow.
+		if strings.Contains(args[0], "/") {
+			return runAddPackageRef(ctx, args[0], adder, targetRepo, st, client, targets, useJSON)
+		}
 		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, isTTY, addYes)
 	}
 
 	// Mode 2: interactive browse (TTY, no args) — Task 7.
 	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, addYes)
+}
+
+func runAddPackageRef(
+	ctx context.Context,
+	packageRepo string,
+	adder *add.Adder,
+	targetRepo string,
+	st *state.State,
+	client *gh.Client,
+	targets []tools.Tool,
+	useJSON bool,
+) error {
+	results := wireAddEmit(adder, targetRepo, useJSON)
+
+	if err := adder.AddPackageRef(ctx, targetRepo, packageRepo); err != nil {
+		return err
+	}
+
+	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
 }
 
 func runAddByName(

@@ -9,17 +9,29 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 )
 
-func TestListSteps_Composition(t *testing.T) {
-	steps := ListSteps()
-	if len(steps) == 0 {
-		t.Fatal("ListSteps() returned empty list")
+func TestListLoadSteps_Composition(t *testing.T) {
+	steps := ListLoadSteps()
+	if len(steps) != 2 {
+		t.Fatalf("ListLoadSteps() = %d steps, want 2", len(steps))
 	}
-
 	if steps[0].Name != "LoadConfig" {
-		t.Errorf("expected first step LoadConfig, got %s", steps[0].Name)
+		t.Errorf("step[0] = %s, want LoadConfig", steps[0].Name)
 	}
-	if steps[len(steps)-1].Name != "BranchLocalOrRemote" {
-		t.Errorf("expected last step BranchLocalOrRemote, got %s", steps[len(steps)-1].Name)
+	if steps[1].Name != "LoadState" {
+		t.Errorf("step[1] = %s, want LoadState", steps[1].Name)
+	}
+}
+
+func TestListJSONSteps_Composition(t *testing.T) {
+	steps := ListJSONSteps()
+	if len(steps) == 0 {
+		t.Fatal("ListJSONSteps() returned empty list")
+	}
+	if steps[0].Name != "LoadConfig" {
+		t.Errorf("first step = %s, want LoadConfig", steps[0].Name)
+	}
+	if steps[len(steps)-1].Name != "WriteListJSON" {
+		t.Errorf("last step = %s, want WriteListJSON", steps[len(steps)-1].Name)
 	}
 }
 
