@@ -6,10 +6,12 @@ import (
 
 func TestRegistryEnableDisableArgs(t *testing.T) {
 	// enableCmd and disableCmd should require exactly one arg.
-	if registryEnableCmd.Args == nil {
+	enableCmd := newRegistryEnableCommand()
+	if enableCmd.Args == nil {
 		t.Error("enableCmd should have arg validation")
 	}
-	if registryDisableCmd.Args == nil {
+	disableCmd := newRegistryDisableCommand()
+	if disableCmd.Args == nil {
 		t.Error("disableCmd should have arg validation")
 	}
 }

@@ -30,10 +30,11 @@ type addResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
-var addCmd = &cobra.Command{
-	Use:   "add [name]",
-	Short: "Add a skill to a team registry",
-	Long: `Add a skill to a team registry on GitHub.
+func newAddCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add [name]",
+		Short: "Add a skill to a team registry",
+		Long: `Add a skill to a team registry on GitHub.
 
 If the skill has a known source (synced from another registry), adds a
 source reference. If it's a local-only skill, uploads the files to the
@@ -46,14 +47,13 @@ Examples:
   scribe add cleanup
   scribe add gstack --registry ArtistfyHQ/team-skills
   scribe add --yes cleanup`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runAdd,
-}
-
-func init() {
-	addCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
-	addCmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	addCmd.Flags().String("registry", "", "Target registry (owner/repo)")
+		Args: cobra.MaximumNArgs(1),
+		RunE: runAdd,
+	}
+	cmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	cmd.Flags().String("registry", "", "Target registry (owner/repo)")
+	return cmd
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
@@ -66,7 +66,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 	if len(cfg.TeamRepos()) == 0 {
 		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
@@ -74,7 +74,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	st, err := state.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load state: %w", err)
 	}
 
 	client := gh.NewClient(cmd.Context(), cfg.Token)
@@ -82,13 +82,13 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}
 
-	tgts := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
-	adder := &add.Adder{Client: client, Tools: tgts}
+	targets := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
+	adder := &add.Adder{Client: client, Tools: targets}
 
 	// Resolve target registry.
 	targetRepo, err := resolveTargetRegistry(addRegistry, cfg.TeamRepos(), isTTY)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve target registry: %w", err)
 	}
 
 	// Mode 3: no args, non-TTY.
@@ -99,7 +99,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	// Discover candidates.
 	localCandidates, err := adder.DiscoverLocal(st)
 	if err != nil {
-		return err
+		return fmt.Errorf("discover local skills: %w", err)
 	}
 
 	// Fetch target registry manifest to filter already-added skills.
@@ -139,11 +139,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	)
 
 	if len(args) == 1 {
-		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, isTTY, addYes)
+		return runAddByName(ctx, args[0], allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, isTTY, addYes)
 	}
 
 	// Mode 2: interactive browse (TTY, no args) — Task 7.
-	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, tgts, useJSON, addYes)
+	return runAddInteractive(ctx, allCandidates, adder, targetRepo, cfg, st, client, targets, useJSON, addYes)
 }
 
 func runAddByName(
@@ -155,7 +155,7 @@ func runAddByName(
 	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
-	tgts []tools.Tool,
+	targets []tools.Tool,
 	useJSON bool,
 	isTTY bool,
 	skipConfirm bool,
@@ -197,7 +197,7 @@ func runAddByName(
 		return err
 	}
 
-	return finishAdd(ctx, *results, targetRepo, st, client, tgts, useJSON)
+	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
 }
 
 func runAddInteractive(
@@ -208,7 +208,7 @@ func runAddInteractive(
 	cfg *config.Config,
 	st *state.State,
 	client *gh.Client,
-	tgts []tools.Tool,
+	targets []tools.Tool,
 	useJSON bool,
 	skipConfirm bool,
 ) error {
@@ -264,7 +264,7 @@ func runAddInteractive(
 		return err
 	}
 
-	return finishAdd(ctx, *results, targetRepo, st, client, tgts, useJSON)
+	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
 }
 
 // sortCandidates groups by origin (local first, then remote), then by package,
@@ -277,15 +277,15 @@ func sortCandidates(candidates []add.Candidate) {
 			return iLocal
 		}
 		// Within local: standalone first, then by package name.
-		pi, pj := candidates[i].Package, candidates[j].Package
-		if pi != pj {
-			if pi == "" {
+		pkgI, pkgJ := candidates[i].Package, candidates[j].Package
+		if pkgI != pkgJ {
+			if pkgI == "" {
 				return true
 			}
-			if pj == "" {
+			if pkgJ == "" {
 				return false
 			}
-			return pi < pj
+			return pkgI < pkgJ
 		}
 		return candidates[i].Name < candidates[j].Name
 	})
@@ -372,8 +372,8 @@ func wireAddEmit(adder *add.Adder, targetRepo string, useJSON bool) *[]addResult
 }
 
 // finishAdd runs auto-sync and optionally outputs JSON after add completes.
-func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *state.State, client *gh.Client, tgts []tools.Tool, useJSON bool) error {
-	synced := autoSync(ctx, targetRepo, st, client, tgts, useJSON)
+func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) error {
+	synced := autoSync(ctx, targetRepo, st, client, targets, useJSON)
 	if useJSON {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"added":  results,
@@ -384,10 +384,10 @@ func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *
 }
 
 // autoSync runs a sync for the target registry after adding skills.
-func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, tgts []tools.Tool, useJSON bool) bool {
+func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) bool {
 	syncer := &sync.Syncer{
-		Client:  sync.WrapGitHubClient(client),
-		Tools: tgts,
+		Client: sync.WrapGitHubClient(client),
+		Tools:  targets,
 		Emit: func(msg any) {
 			if useJSON {
 				return
@@ -409,9 +409,7 @@ func autoSync(ctx context.Context, targetRepo string, st *state.State, client *g
 		fmt.Printf("\nsyncing %s...\n\n", targetRepo)
 	}
 	if err := syncer.Run(ctx, targetRepo, st); err != nil {
-		if !useJSON {
-			fmt.Fprintf(os.Stderr, "warning: sync failed: %v\nrun `scribe sync` to retry\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "warning: sync failed: %v\nrun `scribe sync` to retry\n", err)
 		return false
 	}
 	return true
@@ -420,15 +418,6 @@ func autoSync(ctx context.Context, targetRepo string, st *state.State, client *g
 // fetchRegistryManifest fetches a manifest, trying scribe.yaml first then
 // falling back to scribe.toml (converting TOML to the new format via migrate).
 func fetchRegistryManifest(ctx context.Context, client *gh.Client, owner, repo string) (*manifest.Manifest, error) {
-	raw, err := client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
-	if err == nil {
-		return manifest.Parse(raw)
-	}
-
-	raw, legacyErr := client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
-	if legacyErr != nil {
-		return nil, fmt.Errorf("fetch manifest: %w", err)
-	}
-
-	return migrate.Convert(raw)
+	m, _, err := manifest.FetchWithFallback(ctx, client, owner, repo, migrate.Convert)
+	return m, err
 }

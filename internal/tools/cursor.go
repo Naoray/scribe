@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +42,7 @@ func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
 	skillMDPath := filepath.Join(canonicalDir, "SKILL.md")
 	skillMD, err := os.ReadFile(skillMDPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("skill %q has no SKILL.md in store", skillName)
 		}
 		return nil, fmt.Errorf("read SKILL.md for %q: %w", skillName, err)
@@ -75,7 +77,7 @@ func (t CursorTool) Uninstall(skillName string) error {
 	}
 	mdcName := SlugifyRegistry(skillName) + ".mdc"
 	link := filepath.Join(workDir, ".cursor", "rules", mdcName)
-	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove cursor/%s: %w", skillName, err)
 	}
 	return nil

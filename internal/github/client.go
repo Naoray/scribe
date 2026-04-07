@@ -45,7 +45,9 @@ func NewClient(ctx context.Context, configToken string) *Client {
 }
 
 func resolveToken(configToken string) string {
-	if out, err := exec.Command("gh", "auth", "token").Output(); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
 		if token := strings.TrimSpace(string(out)); token != "" {
 			return token
 		}
@@ -299,7 +301,7 @@ func (c *Client) HasPushAccess(ctx context.Context, owner, repo string) (bool, e
 }
 
 // wrapErr produces user-friendly errors for common GitHub API failures.
-func wrapErr(err error, context string) error {
+func wrapErr(err error, operation string) error {
 	if err == nil {
 		return nil
 	}
@@ -307,22 +309,22 @@ func wrapErr(err error, context string) error {
 	if errors.As(err, &ghErr) {
 		switch ghErr.Response.StatusCode {
 		case http.StatusNotFound:
-			return fmt.Errorf("%s: not found (check the repo/path exists and you have access): %w", context, err)
+			return fmt.Errorf("%s: not found (check the repo/path exists and you have access): %w", operation, err)
 		case http.StatusUnauthorized, http.StatusForbidden:
 			if ghErr.Response.Header.Get("X-RateLimit-Remaining") == "0" {
 				reset := ghErr.Response.Header.Get("X-RateLimit-Reset")
-				return fmt.Errorf("%s: rate limit exceeded, resets at %s — set GITHUB_TOKEN for higher limits: %w", context, formatReset(reset), err)
+				return fmt.Errorf("%s: rate limit exceeded, resets at %s — set GITHUB_TOKEN for higher limits: %w", operation, formatReset(reset), err)
 			}
-			return fmt.Errorf("%s: authentication required — run `gh auth login` or set GITHUB_TOKEN: %w", context, err)
+			return fmt.Errorf("%s: authentication required — run `gh auth login` or set GITHUB_TOKEN: %w", operation, err)
 		}
 	}
-	return fmt.Errorf("%s: %w", context, err)
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
-func formatReset(unix string) string {
+func formatReset(unixTimestamp string) string {
 	var sec int64
-	if _, err := fmt.Sscan(unix, &sec); err != nil {
-		return unix
+	if _, err := fmt.Sscan(unixTimestamp, &sec); err != nil {
+		return unixTimestamp
 	}
 	return time.Unix(sec, 0).Format("15:04:05")
 }

@@ -7,17 +7,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var registryCmd = &cobra.Command{
-	Use:   "registry",
-	Short: "Manage connected skill registries",
-	RunE:  runRegistryList,
-	Args:  cobra.NoArgs,
-}
-
-func init() {
-	registryCmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	registryCmd.AddCommand(registryListCmd)
-	registryCmd.AddCommand(connectCmd) // connect lives under registry
+func newRegistryCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "registry",
+		Short: "Manage connected skill registries",
+		RunE:  runRegistryList,
+		Args:  cobra.NoArgs,
+	}
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	cmd.AddCommand(newRegistryListCommand())
+	cmd.AddCommand(newConnectCommand()) // connect lives under registry
+	cmd.AddCommand(newRegistryEnableCommand())
+	cmd.AddCommand(newRegistryDisableCommand())
+	return cmd
 }
 
 // resolveRegistry matches a user-provided registry string against connected repos.
@@ -61,4 +63,3 @@ func filterRegistries(flag string, repos []string) ([]string, error) {
 	}
 	return []string{resolved}, nil
 }
-

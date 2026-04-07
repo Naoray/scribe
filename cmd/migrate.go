@@ -29,20 +29,22 @@ var (
 	migBoxStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 2).BorderForeground(lipgloss.Color("#7C3AED"))
 )
 
-var migrateCmd = &cobra.Command{
-	Use:   "migrate [owner/repo]",
-	Short: "Convert a scribe.toml registry to scribe.yaml",
-	Long: `Fetches the existing scribe.toml from a registry, converts it to the
+func newMigrateCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate [owner/repo]",
+		Short: "Convert a scribe.toml registry to scribe.yaml",
+		Long: `Fetches the existing scribe.toml from a registry, converts it to the
 new scribe.yaml format, and pushes the change as a single commit
 (deleting scribe.toml and creating scribe.yaml).`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runMigrate,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runMigrate,
+	}
 }
 
 func runMigrate(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	var repo string
@@ -56,7 +58,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 
 	owner, repoName, err := manifest.ParseOwnerRepo(repo)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse registry %q: %w", repo, err)
 	}
 
 	ctx := cmd.Context()
@@ -82,12 +84,12 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 
 	converted, err := migrate.Convert(raw)
 	if err != nil {
-		return err
+		return fmt.Errorf("convert manifest: %w", err)
 	}
 
 	encoded, err := converted.Encode()
 	if err != nil {
-		return err
+		return fmt.Errorf("encode manifest: %w", err)
 	}
 
 	// Show preview — styled for TTY, plain YAML for pipes.

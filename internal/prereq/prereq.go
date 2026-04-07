@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Naoray/scribe/internal/config"
-	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/paths"
 )
 
 // AuthResult describes the GitHub authentication status.
@@ -72,7 +72,7 @@ func checkAuth(cfg *config.Config) AuthResult {
 }
 
 func checkDir() DirResult {
-	dir, err := state.Dir()
+	dir, err := paths.ScribeDir()
 	if err != nil {
 		return DirResult{OK: false, Path: "~/.scribe"}
 	}

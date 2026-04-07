@@ -2,11 +2,12 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Naoray/scribe/internal/paths"
@@ -86,7 +87,7 @@ func (s InstalledSkill) DisplayVersion() string {
 func Load() (*State, error) {
 	path, err := statePath()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve state path: %w", err)
 	}
 
 	// Ensure the state directory exists so the lockfile can be created.
@@ -101,7 +102,7 @@ func Load() (*State, error) {
 	defer unlockFile(lf)
 
 	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return &State{Installed: make(map[string]InstalledSkill)}, nil
 	}
 	if err != nil {
@@ -187,7 +188,7 @@ func namespaceKey(name string, registries []string) string {
 func (s *State) Save() error {
 	path, err := statePath()
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve state path: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
@@ -237,31 +238,3 @@ func statePath() (string, error) {
 	return paths.StatePath()
 }
 
-// Dir returns the path to the ~/.scribe directory.
-func Dir() (string, error) {
-	return paths.ScribeDir()
-}
-
-// lockFile acquires an advisory flock on the given path.
-// Use exclusive=true for writes, exclusive=false (shared) for reads.
-func lockFile(path string, exclusive bool) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	lockType := syscall.LOCK_SH
-	if exclusive {
-		lockType = syscall.LOCK_EX
-	}
-	if err := syscall.Flock(int(f.Fd()), lockType); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return f, nil
-}
-
-// unlockFile releases the advisory lock and closes the file.
-func unlockFile(f *os.File) {
-	syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	f.Close()
-}

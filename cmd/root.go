@@ -65,17 +65,19 @@ func init() {
 	rootCmd.Flags().Bool("json", false, "Output machine-readable JSON")
 
 	// connectCmd moved under registry — add hidden alias for backward compat
-	aliasConnect := *connectCmd
+	aliasConnect := newConnectCommand()
 	aliasConnect.Hidden = true
 	aliasConnect.Deprecated = "use 'scribe registry connect' instead"
-	rootCmd.AddCommand(&aliasConnect)
+	rootCmd.AddCommand(aliasConnect)
 
-	rootCmd.AddCommand(syncCmd)
-	rootCmd.AddCommand(listCmd)
-	rootCmd.AddCommand(addCmd)
-	rootCmd.AddCommand(createCmd)
-	rootCmd.AddCommand(guideCmd)
-	rootCmd.AddCommand(registryCmd)
-	rootCmd.AddCommand(migrateCmd)
-	rootCmd.AddCommand(newExplainCommand())
+	rootCmd.AddCommand(
+		newSyncCommand(),
+		newListCommand(),
+		newAddCommand(),
+		newCreateCommand(),
+		newGuideCommand(),
+		newRegistryCommand(),
+		newMigrateCommand(),
+		newExplainCommand(),
+	)
 }

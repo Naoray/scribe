@@ -7,6 +7,7 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -41,6 +42,16 @@ type Bag struct {
 	// ListTUI is injected by cmd/ to launch an interactive TUI for local skill list.
 	// If nil, falls back to static table output.
 	ListTUI func(skills []discovery.Skill) error
+
+	// Results populated by steps for cmd/ to render.
+	// List command results:
+	LocalSkills    []discovery.Skill               // populated when listing local skills
+	RegistryDiffs  map[string][]sync.SkillStatus   // repo → skill statuses (remote list)
+	MultiRegistry  bool                            // whether multiple registries are shown
+
+	// Registry list command results:
+	RegistryRepos  []string       // connected registries
+	RegistryCounts map[string]int // skills per registry
 
 	// Internal fields populated by steps
 	manifest *manifest.Manifest
