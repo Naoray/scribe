@@ -1,18 +1,29 @@
 # Storage Model Redesign & List TUI Overhaul
 
 **Date:** 2026-04-10
-**Status:** Draft
+**Status:** Draft (revised after counselor review + research)
 **Builds on:** 2026-04-06-mvp-design.md
 
 ## Summary
 
-Redesign the skill storage model from registry-namespaced directories to flat single-copy storage with multi-source tracking, local versioning, and modification protection. Fix 8 list TUI issues uncovered during real usage.
+Redesign skill storage from registry-namespaced directories to flat single-copy storage with local-first ownership, 3-way merge for upstream updates, content-hash modification detection, and version snapshots. Fix 8 list TUI issues uncovered during real usage.
 
 ## Motivation
 
-The current storage model creates `~/.scribe/skills/<registry-slug>/<skill-name>/` with symlinks at `~/.claude/skills/<registry-slug>/<skill-name>`. Claude Code only discovers skills one level deep in `~/.claude/skills/`, so nested skills are invisible — users don't get them in autocomplete. Additionally, the same skill appears twice in `scribe list` (qualified + bare name via legacy symlinks).
+**Claude can't discover nested skills.** The current storage model creates `~/.scribe/skills/<registry-slug>/<skill-name>/` with symlinks at `~/.claude/skills/<registry-slug>/<skill-name>`. Claude Code only scans one level deep in `~/.claude/skills/`, so nested skills are invisible — users don't get them in autocomplete. Skills also appear twice in `scribe list` (qualified + bare name via legacy symlinks).
 
-Users also modify skills locally (e.g., customizing `/recap`) and expect those modifications to survive `scribe sync`. The current SHA-based version comparison is not human-readable and provides no way to restore previous versions.
+**Local modifications get destroyed.** Users customize skills locally (e.g., tweaking `/recap`) and expect those changes to survive `scribe sync`. The current model has no modification detection or merge capability — sync silently overwrites everything.
+
+**Versions are meaningless.** Branch refs like `main` are not versions — they're just branch names that never change from the user's perspective. SHA hashes are opaque. Users need human-readable local revision numbers.
+
+## Core Principle: Local Machine Is Source of Truth
+
+Scribe manages skills for the developer's machine. Registries are distribution channels, not authorities. This means:
+
+- The developer's local copy is always authoritative
+- Registry sync is a pull mechanism, never an automatic overwrite
+- Local modifications are preserved by default, merged on conflict
+- The maintainer of a skill is the person who created it (determined by manifest metadata), not whoever has repo write access
 
 ---
 
@@ -29,10 +40,11 @@ Users also modify skills locally (e.g., customizing `/recap`) and expect those m
 
 ```
 ~/.scribe/skills/cleanup/
-  SKILL.md                    # current working copy
+  SKILL.md                    # current working copy (may be locally modified)
+  .scribe-base.md             # pristine copy from last sync (merge base)
   versions/
-    v1.md                     # snapshot before v2 was synced
-    v2.md                     # snapshot before v3 was synced
+    v1.md                     # rollback snapshot
+    v2.md
 ~/.claude/skills/cleanup      # flat symlink — Claude discovers this
 ```
 
@@ -42,16 +54,20 @@ Users also modify skills locally (e.g., customizing `/recap`) and expect those m
 - Symlinks to tool directories use bare names: `~/.claude/skills/<name>` → `~/.scribe/skills/<name>/`
 - State tracks which registries provide each skill (multi-source)
 - No registry-slug directories on disk
+- Reserved names blocked as skill names: `versions`, `.git`, `.DS_Store`
 
 ### Migration
 
 On first run after upgrade, migrate existing namespaced directories:
 1. For each `~/.scribe/skills/<slug>/<name>/`, move to `~/.scribe/skills/<name>/`
-2. If bare-name target already exists: compare content hashes — if identical, just delete the slug copy; if different, keep the newer one (by state timestamp)
+2. If bare-name target already exists: compare content hashes — if identical, delete the slug copy; if different, move the slug copy to a quarantine dir (`~/.scribe/migration-conflicts/<slug>-<name>/`) for manual review, log a warning
 3. Update symlinks in `~/.claude/skills/` and `~/.cursor/` to point to new flat paths
-4. Update state.json keys (strip slug prefix for skills that moved)
-5. Remove empty slug directories
-6. Package-type entries (with `install_cmd`/`update_cmd`) have no local files to move — only their state keys are migrated from qualified to bare names
+4. Remove stale registry-slug directories from tool dirs (e.g., `~/.claude/skills/Artistfy-hq/`)
+5. Update state.json keys (strip slug prefix for skills that moved)
+6. Remove empty slug directories from `~/.scribe/skills/`
+7. Package-type entries (with `install_cmd`/`update_cmd`) have no local files to move — only their state keys are migrated from qualified to bare names
+8. Add `schema_version: 2` to state.json to mark migration as complete (skip on future loads)
+9. Copy current `SKILL.md` to `.scribe-base.md` for each migrated skill (establishes merge base)
 
 ---
 
@@ -61,9 +77,10 @@ On first run after upgrade, migrate existing namespaced directories:
 
 ```json
 {
+  "schema_version": 2,
   "installed": {
     "cleanup": {
-      "local_version": 3,
+      "revision": 3,
       "installed_hash": "a1b2c3d4",
       "sources": [
         {
@@ -95,138 +112,229 @@ On first run after upgrade, migrate existing namespaced directories:
 | Field | Old | New |
 |-------|-----|-----|
 | Key | `Artistfy-hq/cleanup` (qualified) | `cleanup` (bare) |
-| `version` | Git ref string | Removed — replaced by `local_version` |
+| `version` | Git ref string | Removed — replaced by `revision` |
 | `commit_sha` | Single SHA | Removed — moved into `sources[].last_sha` |
 | `source` | Single source string | Removed — replaced by `sources[]` array |
-| `local_version` | N/A | Monotonic integer, bumped on each sync that changes content |
-| `installed_hash` | N/A | Content hash at time of last sync/install — used to detect local modifications |
+| `revision` | N/A | Monotonic integer, bumped on each sync that changes content |
+| `installed_hash` | N/A | SHA-256 of SKILL.md at time of last sync/install — detects local modifications |
 | `sources` | N/A | Array of registries that provide this skill |
+| `schema_version` | N/A | Top-level field for idempotent migrations |
+
+### Source lifecycle
+
+- When a registry is disconnected (`scribe registry disconnect`): remove that registry from all skills' `sources[]`. If a skill has no remaining sources, it becomes local-only (still installed, just untracked).
+- When a registry is synced and has a new skill: add source entry to existing skill or create new skill entry.
+- `sources[].last_sha` is internal bookkeeping for sync comparison — never displayed to users.
 
 ### Backward compatibility
 
-`state.Load()` already has migration logic (`parseAndMigrate`). Add a new migration step:
-- If key contains `/` and matches pattern `<slug>/<name>`: convert to bare-name key, populate `sources` from old `source` field, set `local_version: 1`, compute `installed_hash`
+`state.Load()` already has migration logic (`parseAndMigrate`). Add a new migration step gated by `schema_version < 2`:
+- If key contains `/` and matches pattern `<slug>/<name>`: convert to bare-name key, populate `sources` from old `source` field, set `revision: 1`, compute `installed_hash`
 
 ---
 
-## 3. Local Versioning
+## 3. Merge Base & 3-Way Merge
 
-### Version snapshots
+### The `.scribe-base.md` file
 
-Before `scribe sync` overwrites a skill's files:
-1. Copy current `SKILL.md` to `versions/v{N}.md` (where N = current `local_version`)
-2. Increment `local_version` to N+1
-3. Write new content as `SKILL.md`
-4. Update `installed_hash` to hash of new content
-
-### Directory layout
+Every synced skill stores a pristine copy of the last-synced SKILL.md as `.scribe-base.md` alongside the working copy. This enables 3-way merge when both local and upstream change:
 
 ```
 ~/.scribe/skills/cleanup/
-  SKILL.md              # current (v3)
-  scripts/deploy.sh     # multi-file skills: only SKILL.md is versioned
-  versions/
-    v1.md               # first synced version
-    v2.md               # second synced version
+  SKILL.md              ← working copy (may be locally modified)
+  .scribe-base.md       ← pristine from last sync (merge base)
 ```
 
-Only `SKILL.md` is versioned — auxiliary files (scripts, references) are not snapshotted. This keeps storage bounded. If a user needs full-directory snapshots, git is the right tool.
+- On fresh install: `SKILL.md` and `.scribe-base.md` are identical
+- On local modification: `SKILL.md` diverges, `.scribe-base.md` stays pristine
+- On upstream update (no local mods): both files are overwritten with new content
+- On upstream update (with local mods): 3-way merge triggered
+
+### 3-Way merge via `git merge-file`
+
+When upstream has a new version AND the skill has local modifications:
+
+```bash
+git merge-file SKILL.md .scribe-base.md /tmp/upstream-new.md
+```
+
+This produces a merged result in `SKILL.md` using Git's battle-tested merge algorithm:
+- **base** = `.scribe-base.md` (what the registry gave us last time)
+- **ours** = `SKILL.md` (current on disk, locally modified)
+- **theirs** = new upstream content (fetched from registry)
+
+### Merge outcomes
+
+| Result | Exit code | Action |
+|--------|-----------|--------|
+| Clean merge | 0 | Auto-apply. Update `.scribe-base.md` to upstream content. Show "merged cleanly" |
+| Conflict | 1 | Write conflict markers to `SKILL.md`. Prompt user: **[m]erge** (keep markers, resolve manually), **[r]eplace** (discard local, use upstream), **[s]kip** (keep local, don't update) |
+| Error | >1 | Show error, skip skill |
+
+### Conflict resolution
+
+After merge with conflicts, `SKILL.md` contains Git-style conflict markers:
+```
+<<<<<<< local
+Your customized instructions here
+=======
+Updated upstream instructions here
+>>>>>>> upstream
+```
+
+The skill is marked as `StatusConflicted` until resolved. User options:
+- Edit manually, remove markers → next sync detects clean state
+- `scribe resolve cleanup --ours` → keep local version
+- `scribe resolve cleanup --theirs` → use upstream version
+
+### Post-merge state update
+
+After successful merge or manual resolution:
+- Update `.scribe-base.md` to the new upstream content
+- Update `installed_hash` to hash of the resolved `SKILL.md`
+- Bump `revision`
+- Snapshot pre-merge version to `versions/`
+
+---
+
+## 4. Local Versioning & Rollback
+
+### Revision counter
+
+Each skill has a `revision` number — a local monotonic counter. It means "how many times the content changed on this machine." This is the only version number users see.
+
+- Branch refs (`main`) are not versions — they're metadata about where content came from
+- SHAs are internal bookkeeping — never shown to users
+- `revision` is bumped on: sync that changes content, manual restore, merge resolution
+
+### Display format
+
+- `rev 3` — clean, matches last sync
+- `rev 3*` — locally modified (hash differs from `installed_hash`)
+- `rev 3!` — conflicted (has unresolved merge markers)
+
+NOT `v3` — avoids confusion with semver.
+
+### Version snapshots
+
+Before content changes (sync, merge, restore):
+1. Copy current `SKILL.md` to `versions/rev-{N}.md` (where N = current `revision`)
+2. Bump `revision`
+3. Write new content
+
+### Retention
+
+Keep last 10 version snapshots per skill. On each new snapshot, delete oldest if count exceeds 10. Configurable via `config.yaml`:
+
+```yaml
+version_retention: 10    # default, 0 = unlimited
+```
 
 ### Restore
 
-`scribe restore cleanup v2` — copies `versions/v2.md` back to `SKILL.md`. Sets `installed_hash` to new content hash (so it's treated as "locally modified" and won't be overwritten on next sync).
-
-### Display
-
-`scribe list` shows version as `v3` (clean) or `v3*` (locally modified).
+`scribe restore cleanup rev-2` — copies `versions/rev-2.md` back to `SKILL.md`. Sets `installed_hash` to new content hash (treated as "locally modified" on next sync). Shows: "Restored rev 2. This skill will be preserved during future syncs unless you run `scribe sync --force`."
 
 ---
 
-## 4. Local Modification Protection
+## 5. Local Modification Protection
 
 ### Detection
 
-At sync time, for each skill that has a newer upstream version:
-1. Compute current content hash of `SKILL.md` on disk
+At sync time, for each skill:
+1. Compute SHA-256 of `SKILL.md` on disk
 2. Compare to `installed_hash` in state
 3. If they differ → skill was locally modified
 
-### Behavior
+### Sync behavior matrix
 
-| Scenario | Action |
-|----------|--------|
-| No local mods, upstream unchanged | Skip (current) |
-| No local mods, upstream newer | Update (snapshot old version, write new) |
-| Local mods, upstream unchanged | Skip (show "modified" status) |
-| Local mods, upstream newer | **Skip with warning** — "cleanup has local modifications, skipping. Use `scribe sync --force` to override." |
-| `--force` flag | Update anyway (still snapshots old version first) |
+| Local mods? | Upstream changed? | Action |
+|-------------|-------------------|--------|
+| No | No | Skip (status: current) |
+| No | Yes | Fast-forward: snapshot old, overwrite, update `.scribe-base.md` |
+| Yes | No | Skip (status: modified) |
+| Yes | Yes | **3-way merge** via `git merge-file` (see Section 3) |
 
-### New status: `StatusModified`
+No `--force` flag that blindly overwrites all. Instead, the merge flow always gives users control:
+- Clean merges auto-apply (safe)
+- Conflicts prompt for resolution (user decides)
+
+### New statuses
 
 Add to `sync.Status`:
 ```go
-StatusModified  Status = 4  // installed, locally modified
+StatusModified    Status = 4  // installed, locally modified, upstream unchanged
+StatusConflicted  Status = 5  // merge produced conflicts, needs resolution
 ```
-Display: icon `✎`, label `modified`, color blue `#3B82F6`.
+
+| Status | Icon | Label | Color |
+|--------|------|-------|-------|
+| `StatusModified` | `✎` | `modified` | blue `#3B82F6` |
+| `StatusConflicted` | `⚡` | `conflict` | orange `#F97316` |
 
 ---
 
-## 5. Collision Handling
+## 6. Collision Handling
 
 When two registries provide a skill with the same name:
 
-### During sync
+### Same content
 
-- All registries are checked. If the skill already exists locally, the source is added to `sources[]`
-- Content comparison: if both registries have identical content → no conflict, both tracked as sources
-- If content differs → use the version from whichever registry was synced most recently (by `last_synced` timestamp, not SHA)
-- Emit warning: "cleanup exists in both Artistfy/hq and sandorian/tools with different content — using Artistfy/hq version (synced more recently)"
+Both registries tracked as sources. No conflict. Skill shown once in list.
+
+### Different content
+
+**Block the install with an error.** Don't silently overwrite.
+
+```
+⚠ cleanup from sandorian/tools conflicts with existing cleanup from Artistfy/hq
+  Different content detected. Options:
+  - Rename one in its registry (cleanup → cleanup-files)
+  - Disconnect one registry (scribe registry disconnect sandorian/tools)
+  - Force replace (scribe sync --replace cleanup --from sandorian/tools)
+```
+
+Non-TTY: skip with error, never auto-resolve.
 
 ### In `scribe list`
 
-Show skill once. Detail pane shows all registries under "Sources" field:
+Show skill once. Detail pane shows all registries under "Sources":
 ```
 Sources   Artistfy/hq (main), sandorian/tools (v1.2.0)
 ```
 
-### Name collision with genuinely different skills
+---
 
-If `Artistfy/hq` has a `cleanup` that cleans code and `sandorian/tools` has a `cleanup` that cleans temp files — same name, different purpose. This is a genuine conflict. The warning during sync surfaces it. User resolves by:
-1. Renaming one skill in their registry (`cleanup` → `cleanup-files`)
-2. Or disconnecting one registry
+## 7. `WriteToStore` and `ClaudeTool.Install` Changes
 
-Scribe doesn't try to solve namespace collision automatically — it warns and uses the latest.
+### `WriteToStore`
+
+Drop `registrySlug` parameter. Skill goes directly to `~/.scribe/skills/<name>/`:
+
+```go
+func WriteToStore(skillName string, files []SkillFile) (string, error) {
+    // writes to ~/.scribe/skills/<skillName>/
+}
+```
+
+After writing, also write `.scribe-base.md` as a copy of `SKILL.md` (establishes merge base).
+
+### `ClaudeTool.Install`
+
+No code change needed — `skillName` is already bare in the new model. The syncer passes bare `sk.Name` instead of `qualifiedName`.
+
+### Syncer changes
+
+- State keys use bare names: `st.RecordInstall(sk.Name, ...)` not `st.RecordInstall(qualifiedName, ...)`
+- `WriteToStore(sk.Name, files)` not `WriteToStore(registrySlug, sk.Name, files)`
+- Source tracking: append to `sources[]` instead of storing single `source` string
 
 ---
 
-## 6. `ClaudeTool.Install` Change
+## 8. List TUI Fixes
 
-### Current
+### 8.1 Actions fix
 
-```go
-func (t ClaudeTool) Install(skillName, canonicalDir string) ([]string, error) {
-    link := filepath.Join(skillsDir, skillName)  // creates nested path for qualified names
-```
-
-### New
-
-```go
-func (t ClaudeTool) Install(skillName, canonicalDir string) ([]string, error) {
-    // Extract bare name — skillName is already bare in the new model
-    link := filepath.Join(skillsDir, skillName)
-```
-
-Since the storage model is now flat, `skillName` passed to `Install` is already bare. The change happens in the syncer: `WriteToStore` writes to `~/.scribe/skills/<name>/` (no slug prefix), and the syncer passes bare `sk.Name` instead of `qualifiedName` to both `WriteToStore` and `Tool.Install`. State keys also use bare names.
-
-`WriteToStore` signature changes: drop the `registrySlug` parameter. The skill goes directly into `~/.scribe/skills/<name>/`.
-
----
-
-## 7. List TUI Fixes
-
-### 7.1 Actions fix
-
-`listRow` gains a new field:
+`listRow` gains new fields:
 
 ```go
 type listRow struct {
@@ -236,7 +344,7 @@ type listRow struct {
 }
 ```
 
-`actionsForRow` logic:
+`actionsForRow` replaces current hardcoded-disabled logic:
 
 | Action | Enabled when |
 |--------|-------------|
@@ -246,7 +354,7 @@ type listRow struct {
 | open in editor | `row.Local != nil && row.Local.LocalPath != ""` |
 | add to category | Always disabled (coming soon) |
 
-### 7.2 Update action (single-skill sync)
+### 8.2 Update action (single-skill sync)
 
 When user selects "update" on an outdated skill:
 
@@ -254,21 +362,24 @@ When user selects "update" on an outdated skill:
 2. Create a `tea.Cmd` that:
    - Creates a `Syncer` with the bag's client, provider, and tools
    - Calls `syncer.RunWithDiff(ctx, registry, []SkillStatus{selectedSkill}, state)` — single-entry diff
-   - Returns `updateDoneMsg{name, err}`
-3. On success: update the row's status to `StatusCurrent`, show "Updated!" for 1 second
-4. On error: show error message in status area
+   - Handles merge flow (3-way merge if local mods exist)
+   - Returns `updateDoneMsg{name, err, merged, conflicted}`
+3. On success (clean): update row status to `StatusCurrent`, show "Updated!" for 1 second
+4. On success (merged): show "Updated! (merged with local changes)"
+5. On conflict: show "Merge conflict — resolve in editor", update status to `StatusConflicted`
+6. On error: show error message in status area
 
 New messages:
 ```go
-type updateStartMsg struct{ name string }
-type updateDoneMsg  struct{ name string; err error }
+type updateStartMsg    struct{ name string }
+type updateDoneMsg     struct{ name string; err error; merged bool; conflicted bool }
 ```
 
-### 7.3 Skill excerpt in detail pane
+### 8.3 Skill excerpt in detail pane
 
-Read first ~8 lines of SKILL.md body (after frontmatter) and display as dimmed text in the bottom-right quadrant of the detail pane.
+Read first ~8 lines of SKILL.md body (after frontmatter) and display as dimmed text in the bottom section of the detail pane.
 
-Add `Excerpt string` to `listRow`, populated during `buildRows` from a new `readSkillExcerpt(localPath string) string` function.
+Add `Excerpt string` to `listRow`, populated during `buildRows` (cached, not re-read on every render).
 
 Layout change for detail pane (right side):
 ```
@@ -277,7 +388,7 @@ Layout change for detail pane (right side):
 │ Clean up stale code...  │  ← description
 │─────────────────────────│
 │ Status   current        │  ← metadata
-│ Version  v3             │
+│ Version  rev 3          │
 │ Sources  Artistfy/hq    │
 │ Path     ~/.scribe/...  │
 │─────────────────────────│
@@ -292,7 +403,7 @@ Layout change for detail pane (right side):
 └─────────────────────────┘
 ```
 
-### 7.4 Search visibility
+### 8.4 Search visibility
 
 Always show search indicator below the header:
 
@@ -304,23 +415,25 @@ Update help text: `↑↓ navigate · /search · enter detail · q quit`
 
 The `/` prefix echoes the slash-command convention users already know.
 
-### 7.5 Alt screen removal
+### 8.5 Alt screen removal
 
-Remove `v.AltScreen = true` from `View()`. The TUI renders inline below the command that was typed.
+Remove `v.AltScreen = true` from `View()`. The TUI renders inline below the command that was typed. Terminal history is preserved — user can scroll up to see what they typed before.
 
 Height calculation: use `min(terminalHeight, contentNeeded)` so small skill lists don't waste vertical space. The TUI should only take as much space as it needs.
 
-### 7.6 Cursor overflow fix
+Note: TUI output stays in the terminal scroll buffer after exit. This is intentional — `scribe list` behaves like `ls`, not like `vim`.
+
+### 8.6 Cursor overflow fix
 
 **Problem:** In full-width view, 1 item is focusable but hidden above the visible area. In split view, ~3 items are hidden behind the header.
 
-**Root cause:** `contentHeight()` returns a height that doesn't match what's actually visible. The header takes 2 lines, but group headers within the content area also consume lines — and `ensureCursorVisible` doesn't account for them.
+**Root cause:** `contentHeight()` subtracts fixed constants that don't match actual chrome size.
 
 **Fix:**
-1. Audit `contentHeight()` — currently subtracts `headerHeight=2 + footerHeight=3`. With the new search bar always visible, footer is 3 lines (blank + summary + help) and header is 3 lines (title + divider + search). Adjust constants.
-2. In `ensureCursorVisible`, count the group headers between `offset` and `cursor` as consumed lines, reducing the effective visible window.
+1. Recalculate `contentHeight()` — with the new always-visible search bar, header is 3 lines (title + divider + search), footer is 3 lines (blank + summary + help). Total chrome = 6 lines.
+2. In `ensureCursorVisible`, count group headers between `offset` and the visible window end as consumed lines. Algorithm: `visibleDataRows = contentHeight - groupHeadersInViewport(offset, contentHeight)`. Cursor must stay within `visibleDataRows`.
 
-### 7.7 Editor configurable
+### 8.7 Editor configurable
 
 Add `editor` field to config:
 
@@ -332,50 +445,76 @@ Resolution order: `config.editor` → `$VISUAL` → `$EDITOR` → `vi`
 
 Action label: **"Open in Editor"** (not "open in $EDITOR").
 
-New command: `scribe config set editor cursor` — writes the editor preference to `~/.scribe/config.yaml`.
+New command: `scribe config set editor cursor` — writes the editor preference to `~/.scribe/config.yaml`. This introduces the `scribe config` subcommand surface.
 
 ---
 
-## 8. Discovery Changes
+## 9. Discovery Changes
 
 ### `discovery.OnDisk` — flat scan
 
 Since skills are now flat in `~/.scribe/skills/`, the scan simplifies:
 - `~/.scribe/skills/<name>/` — every directory with SKILL.md is a skill (no registry-slug nesting)
-- `~/.claude/skills/<name>/` — symlinks pointing back to scribe store (deduplicate by resolved path)
-- Dedup by resolved physical path (`filepath.EvalSymlinks`), not by name
+- `~/.claude/skills/<name>/` — symlinks pointing back to scribe store (deduplicate by resolved path via `filepath.EvalSymlinks`)
+- Skip reserved names: `versions`, `.git`, `.DS_Store`
 
 ### Detecting local modifications
 
-`OnDisk` can compute current content hash and compare against `installed_hash` in state. Add `Modified bool` field to `discovery.Skill`.
+`OnDisk` computes current content hash of SKILL.md and compares against `installed_hash` in state. Add fields to `discovery.Skill`:
+
+```go
+type Skill struct {
+    // ... existing fields ...
+    Modified   bool   // SKILL.md hash differs from installed_hash
+    Conflicted bool   // SKILL.md contains unresolved merge markers
+    Revision   int    // from state
+}
+```
 
 ---
 
-## 9. Scope & Sequencing
+## 10. Scope & Sequencing
 
-This spec covers two concerns that are coupled through the dedup fix:
-
-**Phase 1: Storage model + state migration** (must go first)
+**Phase 1: Storage model + merge engine** (must go first)
 - Flat storage directories
-- State schema migration (qualified → bare keys, add `sources`, `local_version`, `installed_hash`)
-- `ClaudeTool.Install` bare-name symlinks
-- Discovery scan simplification
-- Migration of existing namespaced directories
+- `.scribe-base.md` merge base files
+- State schema migration (qualified → bare keys, add `sources`, `revision`, `installed_hash`, `schema_version`)
+- `WriteToStore` signature change (drop `registrySlug`)
+- `ClaudeTool.Install` bare-name symlinks (cleanup of old nested dirs)
+- Discovery scan simplification + modification detection
+- Migration of existing namespaced directories (with quarantine for conflicts)
+- Local modification protection during sync (hash comparison)
+- 3-way merge via `git merge-file`
+- Version snapshot on update + retention cap
+- Collision blocking (different content, same name)
 
-**Phase 2: List TUI fixes** (depends on Phase 1 for dedup and actions)
+**Phase 2: List TUI fixes** (depends on Phase 1 for dedup, actions, and status)
 - All 7 TUI fixes (actions, update, excerpt, search, alt screen, cursor, editor)
-- Local modification protection during sync
-- Version snapshot on update
+- `StatusModified` and `StatusConflicted` display
+- Single-skill update with merge support
+- `scribe config set editor` command
 
-**Phase 3: New commands** (can follow independently)
-- `scribe restore <skill> <version>`
-- `scribe config set editor <name>`
+**Phase 3: Resolution & restore commands** (can follow independently)
+- `scribe restore <skill> <revision>`
+- `scribe resolve <skill> [--ours|--theirs]`
+
+---
+
+## 11. Contradictions with MVP Spec (to reconcile)
+
+1. **`scribe remove` uses qualified names in MVP spec.** With bare keys, remove takes bare names: `scribe remove cleanup`. To disconnect one source without removing the skill: `scribe registry disconnect <repo>` (removes that registry from all skills' sources).
+
+2. **`WriteToStore` signature.** MVP spec says `WriteToStore(registrySlug, skillName, files)`. This spec drops `registrySlug`. MVP spec must be updated.
+
+3. **Canonical store path.** MVP spec says `~/.scribe/skills/<registry-slug>/<name>/`. This spec says `~/.scribe/skills/<name>/`. MVP spec must be updated.
 
 ---
 
 ## Out of scope
 
-- Publishing updates back to multiple registries (`scribe registry push`) — post-MVP
-- Full-directory version snapshots (only SKILL.md is versioned)
-- Automatic conflict resolution for genuinely different skills with same name
-- Registry priority ordering in config (use sync-order for now, add explicit priority later if needed)
+- Publishing updates back to registries (`scribe registry push`) — post-MVP
+- Full-directory version snapshots (only SKILL.md is versioned for now)
+- Project-level skill scoping (`.scribe/` in project dir to limit which skills are active) — future, useful for reducing token waste
+- Registry priority ordering in config — not needed since collisions block rather than auto-resolve
+- `rerere`-style conflict resolution replay — future optimization
+- Maintainer push flow — post-MVP
