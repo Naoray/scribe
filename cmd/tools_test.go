@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -19,17 +20,17 @@ func TestFormatToolsList(t *testing.T) {
 		t.Fatal("expected non-empty output")
 	}
 	// Should contain tool names.
-	if !containsStr(out, "claude") {
+	if !strings.Contains(out, "claude") {
 		t.Errorf("output should contain 'claude', got: %s", out)
 	}
-	if !containsStr(out, "cursor") {
+	if !strings.Contains(out, "cursor") {
 		t.Errorf("output should contain 'cursor', got: %s", out)
 	}
 	// Should contain status indicators.
-	if !containsStr(out, "enabled") {
+	if !strings.Contains(out, "enabled") {
 		t.Errorf("output should contain 'enabled', got: %s", out)
 	}
-	if !containsStr(out, "disabled") {
+	if !strings.Contains(out, "disabled") {
 		t.Errorf("output should contain 'disabled', got: %s", out)
 	}
 }
@@ -64,20 +65,8 @@ func TestFormatToolsListJSON(t *testing.T) {
 
 func TestFormatToolsListEmpty(t *testing.T) {
 	out := formatToolsList(nil)
-	if !containsStr(out, "No tools detected") {
+	if !strings.Contains(out, "No tools detected") {
 		t.Errorf("expected 'No tools detected' message, got: %s", out)
 	}
 }
 
-func containsStr(s, substr string) bool {
-	return len(s) >= len(substr) && searchStr(s, substr)
-}
-
-func searchStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

@@ -18,8 +18,17 @@ func newToolsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tools",
 		Short: "Manage AI tool targets for skill installation",
-		Args:  cobra.NoArgs,
-		RunE:  runToolsList,
+		Long: `Show detected AI tools and their enabled/disabled status.
+
+Use enable/disable to control which tools receive skill installations
+during sync.
+
+Examples:
+  scribe tools                # list tools and status
+  scribe tools enable cursor  # enable a tool
+  scribe tools disable cursor # disable a tool`,
+		Args: cobra.NoArgs,
+		RunE: runToolsList,
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.AddCommand(newToolsEnableCommand())
