@@ -79,5 +79,6 @@ func init() {
 		newRegistryCommand(),
 		newMigrateCommand(),
 		newExplainCommand(),
+		newToolsCommand(),
 	)
 }
