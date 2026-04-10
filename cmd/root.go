@@ -64,20 +64,33 @@ func init() {
 	rootCmd.RunE = runHub
 	rootCmd.Flags().Bool("json", false, "Output machine-readable JSON")
 
-	// connectCmd moved under registry — add hidden alias for backward compat
+	// Backward-compat aliases: hidden + deprecated, point to registry subcommands.
 	aliasConnect := newConnectCommand()
 	aliasConnect.Hidden = true
 	aliasConnect.Deprecated = "use 'scribe registry connect' instead"
 	rootCmd.AddCommand(aliasConnect)
 
+	aliasMigrate := newMigrateCommand()
+	aliasMigrate.Hidden = true
+	aliasMigrate.Deprecated = "use 'scribe registry migrate' instead"
+	rootCmd.AddCommand(aliasMigrate)
+
+	// Top-level: daily skill management.
 	rootCmd.AddCommand(
-		newSyncCommand(),
 		newListCommand(),
 		newAddCommand(),
-		newCreateCommand(),
+		newRemoveCommand(),
+		newSyncCommand(),
+		newToolsCommand(),
 		newGuideCommand(),
-		newRegistryCommand(),
-		newMigrateCommand(),
+	)
+
+	// Registry subcommand: administration & publishing.
+	rootCmd.AddCommand(newRegistryCommand())
+
+	// Other.
+	rootCmd.AddCommand(
+		newCreateCommand(),
 		newExplainCommand(),
 	)
 }

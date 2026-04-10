@@ -29,10 +29,17 @@ type RegistryConfig struct {
 	Writable bool   `yaml:"writable,omitempty"`
 }
 
+// ToolConfig describes an AI tool target for skill installation.
+type ToolConfig struct {
+	Name    string `yaml:"name"`
+	Enabled bool   `yaml:"enabled"`
+}
+
 // Config holds user preferences from ~/.scribe/config.yaml.
 type Config struct {
 	Registries []RegistryConfig `yaml:"registries,omitempty"`
 	Token      string           `yaml:"token,omitempty"`
+	Tools      []ToolConfig     `yaml:"tools,omitempty"`
 }
 
 // TeamRepos returns the list of enabled registry repos.
