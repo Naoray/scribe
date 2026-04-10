@@ -91,3 +91,54 @@ func TestDetectMethod(t *testing.T) {
 		})
 	}
 }
+
+func TestNeedsUpgrade(t *testing.T) {
+	tests := []struct {
+		name        string
+		current     string
+		latestTag   string
+		wantSkip    bool // dev build — skip entirely
+		wantUpgrade bool
+	}{
+		{
+			name:        "dev build skips upgrade",
+			current:     "dev",
+			latestTag:   "v0.5.0",
+			wantSkip:    true,
+			wantUpgrade: false,
+		},
+		{
+			name:        "same version, no upgrade",
+			current:     "0.5.0",
+			latestTag:   "v0.5.0",
+			wantSkip:    false,
+			wantUpgrade: false,
+		},
+		{
+			name:        "older version, needs upgrade",
+			current:     "0.4.0",
+			latestTag:   "v0.5.0",
+			wantSkip:    false,
+			wantUpgrade: true,
+		},
+		{
+			name:        "tag without v prefix",
+			current:     "0.5.0",
+			latestTag:   "0.5.0",
+			wantSkip:    false,
+			wantUpgrade: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skip, upgrade := NeedsUpgrade(tt.current, tt.latestTag)
+			if skip != tt.wantSkip {
+				t.Errorf("NeedsUpgrade() skip = %v, want %v", skip, tt.wantSkip)
+			}
+			if upgrade != tt.wantUpgrade {
+				t.Errorf("NeedsUpgrade() upgrade = %v, want %v", upgrade, tt.wantUpgrade)
+			}
+		})
+	}
+}

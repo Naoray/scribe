@@ -75,3 +75,16 @@ func isHomebrewPath(path string) bool {
 		strings.Contains(path, "/opt/homebrew/") ||
 		strings.Contains(path, "/linuxbrew/")
 }
+
+// NeedsUpgrade compares the current version against the latest release tag.
+// Returns (isDevBuild, needsUpgrade).
+// Dev builds return (true, false) — caller should skip upgrade.
+// Equal versions return (false, false).
+// Different versions return (false, true).
+func NeedsUpgrade(current, latestTag string) (isDevBuild bool, needsUpgrade bool) {
+	if current == "dev" || current == "" {
+		return true, false
+	}
+	latest := strings.TrimPrefix(latestTag, "v")
+	return false, current != latest
+}
