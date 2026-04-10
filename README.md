@@ -3,7 +3,7 @@
 Keep your team's AI coding agent skills in sync. One command, no copy-paste.
 
 ```bash
-scribe connect ArtistfyHQ/team-skills
+scribe registry connect ArtistfyHQ/team-skills
 scribe sync
 ```
 
@@ -11,7 +11,7 @@ scribe sync
 
 AI coding agents like Claude Code and Cursor work better with "skills" — markdown instruction files that teach the agent how to do specific tasks (code reviews, deployments, Laravel patterns, etc.). If you've built a good set of skills, sharing them with teammates currently means Slack links and manual file copying. Nobody knows if they're on the latest version. The person who just joined has no idea what they're missing.
 
-Scribe fixes this. You put your team's skills in a GitHub repo with a `scribe.yaml` manifest (or legacy `scribe.toml`), teammates run `scribe connect`, and `scribe sync` keeps everyone up to date automatically. Works with Claude Code and Cursor from the same manifest.
+Scribe fixes this. You put your team's skills in a GitHub repo with a `scribe.yaml` manifest (or legacy `scribe.toml`), teammates run `scribe registry connect`, and `scribe sync` keeps everyone up to date automatically. Works with Claude Code and Cursor from the same manifest.
 
 ## Install
 
@@ -67,11 +67,11 @@ go install github.com/Naoray/scribe/cmd/scribe@latest
 
 ```bash
 # 1. Connect to your team's skills repo (one time)
-scribe connect ArtistfyHQ/team-skills
+scribe registry connect ArtistfyHQ/team-skills
 
 # 2. That's it — skills are now installed and you stay in sync
 scribe sync        # run again anytime to pick up new skills
-scribe list        # see what's installed and what's outdated
+scribe list        # see what's installed
 ```
 
 ### For the team lead setting up the shared repo
@@ -79,9 +79,9 @@ scribe list        # see what's installed and what's outdated
 **Option A — Let Scribe scaffold it (recommended):**
 
 ```bash
-scribe create registry
+scribe registry create
 # Interactive prompts for team name, GitHub org, repo name, visibility
-# Creates the repo, pushes scribe.toml + README, and connects automatically
+# Creates the repo, pushes scribe.yaml + README, and connects automatically
 ```
 
 **Option B — Manual setup:**
@@ -115,22 +115,38 @@ ArtistfyHQ/team-skills/
       SKILL.md       ← your skill file
 ```
 
-4. Tell your teammate to run `scribe connect ArtistfyHQ/team-skills`
+4. Tell your teammate to run `scribe registry connect ArtistfyHQ/team-skills`
 
 ## Commands
 
+### Daily Use
+
 | Command | What it does |
 |---|---|
-| `scribe connect <owner/repo>` | Connect to a team skills repo and run an initial sync |
-| `scribe sync` | Install missing skills, update outdated ones |
-| `scribe list` | Show all skills: what's installed, what's outdated, what's missing |
-| `scribe add [name]` | Add a skill to the team registry (interactive picker or by name) |
-| `scribe create registry` | Scaffold a new team skills registry on GitHub and connect to it |
+| `scribe list` | Show all skills on this machine |
+| `scribe add [query]` | Find and install skills from registries |
+| `scribe remove <skill>` | Remove a skill from this machine |
+| `scribe sync` | Pull updates from connected registries |
+| `scribe tools` | List detected AI tools, enable/disable |
 | `scribe explain <skill>` | AI-powered skill explanation (or `--raw` for rendered SKILL.md) |
-| `scribe guide` | Interactive onboarding — walks through connect, sync, and add |
+
+### Registry Management
+
+| Command | What it does |
+|---|---|
+| `scribe registry connect <repo>` | Connect to a skill registry |
+| `scribe registry create` | Scaffold a new registry repo on GitHub |
+| `scribe registry add [name]` | Share a local skill to a registry |
 | `scribe registry list` | Show connected registries with skill counts |
 | `scribe registry enable/disable` | Enable or disable a connected registry |
-| `scribe migrate [registry]` | Convert a `scribe.toml` registry to `scribe.yaml` |
+| `scribe registry migrate` | Convert a `scribe.toml` registry to `scribe.yaml` |
+
+### Other
+
+| Command | What it does |
+|---|---|
+| `scribe guide` | Interactive setup guide |
+| `scribe --version` | Show version |
 
 ### scribe list output
 
@@ -174,7 +190,7 @@ Private GitHub repos work if you're authenticated with the `gh` CLI — Scribe p
 gh auth login   # if not already done
 ```
 
-Auth fallback chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/config.toml` → unauthenticated (public repos only).
+Auth fallback chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/config.yaml` → unauthenticated (public repos only).
 
 ## Agent-friendly
 
@@ -206,9 +222,9 @@ Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specificati
 
 ```
 ~/.scribe/
-  config.toml    # which team repos you're connected to
+  config.yaml    # connected registries, tool settings
   state.json     # what's installed, last sync time
-  skills/        # canonical skill store (symlinked by targets)
+  skills/        # canonical skill store (symlinked by tools)
 ```
 
 ## Requirements
@@ -221,18 +237,15 @@ Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specificati
 
 **What works today:**
 - `scribe sync` — full sync loop (diff, download, install, update)
-- `scribe list` — shows installed skills and their status vs team loadout
-- Claude Code and Cursor install targets
+- `scribe list` — TUI for browsing installed skills, grouped by registry
+- `scribe add` — browse and install skills from connected registries
+- `scribe remove` — uninstall skills from the machine
+- `scribe tools` — list and toggle AI tools (Claude Code, Cursor)
+- `scribe registry connect/create/add` — manage team registries
 - Private repo support via `gh auth token`
-- `--json` flag for CI/agent use
-
-- `scribe connect` — connect to a team repo with interactive setup
-- `scribe create registry` — scaffold a new team skills registry on GitHub
-- `scribe add` — add local or remote skills to your team registry
+- `--json` flag on all commands for CI/agent use
 
 **Coming later:**
-- Community registries — connect to any GitHub repo with SKILL.md files
-- Package support — third-party tools with custom install/update commands
 - `scribe upgrade` — self-update command
 - Lockfile (`scribe.lock`) — pin exact versions across the team
 
