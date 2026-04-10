@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,9 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
+
+// errAmbiguousSkill is returned when a bare skill name matches multiple installed keys.
+var errAmbiguousSkill = errors.New("ambiguous skill")
 
 func newRemoveCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -65,7 +69,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	key, err := resolveRemoveTarget(input, installedKeys)
 	if err != nil {
 		// If ambiguous and TTY, show a picker.
-		if isTTY && !useJSON && strings.Contains(err.Error(), "ambiguous") {
+		if isTTY && !useJSON && errors.Is(err, errAmbiguousSkill) {
 			key, err = pickRemoveTarget(input, installedKeys)
 			if err != nil {
 				return err
@@ -180,13 +184,7 @@ func resolveRemoveTarget(input string, installedKeys []string) (string, error) {
 	}
 
 	// Bare name match — look at the part after the slash.
-	var matches []string
-	for _, k := range installedKeys {
-		parts := strings.SplitN(k, "/", 2)
-		if len(parts) == 2 && parts[1] == input {
-			matches = append(matches, k)
-		}
-	}
+	matches := findBareNameMatches(input, installedKeys)
 
 	switch len(matches) {
 	case 1:
@@ -194,19 +192,14 @@ func resolveRemoveTarget(input string, installedKeys []string) (string, error) {
 	case 0:
 		return "", fmt.Errorf("%q is not installed", input)
 	default:
-		return "", fmt.Errorf("ambiguous skill %q — matches:\n  %s\nSpecify the full key to remove", input, strings.Join(matches, "\n  "))
+		return "", fmt.Errorf("%w %q — matches: %s\nSpecify the full name, e.g.: scribe remove %s",
+			errAmbiguousSkill, input, strings.Join(matches, ", "), matches[0])
 	}
 }
 
 // pickRemoveTarget shows an interactive picker for ambiguous skill names.
 func pickRemoveTarget(input string, installedKeys []string) (string, error) {
-	var matches []string
-	for _, k := range installedKeys {
-		parts := strings.SplitN(k, "/", 2)
-		if len(parts) == 2 && parts[1] == input {
-			matches = append(matches, k)
-		}
-	}
+	matches := findBareNameMatches(input, installedKeys)
 
 	if len(matches) == 0 {
 		return "", fmt.Errorf("%q is not installed", input)
@@ -227,6 +220,19 @@ func pickRemoveTarget(input string, installedKeys []string) (string, error) {
 		return "", err
 	}
 	return selected, nil
+}
+
+// findBareNameMatches returns all installed keys whose bare name (after the slash)
+// matches input case-insensitively.
+func findBareNameMatches(input string, keys []string) []string {
+	var matches []string
+	for _, k := range keys {
+		parts := strings.SplitN(k, "/", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[1], input) {
+			matches = append(matches, k)
+		}
+	}
+	return matches
 }
 
 // findManagingRegistries returns registry repos that manage the given skill key.
