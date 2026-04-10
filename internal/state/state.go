@@ -212,24 +212,26 @@ func parseAndMigrate(data []byte) (*State, error) {
 			if revision == 0 {
 				revision = 1
 			}
+			// InstalledHash left empty — computed during directory migration when files are moved.
 			installedHash := ls.InstalledHash
 			if len(ls.Sources) > 0 {
 				sources = ls.Sources
 			}
 
-			skill := InstalledSkill{
-				Revision:      revision,
-				InstalledHash: installedHash,
-				Sources:       sources,
-				InstalledAt:   ls.InstalledAt,
-				Tools:         ls.Tools,
-				Paths:         ls.Paths,
-				Type:          ls.Type,
-				InstallCmd:    ls.InstallCmd,
-				UpdateCmd:     ls.UpdateCmd,
-				CmdHash:       ls.CmdHash,
-				Approval:      ls.Approval,
-				ApprovedAt:    ls.ApprovedAt,
+			skill := legacyToSkill(ls)
+			skill.Revision = revision
+			skill.InstalledHash = installedHash
+			skill.Sources = sources
+
+			// If bareName already exists (two qualified keys collapsed),
+			// merge Sources from both entries and keep the newer one as base.
+			if existing, ok := s.Installed[bareName]; ok {
+				if existing.InstalledAt.After(skill.InstalledAt) {
+					existing.Sources = appendUniqueSources(existing.Sources, skill.Sources)
+					skill = existing
+				} else {
+					skill.Sources = appendUniqueSources(skill.Sources, existing.Sources)
+				}
 			}
 
 			s.Installed[bareName] = skill
@@ -239,21 +241,7 @@ func parseAndMigrate(data []byte) (*State, error) {
 	} else {
 		// Already v2 — pass through unchanged
 		for _, e := range entries {
-			ls := e.skill
-			skill := InstalledSkill{
-				Revision:      ls.Revision,
-				InstalledHash: ls.InstalledHash,
-				Sources:       ls.Sources,
-				InstalledAt:   ls.InstalledAt,
-				Tools:         ls.Tools,
-				Paths:         ls.Paths,
-				Type:          ls.Type,
-				InstallCmd:    ls.InstallCmd,
-				UpdateCmd:     ls.UpdateCmd,
-				CmdHash:       ls.CmdHash,
-				Approval:      ls.Approval,
-				ApprovedAt:    ls.ApprovedAt,
-			}
+			skill := legacyToSkill(e.skill)
 			s.Installed[e.key] = skill
 		}
 	}
@@ -327,6 +315,41 @@ func (s *State) RecordInstall(name string, skill InstalledSkill) {
 // Remove deletes a skill from state (does not touch disk files).
 func (s *State) Remove(name string) {
 	delete(s.Installed, name)
+}
+
+// legacyToSkill converts a legacyInstalledSkill to an InstalledSkill,
+// carrying over all fields that map directly.
+func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
+	return InstalledSkill{
+		Revision:      ls.Revision,
+		InstalledHash: ls.InstalledHash,
+		Sources:       ls.Sources,
+		InstalledAt:   ls.InstalledAt,
+		Tools:         ls.Tools,
+		Paths:         ls.Paths,
+		Type:          ls.Type,
+		InstallCmd:    ls.InstallCmd,
+		UpdateCmd:     ls.UpdateCmd,
+		CmdHash:       ls.CmdHash,
+		Approval:      ls.Approval,
+		ApprovedAt:    ls.ApprovedAt,
+	}
+}
+
+// appendUniqueSources appends sources from extra into base, skipping
+// any that share the same Registry as an existing entry.
+func appendUniqueSources(base, extra []SkillSource) []SkillSource {
+	seen := make(map[string]bool, len(base))
+	for _, s := range base {
+		seen[s.Registry] = true
+	}
+	for _, s := range extra {
+		if !seen[s.Registry] {
+			base = append(base, s)
+			seen[s.Registry] = true
+		}
+	}
+	return base
 }
 
 func statePath() (string, error) {

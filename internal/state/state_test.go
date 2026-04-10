@@ -702,6 +702,68 @@ func TestStateToolsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMigrationBareKeyCollisionMergesSources(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+
+	// Two qualified keys that collapse to the same bare name "deploy".
+	// org-a's entry is newer, so it should be the base with both sources merged.
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"installed": {
+			"org-a/deploy": {
+				"version": "v2.0.0",
+				"source": "github:org-a/skills@v2.0.0",
+				"installed_at": "2026-04-01T00:00:00Z",
+				"tools": ["claude"],
+				"paths": ["/test/a"],
+				"registries": ["org-a/skills"]
+			},
+			"org-b/deploy": {
+				"version": "v1.0.0",
+				"source": "github:org-b/tools@v1.0.0",
+				"installed_at": "2026-03-01T00:00:00Z",
+				"tools": ["cursor"],
+				"paths": ["/test/b"],
+				"registries": ["org-b/tools"]
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Should have exactly one "deploy" key, not two.
+	if len(s.Installed) != 1 {
+		t.Fatalf("expected 1 installed skill, got %d: %v", len(s.Installed), installedKeys(s))
+	}
+
+	skill, ok := s.Installed["deploy"]
+	if !ok {
+		t.Fatalf("expected bare key 'deploy', got keys: %v", installedKeys(s))
+	}
+
+	// Both sources should be present.
+	if len(skill.Sources) != 2 {
+		t.Fatalf("expected 2 sources (merged), got %d: %v", len(skill.Sources), skill.Sources)
+	}
+
+	registries := map[string]bool{}
+	for _, src := range skill.Sources {
+		registries[src.Registry] = true
+	}
+	if !registries["org-a/skills"] {
+		t.Error("expected org-a/skills in merged sources")
+	}
+	if !registries["org-b/tools"] {
+		t.Error("expected org-b/tools in merged sources")
+	}
+}
+
 // installedKeys is a test helper that returns the keys of the Installed map.
 func installedKeys(s *state.State) []string {
 	keys := make([]string, 0, len(s.Installed))
