@@ -81,8 +81,11 @@ func init() {
 		newAddCommand(),
 		newRemoveCommand(),
 		newSyncCommand(),
+		newResolveCommand(),
+		newRestoreCommand(),
 		newToolsCommand(),
 		newGuideCommand(),
+		newConfigCommand(),
 	)
 
 	// Registry subcommand: administration & publishing.
