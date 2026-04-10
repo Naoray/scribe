@@ -267,14 +267,24 @@ func buildLocalRowsExcluding(skills []discovery.Skill, matched map[string]bool) 
 	return buildLocalRows(remaining)
 }
 
+// registryGroupFromName extracts the registry group from a namespaced skill name.
+// "Artistfy-hq/deploy" → "Artistfy-hq", "local/foo" → "Local (unmanaged)", "bare" → "Local (unmanaged)"
+func registryGroupFromName(name string) string {
+	if idx := strings.Index(name, "/"); idx > 0 {
+		prefix := name[:idx]
+		if prefix == "local" {
+			return "Local (unmanaged)"
+		}
+		return prefix
+	}
+	return "Local (unmanaged)"
+}
+
 func buildLocalRows(skills []discovery.Skill) []listRow {
 	groups := map[string][]listRow{}
 	for i := range skills {
 		sk := &skills[i]
-		g := sk.Package
-		if g == "" {
-			g = "uncategorized"
-		}
+		g := registryGroupFromName(sk.Name)
 		groups[g] = append(groups[g], listRow{
 			Name:    sk.Name,
 			Group:   g,
@@ -285,21 +295,22 @@ func buildLocalRows(skills []discovery.Skill) []listRow {
 		})
 	}
 
-	// Sort: "uncategorized" first, then alphabetical group names; rows
+	// Sort: "Local (unmanaged)" last, then alphabetical group names; rows
 	// within a group sorted by name.
+	const unmanaged = "Local (unmanaged)"
 	var keys []string
 	for k := range groups {
-		if k != "uncategorized" {
+		if k != unmanaged {
 			keys = append(keys, k)
 		}
 	}
 	sort.Strings(keys)
 
 	var ordered []string
-	if _, ok := groups["uncategorized"]; ok {
-		ordered = append(ordered, "uncategorized")
-	}
 	ordered = append(ordered, keys...)
+	if _, ok := groups[unmanaged]; ok {
+		ordered = append(ordered, unmanaged)
+	}
 
 	var rows []listRow
 	for _, g := range ordered {
@@ -672,9 +683,9 @@ func (m listModel) View() tea.View {
 
 func (m listModel) viewLoading() string {
 	frame := spinnerFrames[m.spinnerFrame]
-	msg := "Fetching team skills…"
-	if m.bag != nil && m.bag.Config != nil && len(m.bag.Config.TeamRepos()) == 0 {
-		msg = "Discovering local skills…"
+	msg := "Discovering local skills…"
+	if m.bag != nil && m.bag.RemoteFlag {
+		msg = "Fetching team skills…"
 	}
 	return "\n  " + ltSpinnerStyle.Render(frame) + "  " + ltDimStyle.Render(msg) + "\n"
 }
@@ -792,7 +803,7 @@ func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, c
 	// room.
 	statusReserve := 0
 	if !compact {
-		statusReserve = 12
+		statusReserve = 42 // version(14)+gap(2) + author(12)+gap(2) + icon(1)+space(1)+label(7)+breathing(3)
 	} else {
 		statusReserve = 4 // icon + padding only
 	}
@@ -876,16 +887,38 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 	name := runewidth.Truncate(row.Name, nameCol, "…")
 	name = runewidth.FillRight(name, nameCol)
 
-	if !row.HasStatus {
-		return prefix + nameStyle.Render(name)
-	}
-
-	icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
 	if compact {
+		if !row.HasStatus {
+			return prefix + nameStyle.Render(name)
+		}
+		icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
 		return prefix + nameStyle.Render(name) + "  " + icon
 	}
-	label := statusStyles[row.Status].Render(row.Status.Display().Label)
-	return prefix + nameStyle.Render(name) + "  " + icon + " " + label
+
+	// Full view: name + version + author + status
+	ver := row.Version
+	if ver == "" {
+		ver = "-"
+	}
+	ver = runewidth.Truncate(ver, 14, "…")
+	ver = runewidth.FillRight(ver, 14)
+
+	author := row.Author
+	if author == "" {
+		author = "-"
+	}
+	author = runewidth.Truncate(author, 12, "…")
+	author = runewidth.FillRight(author, 12)
+
+	line := prefix + nameStyle.Render(name) + "  " + ltDimStyle.Render(ver) + "  " + ltDimStyle.Render(author)
+
+	if row.HasStatus {
+		icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
+		label := statusStyles[row.Status].Render(row.Status.Display().Label)
+		line += "  " + icon + " " + label
+	}
+
+	return line
 }
 
 // renderSummary builds the colored "N current · N update · N missing" footer.
@@ -939,13 +972,13 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 		pairs = append(pairs, kv{"Author", row.Author})
 	}
 	if row.Group != "" {
-		pairs = append(pairs, kv{"Group", row.Group})
+		pairs = append(pairs, kv{"Registry", row.Group})
 	}
 	if row.Source != "" {
 		pairs = append(pairs, kv{"Source", row.Source})
 	}
 	if len(row.Targets) > 0 {
-		pairs = append(pairs, kv{"Targets", strings.Join(row.Targets, ", ")})
+		pairs = append(pairs, kv{"Tools", strings.Join(row.Targets, ", ")})
 	}
 	if row.Local != nil && row.Local.LocalPath != "" {
 		path := row.Local.LocalPath

@@ -116,10 +116,10 @@ func TestActionsForRow(t *testing.T) {
 
 func TestBuildLocalRows_GroupsAndOrders(t *testing.T) {
 	skills := []discovery.Skill{
-		{Name: "zeta", Package: "gstack"},
-		{Name: "alpha", Package: ""},
-		{Name: "beta", Package: "gstack"},
-		{Name: "gamma", Package: ""},
+		{Name: "gstack/zeta"},
+		{Name: "alpha"},
+		{Name: "gstack/beta"},
+		{Name: "local/gamma"},
 	}
 	rows := buildLocalRows(skills)
 
@@ -127,16 +127,35 @@ func TestBuildLocalRows_GroupsAndOrders(t *testing.T) {
 		t.Fatalf("expected 4 rows, got %d", len(rows))
 	}
 
-	// Uncategorized first, alphabetical within group.
+	// Registry groups alphabetical first, "Local (unmanaged)" last; rows
+	// within a group sorted by name.
 	want := []struct{ name, group string }{
-		{"alpha", "uncategorized"},
-		{"gamma", "uncategorized"},
-		{"beta", "gstack"},
-		{"zeta", "gstack"},
+		{"gstack/beta", "gstack"},
+		{"gstack/zeta", "gstack"},
+		{"alpha", "Local (unmanaged)"},
+		{"local/gamma", "Local (unmanaged)"},
 	}
 	for i, w := range want {
 		if rows[i].Name != w.name || rows[i].Group != w.group {
 			t.Errorf("row %d = %+v, want name=%q group=%q", i, rows[i], w.name, w.group)
+		}
+	}
+}
+
+func TestRegistryGroupFromName(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"Artistfy-hq/deploy", "Artistfy-hq"},
+		{"local/foo", "Local (unmanaged)"},
+		{"bare", "Local (unmanaged)"},
+		{"owner/skill-name", "owner"},
+	}
+	for _, tt := range tests {
+		got := registryGroupFromName(tt.name)
+		if got != tt.want {
+			t.Errorf("registryGroupFromName(%q) = %q, want %q", tt.name, got, tt.want)
 		}
 	}
 }
