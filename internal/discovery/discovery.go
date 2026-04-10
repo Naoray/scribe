@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -35,113 +36,124 @@ type rawFrontmatter struct {
 	Metadata    map[string]any `yaml:"metadata"`
 }
 
+// reservedNames lists directory names that should be skipped during scanning.
+var reservedNames = map[string]bool{
+	"versions": true,
+	".git":     true,
+	".DS_Store": true,
+}
+
 // Skill represents a skill found on disk, optionally enriched with state info.
 type Skill struct {
 	Name        string
 	Description string   // short description from SKILL.md frontmatter or first paragraph
 	Package     string   // parent package name if skill is a symlink sub-skill (e.g. "gstack")
 	LocalPath   string   // absolute path on disk
-	Source      string   // from state if tracked, else empty
-	Version     string   // from state if tracked, else empty
 	ContentHash string   // deterministic content fingerprint
 	Targets     []string // from state if tracked, else inferred from location
+	Modified    bool     // SKILL.md hash differs from installed_hash in state
+	Conflicted  bool     // SKILL.md contains unresolved merge conflict markers
+	Revision    int      // from state
 }
 
-// OnDisk scans ~/.claude/skills/ and ~/.scribe/skills/ for skill directories.
-// Cross-references state.json for version/source info on tracked skills.
-// Deduplicates by name (first seen wins).
+// OnDisk scans ~/.scribe/skills/ (flat directories) and ~/.claude/skills/ (file symlinks)
+// for installed skills. Cross-references state.json for tracked skill metadata.
+// Deduplicates by resolved path (a skill found via both locations is one skill).
 func OnDisk(st *state.State) ([]Skill, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
 	}
 
-	type scanDir struct {
-		path   string
-		target string // inferred target for skills found here
-	}
+	scribeSkills := filepath.Join(home, ".scribe", "skills")
+	claudeSkills := filepath.Join(home, ".claude", "skills")
 
-	dirs := []scanDir{
-		{filepath.Join(home, ".claude", "skills"), "claude"},
-		{filepath.Join(home, ".scribe", "skills"), ""},
-	}
-
+	// seen tracks skill names we've already processed (dedup by name).
 	seen := map[string]bool{}
 	var skills []Skill
 
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir.path)
-		if errors.Is(err, fs.ErrNotExist) {
+	// 1. Scan ~/.scribe/skills/ — every directory with SKILL.md is a skill.
+	entries, err := os.ReadDir(scribeSkills)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("read %s: %w", scribeSkills, err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", dir.path, err)
+		name := entry.Name()
+		if reservedNames[name] || !validSkillName.MatchString(name) {
+			continue
 		}
 
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-
-			skillDir := filepath.Join(dir.path, name)
-
-			// Check if this is a skill directory (contains files like SKILL.md)
-			// or a registry-slug directory (contains sub-skill directories).
-			if isSkillDir(skillDir) {
-				// Direct skill: ~/.scribe/skills/<name>/
-				if seen[name] || !validSkillName.MatchString(name) {
-					continue
-				}
-
-				empty, err := isDirEmpty(skillDir)
-				if err != nil || empty {
-					continue
-				}
-
-				seen[name] = true
-				sk := buildSkill(name, skillDir, dir.path, dir.target, st)
-				skills = append(skills, sk)
-			} else {
-				// Registry-slug directory: scan sub-entries as skills.
-				subEntries, err := os.ReadDir(skillDir)
-				if err != nil {
-					continue
-				}
-				for _, subEntry := range subEntries {
-					if !subEntry.IsDir() {
-						continue
-					}
-					subName := subEntry.Name()
-					qualifiedName := name + "/" + subName
-					if seen[qualifiedName] || !validSkillName.MatchString(subName) {
-						continue
-					}
-
-					subDir := filepath.Join(skillDir, subName)
-					empty, err := isDirEmpty(subDir)
-					if err != nil || empty {
-						continue
-					}
-
-					seen[qualifiedName] = true
-					sk := buildSkill(qualifiedName, subDir, dir.path, dir.target, st)
-					skills = append(skills, sk)
-				}
-			}
+		skillDir := filepath.Join(scribeSkills, name)
+		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
+			continue // no SKILL.md, skip
 		}
+
+		seen[name] = true
+		sk := buildSkill(name, skillDir, scribeSkills, "", st)
+		skills = append(skills, sk)
 	}
 
-	// Also include state-tracked skills not found on disk (e.g. removed files).
+	// 2. Scan ~/.claude/skills/ — file symlinks to ~/.scribe/skills/<name>/SKILL.md.
+	claudeEntries, err := os.ReadDir(claudeSkills)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("read %s: %w", claudeSkills, err)
+	}
+	for _, entry := range claudeEntries {
+		name := entry.Name()
+		if reservedNames[name] || !validSkillName.MatchString(name) {
+			continue
+		}
+
+		entryPath := filepath.Join(claudeSkills, name)
+
+		// Resolve the symlink to find the actual skill directory.
+		resolved, err := filepath.EvalSymlinks(entryPath)
+		if err != nil {
+			continue // broken symlink, skip
+		}
+
+		// For file symlinks (pointing to SKILL.md), the skill dir is the parent.
+		// For directory symlinks (legacy), the skill dir is the resolved path itself.
+		info, err := os.Stat(resolved)
+		if err != nil {
+			continue
+		}
+
+		var skillDir string
+		if info.IsDir() {
+			skillDir = resolved
+		} else {
+			skillDir = filepath.Dir(resolved)
+		}
+
+		// Derive the skill name from the scribe store directory name.
+		skillName := filepath.Base(skillDir)
+		if seen[skillName] {
+			continue // already found via scribe store
+		}
+
+		// Verify SKILL.md exists in the resolved directory.
+		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
+			continue
+		}
+
+		seen[skillName] = true
+		sk := buildSkill(skillName, skillDir, filepath.Dir(skillDir), "claude", st)
+		skills = append(skills, sk)
+	}
+
+	// 3. Include state-tracked skills not found on disk (orphans).
 	for name, installed := range st.Installed {
 		if seen[name] {
 			continue
 		}
 		skills = append(skills, Skill{
-			Name:    name,
-			Source:  installed.Source,
-			Version: installed.DisplayVersion(),
-			Targets: installed.Tools,
+			Name:     name,
+			Targets:  installed.Tools,
+			Revision: installed.Revision,
 		})
 	}
 
@@ -163,17 +175,18 @@ func OnDisk(st *state.State) ([]Skill, error) {
 	return skills, nil
 }
 
-// isSkillDir checks if a directory is a skill directory (has a SKILL.md file)
-// as opposed to a registry-slug directory containing sub-skill directories.
-func isSkillDir(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, "SKILL.md"))
-	return err == nil
-}
-
 // buildSkill creates a Skill from a directory, enriching with state info.
 func buildSkill(name, skillDir, scanBase, target string, st *state.State) Skill {
 	meta := readSkillMetadata(skillDir)
 	hash, _ := contentHash(skillDir)
+	fileHash, _ := skillFileHash(skillDir)
+
+	// Read SKILL.md content for conflict detection.
+	skillMDPath := filepath.Join(skillDir, "SKILL.md")
+	conflicted := false
+	if content, err := os.ReadFile(skillMDPath); err == nil {
+		conflicted = hasConflictMarkers(content)
+	}
 
 	sk := Skill{
 		Name:        name,
@@ -181,25 +194,26 @@ func buildSkill(name, skillDir, scanBase, target string, st *state.State) Skill 
 		LocalPath:   skillDir,
 		Package:     detectPackage(skillDir, scanBase),
 		ContentHash: hash,
+		Conflicted:  conflicted,
 	}
 
 	if installed, ok := st.Installed[name]; ok {
-		sk.Source = installed.Source
-		sk.Version = installed.DisplayVersion()
 		sk.Targets = installed.Tools
+		sk.Revision = installed.Revision
+		// Detect local modification.
+		if installed.InstalledHash != "" && fileHash != "" && fileHash != installed.InstalledHash {
+			sk.Modified = true
+		}
 	} else if target != "" {
 		sk.Targets = []string{target}
 	}
 
-	// Version resolution: frontmatter → state → content hash.
-	if meta.Version != "" {
-		sk.Version = meta.Version
-	}
-	if sk.Version == "" && hash != "" {
-		sk.Version = "#" + hash
-	}
-
 	return sk
+}
+
+// hasConflictMarkers checks if content contains unresolved Git merge conflict markers.
+func hasConflictMarkers(content []byte) bool {
+	return bytes.Contains(content, []byte("<<<<<<< "))
 }
 
 // detectPackage determines if a skill directory is a sub-skill of a parent
