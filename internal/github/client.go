@@ -317,7 +317,11 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, owner, repo string, i
 		return nil, wrapErr(err, fmt.Sprintf("download asset %d from %s/%s", id, owner, repo))
 	}
 	if redirectURL != "" {
-		resp, err := http.Get(redirectURL)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, redirectURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("build redirect request for asset %d: %w", id, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("follow redirect for asset %d: %w", id, err)
 		}
