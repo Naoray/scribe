@@ -257,6 +257,12 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 						}
 
 						if upstreamContent != nil {
+							// Snapshot current version before merge overwrites SKILL.md.
+							if snapErr := SnapshotVersion(skillDir, installed.Revision); snapErr != nil {
+								s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("snapshot: %w", snapErr)})
+								summary.Failed++
+								continue
+							}
 							result, mergeErr := ThreeWayMerge(skillDir, upstreamContent)
 							switch {
 							case mergeErr != nil:
@@ -288,6 +294,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 								if err := st.Save(); err != nil {
 									s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
 								}
+								_ = EnforceRetention(skillDir, DefaultMaxVersions)
 								s.emit(SkillInstalledMsg{
 									Name:    sk.Name,
 									Updated: true,
@@ -298,6 +305,19 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 							}
 						}
 						// No SKILL.md in upstream or merge not applicable — fall through to overwrite.
+					}
+				}
+			}
+
+			// Snapshot current version before overwrite (no-op for new installs).
+			if installed != nil && sk.Status == StatusOutdated {
+				storeDir, sdErr := tools.StoreDir()
+				if sdErr == nil {
+					skillDir := filepath.Join(storeDir, sk.Name)
+					if snapErr := SnapshotVersion(skillDir, installed.Revision); snapErr != nil {
+						s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("snapshot: %w", snapErr)})
+						summary.Failed++
+						continue
 					}
 				}
 			}
@@ -363,6 +383,11 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			// Save after each successful install — partial sync is safe.
 			if err := st.Save(); err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
+			}
+
+			// Enforce version retention after successful write.
+			if sk.Status == StatusOutdated {
+				_ = EnforceRetention(canonicalDir, DefaultMaxVersions)
 			}
 
 			s.emit(SkillInstalledMsg{
