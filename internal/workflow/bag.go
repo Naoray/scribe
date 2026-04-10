@@ -18,6 +18,7 @@ type Bag struct {
 	Args         []string
 	JSONFlag     bool
 	RepoFlag     string // --registry filter
+	RemoteFlag   bool   // --remote: show available skills from registries
 	TrustAllFlag bool   // --trust-all: approve all package commands without prompting
 
 	// Populated by steps

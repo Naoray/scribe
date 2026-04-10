@@ -38,8 +38,8 @@ func ListJSONSteps() []Step {
 func StepWriteListJSON(ctx context.Context, b *Bag) error {
 	w := os.Stdout
 
-	// Local view: no registries connected.
-	if len(b.Config.TeamRepos()) == 0 {
+	// Local view is the default; --remote switches to registry diff.
+	if !b.RemoteFlag {
 		skills, err := discovery.OnDisk(b.State)
 		if err != nil {
 			return err
