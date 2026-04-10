@@ -300,6 +300,15 @@ func (c *Client) HasPushAccess(ctx context.Context, owner, repo string) (bool, e
 	return perms["push"] || perms["admin"], nil
 }
 
+// LatestRelease fetches the latest published release for a repository.
+func (c *Client) LatestRelease(ctx context.Context, owner, repo string) (*github.RepositoryRelease, error) {
+	release, _, err := c.gh.Repositories.GetLatestRelease(ctx, owner, repo)
+	if err != nil {
+		return nil, wrapErr(err, fmt.Sprintf("latest release %s/%s", owner, repo))
+	}
+	return release, nil
+}
+
 // wrapErr produces user-friendly errors for common GitHub API failures.
 func wrapErr(err error, operation string) error {
 	if err == nil {
