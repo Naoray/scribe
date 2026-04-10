@@ -1,6 +1,9 @@
 package upgrade
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"testing"
 )
 
@@ -90,6 +93,82 @@ func TestDetectMethod(t *testing.T) {
 			}
 		})
 	}
+}
+
+func createTarGz(t *testing.T, entries []tarEntry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	for _, e := range entries {
+		hdr := &tar.Header{
+			Name: e.Name,
+			Size: int64(len(e.Content)),
+			Mode: 0755,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(e.Content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tw.Close()
+	gw.Close()
+	return buf.Bytes()
+}
+
+type tarEntry struct {
+	Name    string
+	Content []byte
+}
+
+func TestExtractBinary(t *testing.T) {
+	binaryContent := []byte("#!/bin/fake-scribe")
+
+	t.Run("valid single-entry archive", func(t *testing.T) {
+		archive := createTarGz(t, []tarEntry{
+			{Name: "scribe", Content: binaryContent},
+		})
+		got, err := ExtractBinary(bytes.NewReader(archive), "scribe")
+		if err != nil {
+			t.Fatalf("ExtractBinary() error = %v", err)
+		}
+		if !bytes.Equal(got, binaryContent) {
+			t.Errorf("content mismatch: got %q, want %q", got, binaryContent)
+		}
+	})
+
+	t.Run("rejects path traversal", func(t *testing.T) {
+		archive := createTarGz(t, []tarEntry{
+			{Name: "../evil", Content: []byte("bad")},
+		})
+		_, err := ExtractBinary(bytes.NewReader(archive), "scribe")
+		if err == nil {
+			t.Fatal("expected error for path traversal, got nil")
+		}
+	})
+
+	t.Run("rejects multiple entries", func(t *testing.T) {
+		archive := createTarGz(t, []tarEntry{
+			{Name: "scribe", Content: binaryContent},
+			{Name: "extra", Content: []byte("extra")},
+		})
+		_, err := ExtractBinary(bytes.NewReader(archive), "scribe")
+		if err == nil {
+			t.Fatal("expected error for multiple entries, got nil")
+		}
+	})
+
+	t.Run("rejects missing target binary", func(t *testing.T) {
+		archive := createTarGz(t, []tarEntry{
+			{Name: "wrong-name", Content: binaryContent},
+		})
+		_, err := ExtractBinary(bytes.NewReader(archive), "scribe")
+		if err == nil {
+			t.Fatal("expected error for missing binary, got nil")
+		}
+	})
 }
 
 func TestNeedsUpgrade(t *testing.T) {

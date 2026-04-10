@@ -1,6 +1,10 @@
 package upgrade
 
 import (
+	"archive/tar"
+	"compress/gzip"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,6 +78,69 @@ func isHomebrewPath(path string) bool {
 	return strings.Contains(path, "/Cellar/") ||
 		strings.Contains(path, "/opt/homebrew/") ||
 		strings.Contains(path, "/linuxbrew/")
+}
+
+const maxDecompressedSize = 100 * 1024 * 1024 // 100MB
+
+// ExtractBinary decompresses a tar.gz stream and extracts a single binary
+// named binaryName. Returns the binary contents.
+//
+// Safety guards:
+//   - Rejects entries with path traversal (../)
+//   - Accepts only a single file entry named binaryName
+//   - Caps decompressed size at 100MB
+func ExtractBinary(r io.Reader, binaryName string) ([]byte, error) {
+	gr, err := gzip.NewReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("decompress: %w", err)
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+	var found bool
+	var content []byte
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read tar: %w", err)
+		}
+
+		// Safety: reject path traversal.
+		if strings.Contains(hdr.Name, "..") {
+			return nil, fmt.Errorf("archive contains path traversal: %s", hdr.Name)
+		}
+
+		// Safety: reject multiple entries.
+		if found {
+			return nil, fmt.Errorf("archive contains multiple entries, expected only %q", binaryName)
+		}
+
+		// Only accept the target binary.
+		name := filepath.Base(hdr.Name)
+		if name != binaryName {
+			return nil, fmt.Errorf("archive contains %q, expected %q", hdr.Name, binaryName)
+		}
+
+		// Safety: cap decompressed size.
+		limited := io.LimitReader(tr, maxDecompressedSize+1)
+		content, err = io.ReadAll(limited)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", binaryName, err)
+		}
+		if len(content) > maxDecompressedSize {
+			return nil, fmt.Errorf("binary %s exceeds %d byte limit", binaryName, maxDecompressedSize)
+		}
+		found = true
+	}
+
+	if !found {
+		return nil, fmt.Errorf("binary %q not found in archive", binaryName)
+	}
+	return content, nil
 }
 
 // NeedsUpgrade compares the current version against the latest release tag.
