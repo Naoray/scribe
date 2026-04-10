@@ -3,6 +3,8 @@ package sync
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -90,14 +92,13 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		return nil, nil, fmt.Errorf("%s has no team section", teamRepo)
 	}
 
-	registrySlug := tools.SlugifyRegistry(teamRepo)
 	var statuses []SkillStatus
 	shaCache := map[string]string{}
 
 	for i := range m.Catalog {
 		entry := &m.Catalog[i]
-		qualifiedName := registrySlug + "/" + entry.Name
-		installedPtr := lookupInstalled(st, qualifiedName)
+		// Use bare name for lookup — flat storage model.
+		installedPtr := lookupInstalled(st, entry.Name)
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
@@ -117,7 +118,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 			}
 		}
 
-		status := compareEntry(*entry, installedPtr, latestSHA)
+		status := compareEntry(*entry, installedPtr, latestSHA, teamRepo)
 		statuses = append(statuses, SkillStatus{
 			Name:       entry.Name,
 			Status:     status,
@@ -130,19 +131,23 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		})
 	}
 
-	// Extra skills (installed but not in catalog) — scoped to this registry only.
+	// Extra skills: installed locally with a source matching this registry,
+	// but not present in the current catalog.
 	catalogNames := make(map[string]bool, len(m.Catalog))
 	for _, e := range m.Catalog {
 		catalogNames[e.Name] = true
 	}
 	extraNames := make([]string, 0)
-	for name := range st.Installed {
-		if !strings.HasPrefix(name, registrySlug+"/") {
-			continue // belongs to a different registry
+	for name, skill := range st.Installed {
+		if catalogNames[name] {
+			continue // already accounted for above
 		}
-		baseName := strings.TrimPrefix(name, registrySlug+"/")
-		if !catalogNames[baseName] {
-			extraNames = append(extraNames, name)
+		// Check if any source matches this registry.
+		for _, src := range skill.Sources {
+			if src.Registry == teamRepo {
+				extraNames = append(extraNames, name)
+				break
+			}
 		}
 	}
 	sort.Strings(extraNames)
@@ -176,7 +181,6 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 	}
 
 	summary := SyncCompleteMsg{}
-	registrySlug := tools.SlugifyRegistry(teamRepo)
 
 	for _, sk := range statuses {
 		switch sk.Status {
@@ -186,7 +190,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 		case StatusMissing, StatusOutdated:
 			if sk.IsPackage {
-				s.applyPackage(ctx, sk, registrySlug, st, &summary)
+				s.applyPackage(ctx, sk, teamRepo, st, &summary)
 				continue
 			}
 
@@ -236,20 +240,81 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				}
 			}
 
+			// Check for local modifications before writing.
+			installed := lookupInstalled(st, sk.Name)
+			if installed != nil && sk.Status == StatusOutdated {
+				storeDir, sdErr := tools.StoreDir()
+				if sdErr == nil {
+					skillDir := filepath.Join(storeDir, sk.Name)
+					if IsLocallyModified(skillDir, installed.InstalledHash) {
+						// Find the new upstream SKILL.md content for merge.
+						var upstreamContent []byte
+						for _, f := range tFiles {
+							if f.Path == "SKILL.md" {
+								upstreamContent = f.Content
+								break
+							}
+						}
+
+						if upstreamContent != nil {
+							result, mergeErr := ThreeWayMerge(skillDir, upstreamContent)
+							switch {
+							case mergeErr != nil:
+								s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("merge: %w", mergeErr)})
+								summary.Failed++
+								continue
+							case result == MergeConflict:
+								// Update state with new source info but flag as conflicted.
+								s.updateSourceEntry(st, sk.Name, teamRepo, sk, installed)
+								if err := st.Save(); err != nil {
+									s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
+								}
+								s.emit(MergeConflictMsg{Name: sk.Name})
+								summary.Failed++
+								continue
+							case result == MergeClean:
+								// Clean merge — read the merged content back and update the hash.
+								merged, readErr := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+								if readErr != nil {
+									s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("read merged: %w", readErr)})
+									summary.Failed++
+									continue
+								}
+								s.updateSourceEntry(st, sk.Name, teamRepo, sk, installed)
+								existing := st.Installed[sk.Name]
+								existing.InstalledHash = ComputeFileHash(merged)
+								existing.Revision = nextRevision(installed)
+								st.Installed[sk.Name] = existing
+								if err := st.Save(); err != nil {
+									s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
+								}
+								s.emit(SkillInstalledMsg{
+									Name:    sk.Name,
+									Updated: true,
+									Merged:  true,
+								})
+								summary.Updated++
+								continue
+							}
+						}
+						// No SKILL.md in upstream or merge not applicable — fall through to overwrite.
+					}
+				}
+			}
+
 			// Write files to canonical store once, then symlink per target.
-			canonicalDir, err := tools.WriteToStore(registrySlug, sk.Name, tFiles)
+			canonicalDir, err := tools.WriteToStore(sk.Name, tFiles)
 			if err != nil {
 				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("write store: %w", err)})
 				summary.Failed++
 				continue
 			}
 
-			qualifiedName := registrySlug + "/" + sk.Name
 			var paths []string
 			var toolNames []string
 			toolFailed := false
 			for _, t := range s.Tools {
-				links, err := t.Install(qualifiedName, canonicalDir)
+				links, err := t.Install(sk.Name, canonicalDir)
 				if err != nil {
 					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
 					summary.Failed++
@@ -263,19 +328,37 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				continue
 			}
 
-			// Parse source for version display.
-			src, err := manifest.ParseSource(sk.Entry.Source)
-			version := "unknown"
-			if err == nil {
-				version = src.Ref
+			// Compute hash of the installed SKILL.md content.
+			var installedHash string
+			for _, f := range tFiles {
+				if f.Path == "SKILL.md" {
+					installedHash = ComputeFileHash(f.Content)
+					break
+				}
 			}
 
-			st.RecordInstall(qualifiedName, state.InstalledSkill{
-				Version:   version,
-				CommitSHA: sk.LatestSHA,
-				Source:    sk.Entry.Source,
-				Tools:     toolNames,
-				Paths:     paths,
+			// Parse source for ref.
+			src, err := manifest.ParseSource(sk.Entry.Source)
+			ref := ""
+			if err == nil {
+				ref = src.Ref
+			}
+
+			// Build sources: merge with existing sources from other registries.
+			newSource := state.SkillSource{
+				Registry:   teamRepo,
+				Ref:        ref,
+				LastSHA:    sk.LatestSHA,
+				LastSynced: time.Now().UTC(),
+			}
+			sources := mergeSources(installed, newSource)
+
+			st.RecordInstall(sk.Name, state.InstalledSkill{
+				Revision:      nextRevision(installed),
+				InstalledHash: installedHash,
+				Sources:       sources,
+				Tools:         toolNames,
+				Paths:         paths,
 			})
 			// Save after each successful install — partial sync is safe.
 			if err := st.Save(); err != nil {
@@ -284,7 +367,6 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 			s.emit(SkillInstalledMsg{
 				Name:    sk.Name,
-				Version: version,
 				Updated: sk.Status == StatusOutdated,
 			})
 			if sk.Status == StatusOutdated {
@@ -358,7 +440,7 @@ func formatCmds(cmds []toolCmd) string {
 	return strings.Join(parts, "\n")
 }
 
-func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug string, st *state.State, summary *SyncCompleteMsg) {
+func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, teamRepo string, st *state.State, summary *SyncCompleteMsg) {
 	if s.Executor == nil {
 		s.emit(PackageErrorMsg{
 			Name: sk.Name,
@@ -376,7 +458,8 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 	}
 
 	newHash := CommandHash(sk.Entry.Install, sk.Entry.Update, sk.Entry.Installs, sk.Entry.Updates)
-	qualifiedName := registrySlug + "/" + sk.Name
+	// Packages use bare name in state (flat storage model).
+	stateName := sk.Name
 	displayCmd := formatCmds(cmds)
 
 	timeout := time.Duration(sk.Entry.Timeout) * time.Second
@@ -386,7 +469,7 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 
 	switch sk.Status {
 	case StatusMissing:
-		approved := s.checkApproval(sk, qualifiedName, st, newHash, displayCmd)
+		approved := s.checkApproval(sk, stateName, st, newHash, displayCmd)
 		if !approved {
 			s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "approval_required"})
 			summary.Skipped++
@@ -401,24 +484,29 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 			}
 			_, stderr, err := s.Executor.Execute(ctx, c.installCmd, timeout)
 			if err != nil {
-				// Install failed — do NOT persist approval. The user only
-				// authorized this specific attempt; a future run must re-prompt.
 				s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
 				summary.Failed++
 				return
 			}
 		}
 
-		version := "unknown"
 		src, parseErr := manifest.ParseSource(sk.Entry.Source)
+		ref := ""
 		if parseErr == nil {
-			version = src.Ref
+			ref = src.Ref
 		}
 
-		st.RecordInstall(qualifiedName, state.InstalledSkill{
-			Version:    version,
-			CommitSHA:  sk.LatestSHA,
-			Source:     sk.Entry.Source,
+		installed := lookupInstalled(st, stateName)
+		newSource := state.SkillSource{
+			Registry:   teamRepo,
+			Ref:        ref,
+			LastSHA:    sk.LatestSHA,
+			LastSynced: time.Now().UTC(),
+		}
+
+		st.RecordInstall(stateName, state.InstalledSkill{
+			Revision:   nextRevision(installed),
+			Sources:    mergeSources(installed, newSource),
 			Type:       "package",
 			InstallCmd: sk.Entry.Install,
 			UpdateCmd:  sk.Entry.Update,
@@ -447,15 +535,15 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 			return
 		}
 
-		installed := st.Installed[qualifiedName]
-		if installed.CmdHash != "" && installed.CmdHash != newHash {
+		installed, ok := st.Installed[stateName]
+		if ok && installed.CmdHash != "" && installed.CmdHash != newHash {
 			s.emit(PackageHashMismatchMsg{
 				Name:       sk.Name,
 				OldCommand: installed.InstallCmd,
 				NewCommand: displayCmd,
 				Source:     sk.Entry.Source,
 			})
-			approved := s.checkApproval(sk, qualifiedName, st, newHash, displayCmd)
+			approved := s.checkApproval(sk, stateName, st, newHash, displayCmd)
 			if !approved {
 				s.emit(PackageSkippedMsg{Name: sk.Name, Reason: "approval_required"})
 				summary.Skipped++
@@ -471,22 +559,32 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 			}
 			_, stderr, err := s.Executor.Execute(ctx, c.updateCmd, timeout)
 			if err != nil {
-				// Update failed — do NOT persist the new approval/hash. The
-				// existing approval (for the prior commands) stays intact.
 				s.emit(PackageErrorMsg{Name: sk.Name, Err: err, Stderr: stderr})
 				summary.Failed++
 				return
 			}
 		}
 
-		existing := st.Installed[qualifiedName]
-		existing.CommitSHA = sk.LatestSHA
+		existing := st.Installed[stateName]
+		// Update source entry for this registry.
+		src, parseErr := manifest.ParseSource(sk.Entry.Source)
+		ref := ""
+		if parseErr == nil {
+			ref = src.Ref
+		}
+		newSource := state.SkillSource{
+			Registry:   teamRepo,
+			Ref:        ref,
+			LastSHA:    sk.LatestSHA,
+			LastSynced: time.Now().UTC(),
+		}
+		existing.Sources = mergeSources(&existing, newSource)
 		existing.InstallCmd = sk.Entry.Install
 		existing.UpdateCmd = sk.Entry.Update
 		existing.CmdHash = newHash
 		existing.Approval = "approved"
 		existing.ApprovedAt = time.Now().UTC()
-		st.Installed[qualifiedName] = existing
+		st.Installed[stateName] = existing
 		if err := st.Save(); err != nil {
 			s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
 		}
@@ -499,12 +597,12 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, registrySlug 
 // checkApproval is pure: it returns whether the command is authorized to run,
 // without mutating state. The caller persists approval ONLY after the command
 // actually succeeds (see applyPackage).
-func (s *Syncer) checkApproval(sk SkillStatus, qualifiedName string, st *state.State, newHash, installCmd string) bool {
+func (s *Syncer) checkApproval(sk SkillStatus, stateName string, st *state.State, newHash, installCmd string) bool {
 	if s.TrustAll {
 		return true
 	}
 
-	if installed, ok := st.Installed[qualifiedName]; ok {
+	if installed, ok := st.Installed[stateName]; ok {
 		if installed.Approval == "approved" && installed.CmdHash == newHash {
 			return true
 		}
@@ -543,4 +641,54 @@ func lookupInstalled(st *state.State, name string) *state.InstalledSkill {
 		return nil
 	}
 	return &installed
+}
+
+// nextRevision returns the next revision number (existing + 1, or 1 for new installs).
+func nextRevision(installed *state.InstalledSkill) int {
+	if installed == nil {
+		return 1
+	}
+	return installed.Revision + 1
+}
+
+// mergeSources combines existing sources with a new source entry.
+// If the registry already exists in sources, it is updated. Otherwise appended.
+func mergeSources(installed *state.InstalledSkill, newSource state.SkillSource) []state.SkillSource {
+	if installed == nil {
+		return []state.SkillSource{newSource}
+	}
+	sources := make([]state.SkillSource, 0, len(installed.Sources)+1)
+	found := false
+	for _, s := range installed.Sources {
+		if s.Registry == newSource.Registry {
+			sources = append(sources, newSource)
+			found = true
+		} else {
+			sources = append(sources, s)
+		}
+	}
+	if !found {
+		sources = append(sources, newSource)
+	}
+	return sources
+}
+
+// updateSourceEntry updates the source entry for a registry in the installed skill state.
+// Used after merge operations where we don't want to fully overwrite the install record.
+func (s *Syncer) updateSourceEntry(st *state.State, skillName, teamRepo string, sk SkillStatus, installed *state.InstalledSkill) {
+	src, parseErr := manifest.ParseSource(sk.Entry.Source)
+	ref := ""
+	if parseErr == nil {
+		ref = src.Ref
+	}
+	newSource := state.SkillSource{
+		Registry:   teamRepo,
+		Ref:        ref,
+		LastSHA:    sk.LatestSHA,
+		LastSynced: time.Now().UTC(),
+	}
+
+	existing := st.Installed[skillName]
+	existing.Sources = mergeSources(installed, newSource)
+	st.Installed[skillName] = existing
 }

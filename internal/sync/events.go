@@ -11,10 +11,12 @@ import (
 type Status int
 
 const (
-	StatusMissing  Status = iota // in loadout, not installed locally
-	StatusCurrent                // installed, matches loadout exactly
-	StatusOutdated               // installed, but loadout specifies a different version
-	StatusExtra                  // installed locally, not in the team loadout
+	StatusMissing    Status = iota // in loadout, not installed locally
+	StatusCurrent                  // installed, matches loadout exactly
+	StatusOutdated                 // installed, but loadout specifies a different version
+	StatusExtra                    // installed locally, not in the team loadout
+	StatusModified                 // installed, locally modified, upstream unchanged
+	StatusConflicted               // merge produced conflicts, needs resolution
 )
 
 func (s Status) String() string {
@@ -27,6 +29,10 @@ func (s Status) String() string {
 		return "outdated"
 	case StatusExtra:
 		return "extra"
+	case StatusModified:
+		return "modified"
+	case StatusConflicted:
+		return "conflicted"
 	default:
 		return "unknown"
 	}
@@ -88,6 +94,10 @@ func (s Status) Display() StatusDisplay {
 		return StatusDisplay{"○", "missing"}
 	case StatusExtra:
 		return StatusDisplay{"?", "extra"}
+	case StatusModified:
+		return StatusDisplay{"✎", "modified"}
+	case StatusConflicted:
+		return StatusDisplay{"⚡", "conflict"}
 	default:
 		return StatusDisplay{"?", "unknown"}
 	}
@@ -105,8 +115,8 @@ type SkillDownloadingMsg struct{ Name string }
 // SkillInstalledMsg is sent when a skill is successfully installed or updated.
 type SkillInstalledMsg struct {
 	Name    string
-	Version string
 	Updated bool // true = update, false = fresh install
+	Merged  bool // true if 3-way merge was used
 }
 
 // SkillSkippedMsg is sent when a skill is already current — no action needed.
@@ -116,6 +126,11 @@ type SkillSkippedMsg struct{ Name string }
 type SkillErrorMsg struct {
 	Name string
 	Err  error
+}
+
+// MergeConflictMsg is sent when a 3-way merge produces conflict markers.
+type MergeConflictMsg struct {
+	Name string
 }
 
 // SyncCompleteMsg is sent when all skills have been processed.
