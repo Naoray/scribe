@@ -26,7 +26,7 @@ Run the deploy script.
 func setup(t *testing.T) (canonicalDir string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	dir, err := tools.WriteToStore("test-registry", "deploy", testFiles)
+	dir, err := tools.WriteToStore("deploy", testFiles)
 	if err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
@@ -35,7 +35,7 @@ func setup(t *testing.T) (canonicalDir string) {
 
 func TestWriteToStore(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dir, err := tools.WriteToStore("test-registry", "deploy", testFiles)
+	dir, err := tools.WriteToStore("deploy", testFiles)
 	if err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
@@ -65,18 +65,23 @@ func TestClaudeInstall(t *testing.T) {
 		t.Fatalf("expected 1 symlink path, got %d", len(paths))
 	}
 
-	// Link resolves to the canonical dir
+	// Link resolves to SKILL.md file, not the directory.
 	resolved, err := os.Readlink(paths[0])
 	if err != nil {
 		t.Fatalf("Readlink: %v", err)
 	}
-	if resolved != canonicalDir {
-		t.Errorf("symlink points to %q, want %q", resolved, canonicalDir)
+	wantTarget := filepath.Join(canonicalDir, "SKILL.md")
+	if resolved != wantTarget {
+		t.Errorf("symlink points to %q, want %q", resolved, wantTarget)
 	}
 
-	// Files accessible through the symlink
-	if _, err := os.Stat(filepath.Join(paths[0], "SKILL.md")); err != nil {
-		t.Error("SKILL.md not accessible through claude symlink")
+	// Content accessible through the symlink.
+	content, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatalf("read through symlink: %v", err)
+	}
+	if len(content) == 0 {
+		t.Error("SKILL.md content empty through symlink")
 	}
 }
 
@@ -221,71 +226,44 @@ func TestSlugifyRegistry(t *testing.T) {
 	}
 }
 
-func TestWriteToStoreNamespaced(t *testing.T) {
+func TestWriteToStoreFlat(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	dir, err := tools.WriteToStore("ArtistfyHQ-team-skills", "deploy", testFiles)
+	dir, err := tools.WriteToStore("deploy", testFiles)
 	if err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
 
-	// Verify path includes registry slug.
+	// Verify path is flat — no registry slug subdirectory.
 	storeDir, _ := tools.StoreDir()
-	expected := filepath.Join(storeDir, "ArtistfyHQ-team-skills", "deploy")
+	expected := filepath.Join(storeDir, "deploy")
 	if dir != expected {
 		t.Errorf("store dir = %q, want %q", dir, expected)
 	}
 
 	// Files exist.
 	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
-		t.Error("SKILL.md not in namespaced store")
+		t.Error("SKILL.md not in store")
 	}
 }
 
-func TestClaudeInstallNamespaced(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-
-	dir, err := tools.WriteToStore("ArtistfyHQ-team-skills", "deploy", testFiles)
-	if err != nil {
-		t.Fatalf("WriteToStore: %v", err)
-	}
-
-	tool := tools.ClaudeTool{}
-	paths, err := tool.Install("ArtistfyHQ-team-skills/deploy", dir)
-	if err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-
-	// Symlink should be at ~/.claude/skills/ArtistfyHQ-team-skills/deploy
-	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".claude", "skills", "ArtistfyHQ-team-skills", "deploy")
-	if paths[0] != expected {
-		t.Errorf("symlink path = %q, want %q", paths[0], expected)
-	}
-
-	resolved, _ := os.Readlink(paths[0])
-	if resolved != dir {
-		t.Errorf("symlink resolves to %q, want %q", resolved, dir)
-	}
-}
-
-func TestCursorInstallNamespaced(t *testing.T) {
+func TestCursorInstallBareName(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	workDir := t.TempDir()
 
-	dir, err := tools.WriteToStore("ArtistfyHQ-team-skills", "deploy", testFiles)
+	dir, err := tools.WriteToStore("deploy", testFiles)
 	if err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
 
 	tool := tools.CursorTool{WorkDir: workDir}
-	paths, err := tool.Install("ArtistfyHQ-team-skills/deploy", dir)
+	paths, err := tool.Install("deploy", dir)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
-	// Cursor flattens namespaced names: ArtistfyHQ-team-skills-deploy.mdc
-	expectedLink := filepath.Join(workDir, ".cursor", "rules", "ArtistfyHQ-team-skills-deploy.mdc")
+	// Bare name passes through slugify unchanged.
+	expectedLink := filepath.Join(workDir, ".cursor", "rules", "deploy.mdc")
 	if paths[0] != expectedLink {
 		t.Errorf("symlink path = %q, want %q", paths[0], expectedLink)
 	}
