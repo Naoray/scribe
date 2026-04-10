@@ -115,7 +115,6 @@ type rowsLoadedMsg struct{ rows []listRow }
 type loadErrMsg struct{ err error }
 type clipboardTickMsg struct{ id int }
 type editorDoneMsg struct{ err error }
-type updateStartMsg struct{ name string }
 type updateDoneMsg struct {
 	name       string
 	err        error
@@ -617,6 +616,18 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 				ss.Installed = &inst
 			}
 		}
+
+		// Capture whether the local file had unsynced edits BEFORE the sync runs.
+		// Post-sync, SKILL.md has been rewritten (or 3-way merged), so
+		// IsLocallyModified can no longer tell us what we need to know.
+		wasModified := false
+		if ss.Installed != nil {
+			if storeDir, sdErr := tools.StoreDir(); sdErr == nil {
+				skillDir := filepath.Join(storeDir, row.Name)
+				wasModified = sync.IsLocallyModified(skillDir, ss.Installed.InstalledHash)
+			}
+		}
+
 		ctx := m.ctx
 		bag := m.bag
 		return m, func() tea.Msg {
@@ -636,7 +647,7 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 					return updateDoneMsg{name: row.Name, conflicted: true}
 				}
 			}
-			return updateDoneMsg{name: row.Name, merged: ss.Installed != nil}
+			return updateDoneMsg{name: row.Name, merged: wasModified}
 		}
 	}
 	if row.Local == nil {

@@ -41,6 +41,9 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid revision %q: expected a number or rev-N format", revArg)
 	}
+	if targetRev <= 0 {
+		return fmt.Errorf("invalid revision %d: must be a positive number", targetRev)
+	}
 
 	st, err := state.Load()
 	if err != nil {

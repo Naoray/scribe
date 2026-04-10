@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,6 +129,9 @@ func Load() (*State, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return &State{SchemaVersion: 2, Installed: make(map[string]InstalledSkill)}, nil
 	}
 	return parseAndMigrate(data)
 }
