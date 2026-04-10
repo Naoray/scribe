@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -307,6 +308,22 @@ func (c *Client) LatestRelease(ctx context.Context, owner, repo string) (*github
 		return nil, wrapErr(err, fmt.Sprintf("latest release %s/%s", owner, repo))
 	}
 	return release, nil
+}
+
+// DownloadReleaseAsset downloads a release asset by ID, following redirects.
+func (c *Client) DownloadReleaseAsset(ctx context.Context, owner, repo string, id int64) (io.ReadCloser, error) {
+	rc, redirectURL, err := c.gh.Repositories.DownloadReleaseAsset(ctx, owner, repo, id, http.DefaultClient)
+	if err != nil {
+		return nil, wrapErr(err, fmt.Sprintf("download asset %d from %s/%s", id, owner, repo))
+	}
+	if redirectURL != "" {
+		resp, err := http.Get(redirectURL)
+		if err != nil {
+			return nil, fmt.Errorf("follow redirect for asset %d: %w", id, err)
+		}
+		return resp.Body, nil
+	}
+	return rc, nil
 }
 
 // wrapErr produces user-friendly errors for common GitHub API failures.

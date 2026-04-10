@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -220,4 +222,43 @@ func TestNeedsUpgrade(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReplaceBinary(t *testing.T) {
+	t.Run("replaces binary with correct content and permissions", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "scribe")
+
+		if err := os.WriteFile(target, []byte("old"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		newContent := []byte("new-binary-content")
+		if err := ReplaceBinary(target, newContent); err != nil {
+			t.Fatalf("ReplaceBinary() error = %v", err)
+		}
+
+		got, err := os.ReadFile(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, newContent) {
+			t.Errorf("content = %q, want %q", got, newContent)
+		}
+
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0755 {
+			t.Errorf("permissions = %v, want 0755", info.Mode().Perm())
+		}
+	})
+
+	t.Run("error on nonexistent target", func(t *testing.T) {
+		err := ReplaceBinary("/nonexistent/path/scribe", []byte("data"))
+		if err == nil {
+			t.Fatal("expected error for nonexistent target")
+		}
+	})
 }

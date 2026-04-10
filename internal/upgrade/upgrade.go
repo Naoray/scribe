@@ -2,13 +2,20 @@ package upgrade
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/google/go-github/v69/github"
 )
 
 // Method represents how scribe was installed.
@@ -154,4 +161,165 @@ func NeedsUpgrade(current, latestTag string) (isDevBuild bool, needsUpgrade bool
 	}
 	latest := strings.TrimPrefix(latestTag, "v")
 	return false, current != latest
+}
+
+// ReplaceBinary atomically replaces the binary at targetPath with newContent.
+func ReplaceBinary(targetPath string, newContent []byte) error {
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		return fmt.Errorf("stat current binary: %w", err)
+	}
+
+	dir := filepath.Dir(targetPath)
+	tmp, err := os.CreateTemp(dir, ".scribe-upgrade-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	defer func() {
+		if tmpPath != "" {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(newContent); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Chmod(tmpPath, info.Mode().Perm()); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		if os.IsPermission(err) {
+			return fmt.Errorf("permission denied replacing %s — try running with sudo: %w", targetPath, err)
+		}
+		return fmt.Errorf("rename %s → %s: %w", tmpPath, targetPath, err)
+	}
+
+	tmpPath = "" // prevent deferred cleanup
+	return nil
+}
+
+// UpgradeHomebrew runs `brew upgrade scribe`.
+func UpgradeHomebrew(ctx context.Context) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "brew", "upgrade", "scribe")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("brew upgrade: %s: %w", string(out), err)
+	}
+	return out, nil
+}
+
+// UpgradeGoInstall runs `go install github.com/Naoray/scribe/cmd/scribe@latest`.
+func UpgradeGoInstall(ctx context.Context) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "go", "install", "github.com/Naoray/scribe/cmd/scribe@latest")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("go install: %s: %w", string(out), err)
+	}
+	return out, nil
+}
+
+// AssetDownloader downloads a release asset by ID.
+type AssetDownloader interface {
+	DownloadReleaseAsset(ctx context.Context, owner, repo string, id int64) (io.ReadCloser, error)
+}
+
+// UpgradeBinary downloads the release asset, verifies its checksum, extracts
+// the binary, and atomically replaces the current executable.
+func UpgradeBinary(ctx context.Context, release *github.RepositoryRelease, downloader AssetDownloader) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("self-upgrade is not supported on Windows — download manually from GitHub Releases")
+	}
+
+	exePath, err := executablePath()
+	if err != nil {
+		return fmt.Errorf("resolve executable path: %w", err)
+	}
+	resolved, err := evalSymlinks(exePath)
+	if err != nil {
+		resolved = exePath
+	}
+
+	assetName := fmt.Sprintf("scribe_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	checksumName := "checksums.txt"
+
+	var assetID, checksumID int64
+	for _, a := range release.Assets {
+		switch a.GetName() {
+		case assetName:
+			assetID = a.GetID()
+		case checksumName:
+			checksumID = a.GetID()
+		}
+	}
+	if assetID == 0 {
+		return fmt.Errorf("no release asset %q found for %s/%s", assetName, runtime.GOOS, runtime.GOARCH)
+	}
+	if checksumID == 0 {
+		return fmt.Errorf("no checksums.txt found in release")
+	}
+
+	// Download checksum file.
+	checksumRC, err := downloader.DownloadReleaseAsset(ctx, "Naoray", "scribe", checksumID)
+	if err != nil {
+		return fmt.Errorf("download checksums: %w", err)
+	}
+	checksumData, err := io.ReadAll(checksumRC)
+	checksumRC.Close()
+	if err != nil {
+		return fmt.Errorf("read checksums: %w", err)
+	}
+	expectedHash, err := findChecksum(checksumData, assetName)
+	if err != nil {
+		return err
+	}
+
+	// Download the archive.
+	assetRC, err := downloader.DownloadReleaseAsset(ctx, "Naoray", "scribe", assetID)
+	if err != nil {
+		return fmt.Errorf("download asset: %w", err)
+	}
+	assetData, err := io.ReadAll(assetRC)
+	assetRC.Close()
+	if err != nil {
+		return fmt.Errorf("read asset: %w", err)
+	}
+
+	// Verify checksum.
+	actualHash := sha256sum(assetData)
+	if actualHash != expectedHash {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", assetName, expectedHash, actualHash)
+	}
+
+	// Extract binary.
+	content, err := ExtractBinary(bytes.NewReader(assetData), "scribe")
+	if err != nil {
+		return err
+	}
+
+	return ReplaceBinary(resolved, content)
+}
+
+func sha256sum(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+// findChecksum parses a goreleaser checksums.txt and returns the SHA256
+// for the named asset. Format: "<hash>  <filename>\n"
+func findChecksum(data []byte, assetName string) (string, error) {
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) == 2 && parts[1] == assetName {
+			return parts[0], nil
+		}
+	}
+	return "", fmt.Errorf("checksum for %s not found in checksums.txt", assetName)
 }
