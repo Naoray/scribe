@@ -167,9 +167,10 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		for _, e := range errs {
 			fmt.Fprintf(os.Stderr, "  • %s\n", e)
 		}
-	} else {
-		fmt.Fprintf(os.Stderr, "Removed %s\n", key)
+		return fmt.Errorf("removed %s with %d warning(s)", key, len(errs))
 	}
+
+	fmt.Fprintf(os.Stderr, "Removed %s\n", key)
 	return nil
 }
 

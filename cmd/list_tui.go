@@ -267,17 +267,19 @@ func buildLocalRowsExcluding(skills []discovery.Skill, matched map[string]bool) 
 	return buildLocalRows(remaining)
 }
 
+const unmanagedGroup = "Local (unmanaged)"
+
 // registryGroupFromName extracts the registry group from a namespaced skill name.
-// "Artistfy-hq/deploy" → "Artistfy-hq", "local/foo" → "Local (unmanaged)", "bare" → "Local (unmanaged)"
+// "Artistfy-hq/deploy" → "Artistfy-hq", "local/foo" → unmanagedGroup, "bare" → unmanagedGroup
 func registryGroupFromName(name string) string {
 	if idx := strings.Index(name, "/"); idx > 0 {
 		prefix := name[:idx]
 		if prefix == "local" {
-			return "Local (unmanaged)"
+			return unmanagedGroup
 		}
 		return prefix
 	}
-	return "Local (unmanaged)"
+	return unmanagedGroup
 }
 
 func buildLocalRows(skills []discovery.Skill) []listRow {
@@ -295,12 +297,11 @@ func buildLocalRows(skills []discovery.Skill) []listRow {
 		})
 	}
 
-	// Sort: "Local (unmanaged)" last, then alphabetical group names; rows
+	// Sort: unmanagedGroup last, then alphabetical group names; rows
 	// within a group sorted by name.
-	const unmanaged = "Local (unmanaged)"
 	var keys []string
 	for k := range groups {
-		if k != unmanaged {
+		if k != unmanagedGroup {
 			keys = append(keys, k)
 		}
 	}
@@ -308,8 +309,8 @@ func buildLocalRows(skills []discovery.Skill) []listRow {
 
 	var ordered []string
 	ordered = append(ordered, keys...)
-	if _, ok := groups[unmanaged]; ok {
-		ordered = append(ordered, unmanaged)
+	if _, ok := groups[unmanagedGroup]; ok {
+		ordered = append(ordered, unmanagedGroup)
 	}
 
 	var rows []listRow
@@ -592,6 +593,19 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 		m.statusMsg = "Cannot remove: path outside managed directories"
 		m.substate = listSubstateNone
 		return m, nil
+	}
+
+	// Uninstall from all tools that had this skill installed.
+	if installed, ok := m.bag.State.Installed[sk.Name]; ok {
+		detectedTools := tools.DetectTools()
+		for _, tool := range detectedTools {
+			for _, t := range installed.Tools {
+				if t == tool.Name() {
+					_ = tool.Uninstall(sk.Name)
+					break
+				}
+			}
+		}
 	}
 
 	m.bag.State.Remove(sk.Name)
