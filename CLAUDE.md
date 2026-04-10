@@ -27,6 +27,7 @@ internal/
   state/                # ~/.scribe/state.json management
   sync/                 # Sync algorithm — UI-agnostic, emits tea.Msg events
   tools/                # Install target writers (claude, cursor)
+  scaffold/             # Registry scaffolding (scribe create registry)
   workflow/             # Step-sequence engine: Runner, Bag, Formatter, per-command steps
 ```
 

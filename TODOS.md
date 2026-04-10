@@ -81,9 +81,9 @@ Skills grouped by registry in list output. `--registry` filter flag available.
 **Why:** Teams already have repos (e.g., a team hub, monorepo, or docs repo) where they want to add a skill registry. Currently the only option is to manually push the manifest and then `scribe connect`. The CLI should handle this end-to-end.
 
 **Behavior:**
-- `scribe create registry --existing Artistfy/hq` — clones (or fetches) the repo, creates `scribe.toml` + `skills/` on a branch, pushes, opens PR (or commits directly), then auto-connects
+- `scribe create registry --existing Artistfy/hq` — clones (or fetches) the repo, creates `scribe.yaml` + `skills/` on a branch, pushes, opens PR (or commits directly), then auto-connects
 - Interactive mode: prompt for repo selection from user's orgs/repos if no `--existing` flag
-- Detect if `scribe.toml` already exists and abort with message
+- Detect if `scribe.yaml` already exists and abort with message
 
 **Context:** User tried to use `Artistfy/hq` as a registry (2026-04-03). Had to fall back to manual setup because the CLI only supports creating new repos.
 
