@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,9 +46,21 @@ func WriteToStore(skillName string, files []SkillFile) (string, error) {
 
 	skillDir := filepath.Join(base, skillName)
 
-	// Clean slate on update — remove existing before writing.
-	if err := os.RemoveAll(skillDir); err != nil {
-		return "", fmt.Errorf("clear store for %s: %w", skillName, err)
+	// Clean slate on update, but preserve version snapshots.
+	// SnapshotVersion writes to versions/ before WriteToStore runs during sync,
+	// so a blanket RemoveAll would destroy the snapshot the syncer just created.
+	preserved := map[string]bool{"versions": true}
+	entries, err := os.ReadDir(skillDir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("read store for %s: %w", skillName, err)
+	}
+	for _, entry := range entries {
+		if preserved[entry.Name()] {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(skillDir, entry.Name())); err != nil {
+			return "", fmt.Errorf("clear %s: %w", entry.Name(), err)
+		}
 	}
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		return "", fmt.Errorf("create store dir: %w", err)
