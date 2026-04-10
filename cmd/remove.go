@@ -95,8 +95,8 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// Confirmation prompt.
-	if !yes && !useJSON {
-		if isTTY {
+	if !yes {
+		if isTTY && !useJSON {
 			var confirm bool
 			if err := huh.NewConfirm().
 				Title(fmt.Sprintf("Remove %s?", key)).
