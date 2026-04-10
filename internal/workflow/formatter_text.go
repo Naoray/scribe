@@ -39,12 +39,12 @@ func (f *textFormatter) OnSkillDownloading(name string) {
 	fmt.Fprintf(f.out, "  %-20s downloading...\n", name)
 }
 
-func (f *textFormatter) OnSkillInstalled(name string, version string, updated bool) {
+func (f *textFormatter) OnSkillInstalled(name string, updated bool) {
 	verb := "installed"
 	if updated {
-		verb = "updated to"
+		verb = "updated"
 	}
-	fmt.Fprintf(f.out, "  %-20s %s %s\n", name, verb, version)
+	fmt.Fprintf(f.out, "  %-20s %s\n", name, verb)
 }
 
 func (f *textFormatter) OnSkillSkipped(name string, status sync.SkillStatus) {

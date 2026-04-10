@@ -40,9 +40,8 @@ func TestPrintLocalJSON(t *testing.T) {
 		Name        string   `json:"name"`
 		Description string   `json:"description,omitempty"`
 		Package     string   `json:"package,omitempty"`
-		Version     string   `json:"version"`
+		Revision    int      `json:"revision,omitempty"`
 		ContentHash string   `json:"content_hash,omitempty"`
-		Source      string   `json:"source"`
 		Targets     []string `json:"targets"`
 		Managed     bool     `json:"managed"`
 		Path        string   `json:"path,omitempty"`
@@ -50,7 +49,7 @@ func TestPrintLocalJSON(t *testing.T) {
 
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"managed-skill": {Version: "v1.0"},
+			"managed-skill": {Revision: 3},
 		},
 	}
 
@@ -58,18 +57,15 @@ func TestPrintLocalJSON(t *testing.T) {
 		{
 			Name:        "managed-skill",
 			Description: "A managed skill",
-			Version:     "v1.0",
+			Revision:    3,
 			ContentHash: "abc123",
-			Source:      "github.com/example/repo",
 			Targets:     []string{"claude"},
 			LocalPath:   "/home/user/.claude/skills/managed-skill",
 		},
 		{
 			Name:        "unmanaged-skill",
 			Description: "An unmanaged skill",
-			Version:     "v2.0",
 			ContentHash: "def456",
-			Source:      "",
 			Targets:     nil, // should become [] in JSON
 			LocalPath:   "/home/user/.claude/skills/unmanaged-skill",
 		},
@@ -96,8 +92,8 @@ func TestPrintLocalJSON(t *testing.T) {
 	if got[0].ContentHash != "abc123" {
 		t.Errorf("managed-skill: content_hash = %q, want %q", got[0].ContentHash, "abc123")
 	}
-	if got[0].Version != "v1.0" {
-		t.Errorf("managed-skill: version = %q, want %q", got[0].Version, "v1.0")
+	if got[0].Revision != 3 {
+		t.Errorf("managed-skill: revision = %d, want 3", got[0].Revision)
 	}
 
 	// Unmanaged skill
@@ -106,9 +102,6 @@ func TestPrintLocalJSON(t *testing.T) {
 	}
 	if got[1].ContentHash != "def456" {
 		t.Errorf("unmanaged-skill: content_hash = %q, want %q", got[1].ContentHash, "def456")
-	}
-	if got[1].Version != "v2.0" {
-		t.Errorf("unmanaged-skill: version = %q, want %q", got[1].Version, "v2.0")
 	}
 
 	// Targets should be [] not null for nil input

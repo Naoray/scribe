@@ -64,7 +64,6 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 			Origin:      "local",
 			Package:     sk.Package,
 			LocalPath:   sk.LocalPath,
-			Source:      sk.Source,
 		})
 	}
 

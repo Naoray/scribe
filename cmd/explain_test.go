@@ -206,8 +206,7 @@ func TestExplainRendered(t *testing.T) {
 	skill := discovery.Skill{
 		Name:        "test-skill",
 		Description: "A test skill",
-		Version:     "1.0.0",
-		Source:      "github.com/test/repo",
+		Revision:    1,
 		Targets:     []string{"claude", "cursor"},
 	}
 	content := "---\nname: test-skill\n---\n\n# Test Skill\n\nThis skill does testing things."
@@ -225,8 +224,8 @@ func TestExplainRendered(t *testing.T) {
 	if !strings.Contains(output, "A test skill") {
 		t.Errorf("expected description in output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "1.0.0") {
-		t.Errorf("expected version in output, got:\n%s", output)
+	if !strings.Contains(output, "rev 1") {
+		t.Errorf("expected revision in output, got:\n%s", output)
 	}
 }
 
@@ -335,8 +334,7 @@ func TestExplainJSONUnit(t *testing.T) {
 	skill := discovery.Skill{
 		Name:        "my-skill",
 		Description: "Does things",
-		Version:     "2.0.0",
-		Source:      "github.com/org/repo",
+		Revision:    2,
 		Targets:     []string{"claude"},
 		LocalPath:   "/tmp/skills/my-skill",
 	}
@@ -352,8 +350,8 @@ func TestExplainJSONUnit(t *testing.T) {
 	if !strings.Contains(output, `"name": "my-skill"`) {
 		t.Errorf("expected name field, got:\n%s", output)
 	}
-	if !strings.Contains(output, `"version": "2.0.0"`) {
-		t.Errorf("expected version field, got:\n%s", output)
+	if !strings.Contains(output, `"revision": 2`) {
+		t.Errorf("expected revision field, got:\n%s", output)
 	}
 	if !strings.Contains(output, `"content": "# My Skill\n\nHello world."`) {
 		t.Errorf("expected content field, got:\n%s", output)

@@ -70,7 +70,6 @@ type listRow struct {
 	HasStatus bool // true in registry mode, false in local-only mode
 	Version   string
 	Author    string
-	Source    string
 	Targets   []string
 	Local     *discovery.Skill // populated when the skill exists on disk
 }
@@ -240,7 +239,6 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 			}
 			if ss.Installed != nil {
 				row.Targets = ss.Installed.Tools
-				row.Source = ss.Installed.Source
 			}
 			rows = append(rows, row)
 		}
@@ -290,8 +288,6 @@ func buildLocalRows(skills []discovery.Skill) []listRow {
 		groups[g] = append(groups[g], listRow{
 			Name:    sk.Name,
 			Group:   g,
-			Version: sk.Version,
-			Source:  sk.Source,
 			Targets: sk.Targets,
 			Local:   sk,
 		})
@@ -951,7 +947,7 @@ func (m listModel) renderSummary() string {
 	if !hasStatus {
 		return ltDimStyle.Render(fmt.Sprintf("%d skills total", len(m.rows)))
 	}
-	order := []sync.Status{sync.StatusCurrent, sync.StatusOutdated, sync.StatusMissing, sync.StatusExtra}
+	order := []sync.Status{sync.StatusCurrent, sync.StatusModified, sync.StatusOutdated, sync.StatusConflicted, sync.StatusMissing, sync.StatusExtra}
 	var parts []string
 	for _, s := range order {
 		if part := renderStatusCount(s, counts[s]); part != "" {
@@ -987,9 +983,6 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	}
 	if row.Group != "" {
 		pairs = append(pairs, kv{"Registry", row.Group})
-	}
-	if row.Source != "" {
-		pairs = append(pairs, kv{"Source", row.Source})
 	}
 	if len(row.Targets) > 0 {
 		pairs = append(pairs, kv{"Tools", strings.Join(row.Targets, ", ")})
