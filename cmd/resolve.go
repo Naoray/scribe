@@ -58,6 +58,7 @@ func runResolve(cmd *cobra.Command, args []string) error {
 	skillDir := filepath.Join(storeDir, skillName)
 
 	var content []byte
+	theirsPath := filepath.Join(skillDir, ".scribe-theirs.md")
 
 	if ours {
 		// --ours: restore from the latest version snapshot (what we had before the merge).
@@ -74,11 +75,10 @@ func runResolve(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("read version snapshot: %w", err)
 		}
 	} else {
-		// --theirs: use the upstream base (.scribe-base.md).
-		basePath := filepath.Join(skillDir, ".scribe-base.md")
-		content, err = os.ReadFile(basePath)
+		// --theirs: use the upstream sidecar persisted by ThreeWayMerge on conflict.
+		content, err = os.ReadFile(theirsPath)
 		if err != nil {
-			return fmt.Errorf("read upstream base: %w", err)
+			return fmt.Errorf("read upstream sidecar: %w", err)
 		}
 	}
 
@@ -87,6 +87,14 @@ func runResolve(cmd *cobra.Command, args []string) error {
 	if err := os.WriteFile(skillPath, content, 0o644); err != nil {
 		return fmt.Errorf("write resolved skill: %w", err)
 	}
+
+	// Advance the merge base to the resolved content so the next sync starts
+	// from a clean 3-way merge baseline, and drop the conflict sidecar.
+	basePath := filepath.Join(skillDir, ".scribe-base.md")
+	if err := os.WriteFile(basePath, content, 0o644); err != nil {
+		return fmt.Errorf("update merge base: %w", err)
+	}
+	_ = os.Remove(theirsPath)
 
 	// Update state.
 	skill.InstalledHash = sync.ComputeFileHash(content)

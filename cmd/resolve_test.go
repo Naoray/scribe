@@ -101,8 +101,14 @@ func TestRunResolve_Theirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Base stays as the old content (pre-merge) — that's what ThreeWayMerge
+	// leaves behind on conflict. Upstream is persisted to the .scribe-theirs.md
+	// sidecar.
+	if err := os.WriteFile(filepath.Join(skillDir, ".scribe-base.md"), []byte("original stuff\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	theirsContent := []byte("upstream stuff\n")
-	if err := os.WriteFile(filepath.Join(skillDir, ".scribe-base.md"), theirsContent, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, ".scribe-theirs.md"), theirsContent, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -136,6 +142,21 @@ func TestRunResolve_Theirs(t *testing.T) {
 	}
 	if st2.Installed["cleanup"].Revision != 2 {
 		t.Errorf("expected revision 2, got %d", st2.Installed["cleanup"].Revision)
+	}
+
+	// Sidecar must be removed after resolution.
+	if _, err := os.Stat(filepath.Join(skillDir, ".scribe-theirs.md")); !os.IsNotExist(err) {
+		t.Errorf("expected .scribe-theirs.md to be removed, got err=%v", err)
+	}
+
+	// Base must have advanced to the resolved (upstream) content so the next
+	// 3-way merge starts from a clean baseline.
+	gotBase, err := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotBase) != string(theirsContent) {
+		t.Errorf("expected base to equal upstream content, got %q", string(gotBase))
 	}
 }
 
