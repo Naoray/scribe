@@ -151,12 +151,18 @@ func TestMigrateIdempotent(t *testing.T) {
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "skills")
 
-	// Create a slug directory that should NOT be touched.
+	// Create a slug directory that should NOT be touched because the marker
+	// file says migration already ran.
 	slugDir := filepath.Join(storeDir, "slug", "cleanup")
 	if err := os.MkdirAll(slugDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(slugDir, "SKILL.md"), []byte("# Content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create the marker — simulates "migration already happened".
+	if err := os.WriteFile(filepath.Join(storeDir, migratedMarker), []byte("v2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -178,6 +184,40 @@ func TestMigrateIdempotent(t *testing.T) {
 	// Flat dir should NOT exist.
 	if _, err := os.Stat(filepath.Join(storeDir, "cleanup")); !os.IsNotExist(err) {
 		t.Errorf("flat dir should not exist after idempotent skip")
+	}
+
+	// AlreadyMigrated should report true.
+	if !AlreadyMigrated(storeDir) {
+		t.Errorf("AlreadyMigrated should return true when marker exists")
+	}
+}
+
+func TestMigrateWritesMarker(t *testing.T) {
+	tmp := t.TempDir()
+	storeDir := filepath.Join(tmp, "skills")
+
+	// Create a slug-style skill to migrate.
+	slugDir := filepath.Join(storeDir, "owner-repo", "cleanup")
+	if err := os.MkdirAll(slugDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slugDir, "SKILL.md"), []byte("# Content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st := &state.State{SchemaVersion: 1, Installed: make(map[string]state.InstalledSkill)}
+	if _, err := Migrate(storeDir, st); err != nil {
+		t.Fatalf("Migrate failed: %v", err)
+	}
+
+	// Marker must exist after a successful migration so subsequent runs skip.
+	if !AlreadyMigrated(storeDir) {
+		t.Errorf("marker should exist after Migrate completes")
+	}
+
+	// A second Migrate call must be a no-op (and must not error).
+	if _, err := Migrate(storeDir, st); err != nil {
+		t.Errorf("second Migrate should be idempotent, got: %v", err)
 	}
 }
 

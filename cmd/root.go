@@ -9,6 +9,9 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/firstrun"
+	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/storemigrate"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 // Version is set at build time via ldflags.
@@ -23,9 +26,15 @@ var rootCmd = &cobra.Command{
 	SilenceUsage:  true,
 	SilenceErrors: true, // errors printed once below; prevents double-print when RunE re-enters Execute
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip first-run for meta commands.
+		// Skip meta commands.
 		if cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "migrate" {
 			return nil
+		}
+
+		// Run on-disk store migration (v1 slug/<name>/ → v2 flat <name>/) before
+		// any command touches the store. Idempotent — gated by a marker file.
+		if err := runStoreMigration(); err != nil {
+			return err
 		}
 
 		if !firstrun.IsFirstRun() {
@@ -58,6 +67,43 @@ func Execute() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// runStoreMigration executes the v1 → v2 on-disk migration if the marker is
+// absent. Warnings are surfaced on stderr; any error fails the command loud
+// so we don't silently operate on a half-migrated store.
+func runStoreMigration() error {
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		return fmt.Errorf("resolve store dir: %w", err)
+	}
+
+	// Fast path: marker already written, nothing to do.
+	if storemigrate.AlreadyMigrated(storeDir) {
+		return nil
+	}
+
+	st, err := state.Load()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+
+	warnings, err := storemigrate.Migrate(storeDir, st)
+	if err != nil {
+		return fmt.Errorf("migrate store: %w", err)
+	}
+
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "scribe: %s\n", w)
+	}
+
+	// Persist the state so the v2 schema_version (set by parseAndMigrate on load)
+	// is saved to disk alongside the on-disk migration.
+	if err := st.Save(); err != nil {
+		return fmt.Errorf("save state: %w", err)
+	}
+
+	return nil
 }
 
 func init() {

@@ -12,12 +12,27 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 )
 
+// migratedMarker is written at the store root once the v2 flat-store migration
+// completes, so we don't rescan the filesystem on every command.
+const migratedMarker = ".store-migrated-v2"
+
+// AlreadyMigrated reports whether the v2 flat-store migration marker exists.
+// Callers can use this to short-circuit before Load()ing state.
+func AlreadyMigrated(storeDir string) bool {
+	_, err := os.Stat(filepath.Join(storeDir, migratedMarker))
+	return err == nil
+}
+
 // Migrate moves skills from ~/.scribe/skills/<slug>/<name>/ to ~/.scribe/skills/<name>/.
-// It is idempotent — skips if schema_version >= 2 in state.
+// It is idempotent — a marker file under storeDir gates repeat runs, and the
+// underlying file operations are safe to retry if the marker is absent.
 // Returns a list of warnings (e.g., conflicts quarantined).
 func Migrate(storeDir string, st *state.State) (warnings []string, err error) {
-	// Already migrated — nothing to do.
-	if st.SchemaVersion >= 2 {
+	// Check filesystem marker — authoritative signal that migration ran.
+	// state.SchemaVersion can't gate this: parseAndMigrate bumps it in memory
+	// before file migration ever happens, so it's not a reliable signal.
+	markerPath := filepath.Join(storeDir, migratedMarker)
+	if _, statErr := os.Stat(markerPath); statErr == nil {
 		return nil, nil
 	}
 
@@ -159,6 +174,11 @@ func Migrate(storeDir string, st *state.State) (warnings []string, err error) {
 		if len(children) == 0 {
 			_ = os.Remove(dir)
 		}
+	}
+
+	// Mark migration complete so we don't rescan on every command.
+	if err := os.WriteFile(markerPath, []byte("v2\n"), 0o644); err != nil {
+		return warnings, fmt.Errorf("write migration marker: %w", err)
 	}
 
 	return warnings, nil
