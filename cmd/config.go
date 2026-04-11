@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -113,15 +114,11 @@ func runConfigAdoption(cmd *cobra.Command, args []string) error {
 			}
 		}
 		cfg.Adoption.Paths = append(cfg.Adoption.Paths, addPath)
-		// Validate via re-load: save then load to surface boundary errors.
+		if _, err := cfg.AdoptionPaths(); err != nil {
+			return fmt.Errorf("invalid path: %w", err)
+		}
 		if err := cfg.Save(); err != nil {
 			return fmt.Errorf("save config: %w", err)
-		}
-		if _, err := cfg.AdoptionPaths(); err != nil {
-			// Roll back: reload previous state and re-save without the bad path.
-			cfg.Adoption.Paths = cfg.Adoption.Paths[:len(cfg.Adoption.Paths)-1]
-			_ = cfg.Save()
-			return fmt.Errorf("invalid path: %w", err)
 		}
 
 	case removePath != "":
@@ -148,10 +145,7 @@ func runConfigAdoption(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printAdoptionState(cmd *cobra.Command, cfg interface {
-	AdoptionMode() string
-	AdoptionPaths() ([]string, error)
-}) {
+func printAdoptionState(cmd *cobra.Command, cfg *config.Config) {
 	mode := cfg.AdoptionMode()
 	paths, _ := cfg.AdoptionPaths()
 
