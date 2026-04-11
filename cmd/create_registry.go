@@ -12,7 +12,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
@@ -46,6 +45,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 	private, _ := cmd.Flags().GetBool("private")
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd())
+	factory := newCommandFactory()
 
 	// Prompt for missing values if TTY; error if non-TTY.
 	if err := promptOrRequire(&team, "team", "What's your team name?", isTTY); err != nil {
@@ -76,11 +76,14 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, err := config.Load()
+	cfg, err := factory.Config()
 	if err != nil {
 		return err
 	}
-	client := gh.NewClient(cmd.Context(), cfg.Token)
+	client, err := factory.Client()
+	if err != nil {
+		return fmt.Errorf("load github client: %w", err)
+	}
 
 	// Auth check (#3) — creating repos requires authentication.
 	if !client.IsAuthenticated() {
@@ -131,7 +134,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Pushing initial %s and README.md...\n", manifest.ManifestFilename)
 		files := map[string]string{
 			manifest.ManifestFilename: scaffold.ScaffoldYAML(team),
-			"README.md":              scaffold.ScaffoldREADME(team, repoSlug),
+			"README.md":               scaffold.ScaffoldREADME(team, repoSlug),
 		}
 		if err := client.PushFiles(ctx, owner, repo, files, "Initialize skill registry"); err != nil {
 			fmt.Fprintf(os.Stderr, "\nRepo %s was created but the initial commit failed: %v\n", repoSlug, err)
@@ -148,6 +151,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		RepoArg:  repoSlug,
 		Config:   cfg,
 		Client:   client,
+		Factory:  factory,
 		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
 	}
 	if err := workflow.Run(ctx, workflow.ConnectTail(), bag); err != nil {

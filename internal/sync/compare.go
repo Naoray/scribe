@@ -47,6 +47,9 @@ func compareEntry(entry manifest.Entry, installed *state.InstalledSkill, latestS
 	// Packages and branches use SHA comparison.
 	// If latestSHA is empty (API unreachable), assume current to avoid spurious re-installs.
 	if entry.IsPackage() || src.IsBranch() {
+		if latestSHA == missingSkillBlobSHA {
+			return StatusOutdated
+		}
 		if latestSHA == "" {
 			return StatusCurrent
 		}

@@ -11,8 +11,6 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/config"
-	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 )
@@ -43,7 +41,8 @@ new scribe.yaml format, and pushes the change as a single commit
 }
 
 func runMigrate(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
+	factory := newCommandFactory()
+	cfg, err := factory.Config()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -63,7 +62,10 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	client := gh.NewClient(ctx, cfg.Token)
+	client, err := factory.Client()
+	if err != nil {
+		return fmt.Errorf("load github client: %w", err)
+	}
 	if !client.IsAuthenticated() {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}

@@ -8,6 +8,7 @@ import (
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 
+	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/provider"
@@ -39,26 +40,64 @@ func SyncTail() []Step {
 }
 
 func StepLoadConfig(ctx context.Context, b *Bag) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+	if b.Config == nil {
+		cfg, err := loadConfig(b.Factory)
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		b.Config = cfg
 	}
-	b.Config = cfg
-	b.Client = gh.NewClient(ctx, cfg.Token)
 
-	// Wrap the GitHub client into a Provider for discovery/fetch.
-	b.Provider = provider.NewGitHubProvider(provider.WrapGitHubClient(b.Client))
+	if b.Client == nil {
+		if b.Factory != nil {
+			client, err := b.Factory.Client()
+			if err != nil {
+				return fmt.Errorf("load github client: %w", err)
+			}
+			b.Client = client
+		} else {
+			b.Client = gh.NewClient(ctx, b.Config.Token)
+		}
+	}
+
+	if b.Provider == nil {
+		if b.Factory != nil {
+			p, err := b.Factory.Provider()
+			if err != nil {
+				return fmt.Errorf("load provider: %w", err)
+			}
+			b.Provider = p
+		} else {
+			b.Provider = provider.NewGitHubProvider(provider.WrapGitHubClient(b.Client))
+		}
+	}
 
 	return nil
 }
 
 func StepLoadState(_ context.Context, b *Bag) error {
-	st, err := state.Load()
-	if err != nil {
-		return fmt.Errorf("load state: %w", err)
+	if b.State == nil {
+		st, err := loadState(b.Factory)
+		if err != nil {
+			return fmt.Errorf("load state: %w", err)
+		}
+		b.State = st
 	}
-	b.State = st
 	return nil
+}
+
+func loadConfig(factory *app.Factory) (*config.Config, error) {
+	if factory != nil {
+		return factory.Config()
+	}
+	return config.Load()
+}
+
+func loadState(factory *app.Factory) (*state.State, error) {
+	if factory != nil {
+		return factory.State()
+	}
+	return state.Load()
 }
 
 func StepCheckConnected(_ context.Context, b *Bag) error {

@@ -1,6 +1,8 @@
 package github_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/github"
@@ -18,5 +20,22 @@ func TestTreeEntryStruct(t *testing.T) {
 	}
 	if entry.Type != "blob" {
 		t.Errorf("Type: got %q", entry.Type)
+	}
+}
+
+func TestNewClientPrefersGhAuthToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "env-token")
+
+	tmpDir := t.TempDir()
+	ghPath := filepath.Join(tmpDir, "gh")
+	script := "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"token\" ]; then\n  printf 'gh-token\\n'\n  exit 0\nfi\nexit 1\n"
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	client := github.NewClient(t.Context(), "config-token")
+	if !client.IsAuthenticated() {
+		t.Fatal("expected authenticated client from gh auth token")
 	}
 }

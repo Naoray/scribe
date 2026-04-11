@@ -7,15 +7,18 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/firstrun"
-	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/storemigrate"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
 // Version is set at build time via ldflags.
 var Version = "dev"
+
+func newCommandFactory() *app.Factory {
+	return app.NewFactory()
+}
 
 var rootCmd = &cobra.Command{
 	Use:           "scribe",
@@ -33,7 +36,8 @@ var rootCmd = &cobra.Command{
 
 		// Run on-disk store migration (v1 slug/<name>/ → v2 flat <name>/) before
 		// any command touches the store. Idempotent — gated by a marker file.
-		if err := runStoreMigration(); err != nil {
+		factory := newCommandFactory()
+		if err := runStoreMigration(factory); err != nil {
 			return err
 		}
 
@@ -41,7 +45,7 @@ var rootCmd = &cobra.Command{
 			return nil
 		}
 
-		cfg, err := config.Load()
+		cfg, err := factory.Config()
 		if err != nil {
 			return err
 		}
@@ -72,7 +76,7 @@ func Execute() {
 // runStoreMigration executes the v1 → v2 on-disk migration if the marker is
 // absent. Warnings are surfaced on stderr; any error fails the command loud
 // so we don't silently operate on a half-migrated store.
-func runStoreMigration() error {
+func runStoreMigration(factory *app.Factory) error {
 	storeDir, err := tools.StoreDir()
 	if err != nil {
 		return fmt.Errorf("resolve store dir: %w", err)
@@ -83,7 +87,7 @@ func runStoreMigration() error {
 		return nil
 	}
 
-	st, err := state.Load()
+	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}

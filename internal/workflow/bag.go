@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/discovery"
 	gh "github.com/Naoray/scribe/internal/github"
@@ -20,6 +21,7 @@ type Bag struct {
 	RepoFlag     string // --registry filter
 	RemoteFlag   bool   // --remote: show available skills from registries
 	TrustAllFlag bool   // --trust-all: approve all package commands without prompting
+	Factory      *app.Factory
 
 	// Populated by steps
 	Config    *config.Config

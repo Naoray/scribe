@@ -24,6 +24,7 @@ type GitHubFetcher interface {
 	FetchFile(ctx context.Context, owner, repo, path, ref string) ([]byte, error)
 	FetchDirectory(ctx context.Context, owner, repo, dirPath, ref string) ([]SkillFile, error)
 	LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error)
+	GetTree(ctx context.Context, owner, repo, ref string) ([]provider.TreeEntry, error)
 }
 
 // Syncer wires manifest, github, tools, and state together.
@@ -93,7 +94,13 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 	}
 
 	var statuses []SkillStatus
-	shaCache := map[string]string{}
+	// Cache for package commit SHAs keyed by owner/repo/ref.
+	commitSHACache := map[string]string{}
+	// Cache for branch-skill tree listings keyed by owner/repo/ref.
+	// A single GetTree call yields blob SHAs for every skill in the registry,
+	// so we only hit the API once per (owner, repo, ref) tuple even across
+	// dozens of catalog entries.
+	treeCache := map[string][]provider.TreeEntry{}
 
 	for i := range m.Catalog {
 		entry := &m.Catalog[i]
@@ -102,18 +109,41 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
-		// Resolve the latest SHA for branch-pinned and package entries.
-		// If Client is a NoopFetcher (or the API is unavailable), LatestCommitSHA
-		// returns an error and latestSHA stays ""; compareEntry handles that gracefully.
-		if err == nil && (src.IsBranch() || entry.IsPackage()) {
-			key := src.Owner + "/" + src.Repo + "/" + src.Ref
-			if cached, ok := shaCache[key]; ok {
-				latestSHA = cached
-			} else {
-				sha, err := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
-				if err == nil {
-					shaCache[key] = sha
-					latestSHA = sha
+		// Resolve the latest identity signal for branch-pinned and package entries.
+		// Branch skills compare blob SHAs (file content identity) via GetTree; packages
+		// still compare commit SHAs via LatestCommitSHA (tree-based identity is a
+		// follow-up PR). If the API is unavailable, latestSHA stays "" and
+		// compareEntry handles that gracefully.
+		if err == nil {
+			switch {
+			case entry.IsPackage():
+				key := src.Owner + "/" + src.Repo + "/" + src.Ref
+				if cached, ok := commitSHACache[key]; ok {
+					latestSHA = cached
+				} else {
+					sha, cerr := s.Client.LatestCommitSHA(ctx, src.Owner, src.Repo, src.Ref)
+					if cerr == nil {
+						commitSHACache[key] = sha
+						latestSHA = sha
+					}
+				}
+			case src.IsBranch():
+				key := src.Owner + "/" + src.Repo + "/" + src.Ref
+				tree, ok := treeCache[key]
+				if !ok {
+					fetched, terr := s.Client.GetTree(ctx, src.Owner, src.Repo, src.Ref)
+					if terr == nil {
+						treeCache[key] = fetched
+						tree = fetched
+					}
+				}
+				if len(tree) > 0 {
+					resolvedSHA, found := resolveSkillBlobSHA(tree, *entry)
+					if found {
+						latestSHA = resolvedSHA
+					} else {
+						latestSHA = missingSkillBlobSHA
+					}
 				}
 			}
 		}

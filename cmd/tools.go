@@ -74,8 +74,9 @@ func newToolsDisableCommand() *cobra.Command {
 
 func runToolsList(cmd *cobra.Command, _ []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
+	factory := newCommandFactory()
 
-	cfg, err := config.Load()
+	cfg, err := factory.Config()
 	if err != nil {
 		return err
 	}
@@ -172,7 +173,8 @@ func runToolsDisable(cmd *cobra.Command, args []string) error {
 }
 
 func setToolEnabled(name string, enabled bool) error {
-	cfg, err := config.Load()
+	factory := newCommandFactory()
+	cfg, err := factory.Config()
 	if err != nil {
 		return err
 	}

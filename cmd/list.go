@@ -51,6 +51,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		JSONFlag:         useJSON,
 		RemoteFlag:       remoteFlag,
 		RepoFlag:         repoFlag,
+		Factory:          newCommandFactory(),
 		FilterRegistries: filterRegistries,
 	}
 
