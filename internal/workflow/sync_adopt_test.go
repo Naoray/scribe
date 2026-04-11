@@ -116,6 +116,8 @@ func (m *mockAdoptTool) SkillPath(skillName string) (string, error) {
 	return filepath.Join(m.name, skillName), nil
 }
 
+func (m *mockAdoptTool) CanonicalTarget(_ string) (string, bool) { return "", false }
+
 var _ tools.Tool = (*mockAdoptTool)(nil)
 
 // ---------------------------------------------------------------------------

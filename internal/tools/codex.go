@@ -62,6 +62,10 @@ func (t CodexTool) SkillPath(skillName string) (string, error) {
 	return filepath.Join(skillsDir, skillName), nil
 }
 
+func (t CodexTool) CanonicalTarget(canonicalDir string) (string, bool) {
+	return canonicalDir, true
+}
+
 func codexSkillsDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
