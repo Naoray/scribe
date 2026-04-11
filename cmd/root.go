@@ -22,8 +22,8 @@ func newCommandFactory() *app.Factory {
 
 var rootCmd = &cobra.Command{
 	Use:           "scribe",
-	Short:         "Team skill sync for AI coding agents",
-	Long:          "Scribe syncs AI coding agent skills across your team via a shared GitHub loadout.",
+	Short:         "Manage local AI coding agent skills",
+	Long:          "Scribe manages local AI coding agent skills and keeps shared team registries in sync.",
 	Version:       Version,
 	Args:          cobra.NoArgs,
 	SilenceUsage:  true,
@@ -111,7 +111,7 @@ func runStoreMigration(factory *app.Factory) error {
 }
 
 func init() {
-	rootCmd.RunE = runHub
+	rootCmd.RunE = runDefault
 	rootCmd.Flags().Bool("json", false, "Output machine-readable JSON")
 
 	// Backward-compat aliases: hidden + deprecated, point to registry subcommands.
@@ -131,6 +131,7 @@ func init() {
 		newAddCommand(),
 		newRemoveCommand(),
 		newSyncCommand(),
+		newStatusCommand(),
 		newResolveCommand(),
 		newRestoreCommand(),
 		newToolsCommand(),

@@ -34,7 +34,7 @@ func TestHubJSONOutput(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := writeHubJSON(&buf, "1.0.0", cfg, st)
+	err := writeStatusJSON(&buf, "1.0.0", cfg, st)
 	if err != nil {
 		t.Fatalf("writeHubJSON error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestHubJSONNoState(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := writeHubJSON(&buf, "dev", cfg, st)
+	err := writeStatusJSON(&buf, "dev", cfg, st)
 	if err != nil {
 		t.Fatalf("writeHubJSON error: %v", err)
 	}
