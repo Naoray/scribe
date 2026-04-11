@@ -232,7 +232,7 @@ func (f *jsonFormatter) Flush() error {
 			"failed":    f.summary.Failed,
 		},
 	}
-	if f.adoption.active || f.adoption.Skipped != "" {
+	if f.adoption.active || f.adoption.Skipped != "" || f.adoption.Conflicts > 0 {
 		out["adoption"] = f.adoption
 	}
 	return json.NewEncoder(f.out).Encode(out)

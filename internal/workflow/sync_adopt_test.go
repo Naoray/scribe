@@ -1,7 +1,6 @@
 package workflow_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -266,14 +265,12 @@ func TestStepAdopt_ErrorDoesNotAbortSync(t *testing.T) {
 		installErr: errors.New("disk full"),
 	}
 
-	var out, errOut bytes.Buffer
-	fmtr := workflow.NewFormatterWithWriters(false, false, &out, &errOut)
-
+	rec := &adoptRecorder{}
 	b := &workflow.Bag{
 		Config:    &config.Config{Adoption: config.AdoptionConfig{Mode: "auto"}},
 		State:     freshState(t, home),
 		Tools:     []tools.Tool{failTool},
-		Formatter: fmtr,
+		Formatter: rec,
 	}
 
 	// Must not return error regardless of adoption failure.
@@ -281,9 +278,12 @@ func TestStepAdopt_ErrorDoesNotAbortSync(t *testing.T) {
 		t.Fatalf("StepAdopt must be non-fatal; got: %v", err)
 	}
 
-	// Error should be surfaced in formatter output, not propagated.
-	if errOut.Len() == 0 && out.Len() == 0 {
-		t.Log("note: no formatter output captured (may be fine if error went to errOut)")
+	// Error must be routed to the formatter, not propagated.
+	if len(rec.errors) != 1 {
+		t.Fatalf("expected 1 adoption error, got %d", len(rec.errors))
+	}
+	if rec.errors[0].name != "broken-skill" {
+		t.Errorf("expected error for broken-skill, got %q", rec.errors[0].name)
 	}
 }
 
