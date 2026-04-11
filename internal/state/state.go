@@ -33,6 +33,20 @@ const (
 	OriginLocal Origin = "local"
 )
 
+// ToolsMode controls how the Tools field is interpreted at sync time.
+type ToolsMode string
+
+const (
+	// ToolsModeInherit is the zero value: the skill installs to whichever
+	// tools are globally enabled. Tools is a cache of the most recent
+	// effective list and may be rewritten by sync.
+	ToolsModeInherit ToolsMode = ""
+	// ToolsModePinned means the user explicitly chose this skill's tools.
+	// Sync must respect Tools verbatim (intersected with availability) and
+	// must not overwrite it based on global toggles.
+	ToolsModePinned ToolsMode = "pinned"
+)
+
 // InstalledSkill records everything needed to detect updates and uninstall.
 type InstalledSkill struct {
 	Revision      int           `json:"revision"`
@@ -40,6 +54,7 @@ type InstalledSkill struct {
 	Sources       []SkillSource `json:"sources,omitempty"`
 	InstalledAt   time.Time     `json:"installed_at"`
 	Tools         []string      `json:"tools"`
+	ToolsMode     ToolsMode     `json:"tools_mode,omitempty"`
 	Paths         []string      `json:"paths"`
 	Origin        Origin        `json:"origin,omitempty"`
 
@@ -93,6 +108,7 @@ type legacyInstalledSkill struct {
 	InstalledHash string        `json:"installed_hash,omitempty"`
 	Sources       []SkillSource `json:"sources,omitempty"`
 	Origin        Origin        `json:"origin,omitempty"`
+	ToolsMode     ToolsMode     `json:"tools_mode,omitempty"`
 }
 
 // DisplayVersion returns the version string shown in `scribe list`.
@@ -358,6 +374,7 @@ func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
 		Sources:       ls.Sources,
 		InstalledAt:   ls.InstalledAt,
 		Tools:         ls.Tools,
+		ToolsMode:     ls.ToolsMode,
 		Paths:         ls.Paths,
 		Origin:        ls.Origin,
 		Type:          ls.Type,

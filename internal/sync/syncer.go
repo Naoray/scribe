@@ -377,10 +377,14 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				continue
 			}
 
+			// Filter to the skill's effective tools (pinned mode respects user
+			// selection; inherit mode uses every globally-enabled tool).
+			effectiveTools := selectEffectiveTools(s.Tools, installed)
+
 			var paths []string
 			var toolNames []string
 			toolFailed := false
-			for _, t := range s.Tools {
+			for _, t := range effectiveTools {
 				links, err := t.Install(sk.Name, canonicalDir)
 				if err != nil {
 					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
@@ -420,11 +424,21 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 			sources := mergeSources(installed, newSource)
 
+			// Preserve pinned ToolsMode across re-syncs. New skills default to
+			// inherit; for pinned skills we still overwrite Tools with the
+			// resolved names so stale entries (tool uninstalled globally)
+			// don't linger in state.
+			toolsMode := state.ToolsModeInherit
+			if installed != nil {
+				toolsMode = installed.ToolsMode
+			}
+
 			st.RecordInstall(sk.Name, state.InstalledSkill{
 				Revision:      nextRevision(installed),
 				InstalledHash: installedHash,
 				Sources:       sources,
 				Tools:         toolNames,
+				ToolsMode:     toolsMode,
 				Paths:         paths,
 			})
 			// Save after each successful install — partial sync is safe.
@@ -498,6 +512,27 @@ func resolveToolCmds(entry *manifest.Entry, activeTools []tools.Tool) []toolCmd 
 		cmds = append(cmds, toolCmd{installCmd: entry.Install, updateCmd: entry.Update})
 	}
 	return cmds
+}
+
+// selectEffectiveTools filters the globally-enabled tools down to the subset
+// that should receive this skill, honoring ToolsMode. Order comes from the
+// installed record for pinned mode (preserves user intent); from the global
+// list for inherit mode (preserves tool config order).
+func selectEffectiveTools(global []tools.Tool, installed *state.InstalledSkill) []tools.Tool {
+	if installed == nil || installed.ToolsMode != state.ToolsModePinned {
+		return global
+	}
+	byName := make(map[string]tools.Tool, len(global))
+	for _, t := range global {
+		byName[t.Name()] = t
+	}
+	out := make([]tools.Tool, 0, len(installed.Tools))
+	for _, name := range installed.Tools {
+		if t, ok := byName[name]; ok {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // formatCmds formats tool commands for display in approval prompts.

@@ -150,6 +150,7 @@ func init() {
 		newStatusCommand(),
 		newResolveCommand(),
 		newRestoreCommand(),
+		newSkillCommand(),
 		newToolsCommand(),
 		newGuideCommand(),
 		newConfigCommand(),
