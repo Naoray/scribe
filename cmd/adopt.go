@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/adopt"
+	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/tools"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -46,7 +48,6 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 	yes, _ := cmd.Flags().GetBool("yes")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	jsonFlag, _ := cmd.Flags().GetBool("json")
-	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
@@ -64,7 +65,7 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Non-TTY without --yes: cannot prompt. Exit with guidance.
-	if !isTTY && !yes && !dryRun && !useJSON {
+	if !isTTY && !yes && !dryRun && !jsonFlag {
 		return fmt.Errorf("adopt: non-interactive terminal detected — pass --yes to force auto-adopt, or run 'scribe config adoption --mode off' to disable")
 	}
 
@@ -87,14 +88,15 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// --dry-run: print plan and exit without writing.
 	// Bypasses formatter — one-shot output, not an event stream.
 	if dryRun {
+		verbose, _ := cmd.Flags().GetBool("verbose")
 		return printDryRun(plan, useJSON, verbose)
 	}
 
 	// Non-TTY + --json without --yes: also print dry-run style plan.
 	if useJSON && !yes {
+		verbose, _ := cmd.Flags().GetBool("verbose")
 		return printDryRun(plan, true, verbose)
 	}
 
@@ -156,7 +158,6 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("adoption completed with %d failure(s)", len(result.Failed))
 	}
 
-	_ = verbose // consumed by dry-run path; not used in live path
 	return nil
 }
 
@@ -245,7 +246,7 @@ func printDryRun(plan adopt.Plan, useJSON, verbose bool) error {
 	}
 	for _, c := range plan.Conflicts {
 		if verbose {
-			fmt.Printf("  ! %s  conflict: managed=%s unmanaged=%s\n", c.Name, c.Managed.InstalledHash[:7], c.Unmanaged.Hash[:7])
+			fmt.Printf("  ! %s  conflict: managed=%s unmanaged=%s\n", c.Name, shortHash(c.Managed.InstalledHash), shortHash(c.Unmanaged.Hash))
 		} else {
 			fmt.Printf("  ! %s  (conflict)\n", c.Name)
 		}
@@ -353,10 +354,17 @@ func showDiff(c adopt.Conflict) {
 	managedPath := c.Managed.Paths
 	unmanagedPath := c.Unmanaged.LocalPath + "/SKILL.md"
 
-	// Use a managed path if available; fall back to the store.
-	managed := unmanagedPath // fallback; replaced below if paths available
+	// Use a managed path if available; fall back to canonical store path.
+	var managed string
 	if len(managedPath) > 0 {
 		managed = managedPath[0]
+	} else {
+		storeDir, err := paths.StoreDir()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "cannot show diff: store path unavailable")
+			return
+		}
+		managed = filepath.Join(storeDir, c.Name, "SKILL.md")
 	}
 
 	diffBytes, err := exec.Command("diff", "-u", managed, unmanagedPath).Output()
@@ -370,7 +378,13 @@ func showDiff(c adopt.Conflict) {
 		pager = "less"
 	}
 
-	pagerCmd := exec.Command(pager)
+	parts := strings.Fields(pager)
+	if len(parts) == 0 {
+		fmt.Print(string(diffBytes))
+		return
+	}
+
+	pagerCmd := exec.Command(parts[0], parts[1:]...)
 	pagerCmd.Stdin = strings.NewReader(string(diffBytes))
 	pagerCmd.Stdout = os.Stdout
 	pagerCmd.Stderr = os.Stderr
