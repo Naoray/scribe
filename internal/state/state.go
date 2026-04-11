@@ -125,13 +125,13 @@ func Load() (*State, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &State{SchemaVersion: 2, Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 3, Installed: make(map[string]InstalledSkill)}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return &State{SchemaVersion: 2, Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 3, Installed: make(map[string]InstalledSkill)}, nil
 	}
 	return parseAndMigrate(data)
 }
@@ -141,6 +141,10 @@ func Load() (*State, error) {
 // 2. Rename targets → tools in each InstalledSkill
 // 3. Namespace bare keys using Registries[0] owner prefix
 // 4. Schema v2: convert to bare keys, populate Sources, set Revision
+// 5. Schema v3: drop all SkillSource entries (v2 stored commit SHAs in
+//    LastSHA and sometimes the upstream source repo in Registry — both are
+//    unreliable under the blob-SHA identity model). The next `scribe sync`
+//    repopulates Sources with correct blob SHAs and curating registry.
 func parseAndMigrate(data []byte) (*State, error) {
 	var legacy legacyState
 	if err := json.Unmarshal(data, &legacy); err != nil {
@@ -243,11 +247,22 @@ func parseAndMigrate(data []byte) (*State, error) {
 
 		s.SchemaVersion = 2
 	} else {
-		// Already v2 — pass through unchanged
+		// Already v2+ — pass through unchanged
 		for _, e := range entries {
 			skill := legacyToSkill(e.skill)
 			s.Installed[e.key] = skill
 		}
+	}
+
+	// Migration 5: Schema v3 — drop all source entries to force re-resolve.
+	// v2 LastSHA values are commit SHAs, incompatible with the new blob-SHA
+	// comparison in sync.Diff. Run `scribe sync` afterwards to repopulate.
+	if s.SchemaVersion < 3 {
+		for name, skill := range s.Installed {
+			skill.Sources = nil
+			s.Installed[name] = skill
+		}
+		s.SchemaVersion = 3
 	}
 
 	return s, nil
