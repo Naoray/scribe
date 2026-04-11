@@ -10,11 +10,14 @@ func TestShouldInclude(t *testing.T) {
 	}{
 		{"skill file", "SKILL.md", true},
 		{"script", "scripts/deploy.sh", true},
-		{"readme", "README.md", true},
+		{"nested readme", "docs/README.md", true},
 		{"nested file", "lib/helper.go", true},
 
 		// Deny list — these are repo-root files that leak into skill directories
 		// when the skill path == repo root.
+		{"readme", "README.md", false},
+		{"readme txt", "README.txt", false},
+		{"readme no extension", "README", false},
 		{"dot git", ".git/config", false},
 		{"dot gitignore", ".gitignore", false},
 		{"dot gitkeep", ".gitkeep", false},

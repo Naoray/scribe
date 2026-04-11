@@ -3,12 +3,16 @@ package sync_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 type mockExecutor struct {
@@ -21,6 +25,73 @@ type mockExecutor struct {
 func (m *mockExecutor) Execute(ctx context.Context, command string, timeout time.Duration) (string, string, error) {
 	m.commands = append(m.commands, command)
 	return m.stdout, m.stderr, m.err
+}
+
+type syncTestFetcher struct {
+	files []tools.SkillFile
+}
+
+func (f *syncTestFetcher) FetchFile(ctx context.Context, owner, repo, path, ref string) ([]byte, error) {
+	return nil, nil
+}
+
+func (f *syncTestFetcher) FetchDirectory(ctx context.Context, owner, repo, dirPath, ref string) ([]tools.SkillFile, error) {
+	return f.files, nil
+}
+
+func (f *syncTestFetcher) LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error) {
+	return "", nil
+}
+
+func (f *syncTestFetcher) GetTree(ctx context.Context, owner, repo, ref string) ([]provider.TreeEntry, error) {
+	return nil, nil
+}
+
+func TestRunWithDiff_DoesNotOverwriteTargetReadme(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	projectDir := t.TempDir()
+	readmePath := filepath.Join(projectDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# project readme\n"), 0o644); err != nil {
+		t.Fatalf("write project readme: %v", err)
+	}
+
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{
+				{Path: "SKILL.md", Content: []byte("# skill\n")},
+				{Path: "README.md", Content: []byte("# scribe readme\n")},
+			},
+		},
+		Tools: []tools.Tool{tools.CommandTool{
+			ToolName:         "project-copy",
+			InstallCommand:   "cp -R \"{{canonical_dir}}\"/. \"" + projectDir + "\"",
+			UninstallCommand: "true",
+			PathTemplate:     projectDir,
+		}},
+	}
+
+	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
+	statuses := []sync.SkillStatus{{
+		Name:   "repo-root-skill",
+		Status: sync.StatusMissing,
+		Entry: &manifest.Entry{
+			Name:   "repo-root-skill",
+			Source: "github:acme/skills@main",
+		},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/team", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	got, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("read project readme: %v", err)
+	}
+	if string(got) != "# project readme\n" {
+		t.Fatalf("README.md overwritten: got %q", string(got))
+	}
 }
 
 func TestApply_PackageMissing_Approved(t *testing.T) {

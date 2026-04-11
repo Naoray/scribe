@@ -33,6 +33,9 @@ func shouldInclude(path string) bool {
 	// Only deny exact matches at the root level (not nested).
 	if filepath.Dir(path) == "." {
 		base := strings.ToLower(filepath.Base(path))
+		if base == "readme" || strings.HasPrefix(base, "readme.") {
+			return false
+		}
 		for _, denied := range denyExact {
 			if base == denied {
 				return false
