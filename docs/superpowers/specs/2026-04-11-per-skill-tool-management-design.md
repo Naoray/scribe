@@ -44,11 +44,13 @@ const (
 
 type InstalledSkill struct {
     // ... existing fields
-    Tools     []string  `json:"tools"`
-    Paths     []string  `json:"paths"`
-    ToolsMode ToolsMode `json:"tools_mode,omitempty"`
+    Tools     []string            `json:"tools"`
+    Paths     map[string][]string `json:"paths"` // tool name → installed paths
+    ToolsMode ToolsMode           `json:"tools_mode,omitempty"`
 }
 ```
+
+`Paths` is a map keyed by tool name rather than a flat slice. This makes the tool-to-paths association explicit, eliminates prefix-matching heuristics for self-heal, and handles custom tools whose `PathTemplate` produces arbitrary filesystem paths with no discoverable root.
 
 - `inherit` (default, zero value) — sync recomputes the tool set from the globally enabled, detected tools on every run. Legacy state entries without the field load as inherit.
 - `pinned` — user explicitly touched this skill via the per-skill TUI, the bulk `tools loadout` TUI, or the `skill edit --tools` CLI. Sync uses `Tools` verbatim. Global `tools enable/disable` does not affect pinned skills.
@@ -213,9 +215,14 @@ Uses the same install-first ordering and partial-failure semantics.
 
 ### `tools.Tool` interface change
 
-`Uninstall` must report which paths it removed so the merge step can drop them from `state.InstalledSkill.Paths`. Current signature is `Uninstall(skillName string) error`; new signature is `Uninstall(skillName string) (removed []string, err error)`. Four existing implementations update (`ClaudeTool`, `CursorTool`, `GeminiTool`, `CodexTool`) plus the custom-tool runtime wrapper. This is strictly additive from the caller's perspective — existing `_ = tool.Uninstall(...)` sites become `_, _ = tool.Uninstall(...)`.
+`Uninstall` must report which paths it removed so the merge step can drop them from `state.InstalledSkill.Paths`. Current signature is `Uninstall(skillName string) error`; new signature is `Uninstall(skillName string) (removed []string, err error)`. Four builtin implementations update (`ClaudeTool`, `CursorTool`, `GeminiTool`, `CodexTool`) plus the custom-tool runtime wrapper (`CommandTool`).
 
-Rationale: `state.InstalledSkill.Paths` is a flat slice without a per-tool key. Without a return value from `Uninstall`, there is no reliable way to know which paths to drop when only one tool is removed. Re-deriving the path from convention is fragile (custom tools define arbitrary install paths).
+The signature change breaks compilation at two existing callsites that must be updated in the same PR:
+
+- `cmd/remove.go:126` — currently `if err := tool.Uninstall(key); err != nil { ... }`. Update to capture both return values, keep the error branch, and pass the returned paths to the state mutation so the per-tool `Paths` entry is cleared.
+- `cmd/list_tui.go:882` — currently `_ = tool.Uninstall(sk.Name)`. Update to `_, _ = tool.Uninstall(sk.Name)` at minimum; better, capture the paths and use them to update state consistently.
+
+Rationale: `state.InstalledSkill.Paths` needs per-tool keys. Without a return value from `Uninstall`, there is no reliable way to know which paths to drop when only one tool is removed — prefix matching fails for custom tools with arbitrary path templates.
 
 ### New package: `internal/tools/assign`
 
@@ -259,7 +266,7 @@ func Merge(installed state.InstalledSkill, results []Result) state.InstalledSkil
 
 `internal/sync/syncer.go`:
 - For skills with `ToolsMode == ToolsModePinned`, skip the "which tools" computation and use `state.Tools` verbatim.
-- Self-heal: for each tool in `state.Tools`, verify the expected symlink exists via `os.Lstat` on every recorded path in `state.Paths` that belongs to that tool. If missing, re-run `Install`. Path-to-tool association is re-derived by matching path prefixes against each `tools.Tool.Name()`-specific root.
+- Self-heal: for each tool in `state.Tools`, look up the paths from `state.Paths[toolName]` and verify each exists via `os.Lstat`. If any are missing, re-run `Install` and replace that tool's path entry with the fresh result. The map keyed by tool name makes this lookup exact — no prefix matching, no custom-tool edge cases.
 - `applyPackage` is unchanged. Packages always stay inherit mode with empty `Tools`.
 - Cursor is excluded from both the pinned path and the self-heal path. It continues to use today's per-sync behavior (install into the current working directory's `.cursor/rules/`).
 
@@ -301,9 +308,19 @@ func Merge(installed state.InstalledSkill, results []Result) state.InstalledSkil
 - `cmd/skill_test.go` (new): flag mutex, `--inherit` resets mode, `--add cursor` rejected.
 - `cmd/tools_test.go`: reconcile path, pinned skills skipped, summary output.
 
+## State migration
+
+`InstalledSkill.Paths` changes from `[]string` to `map[string][]string`. Legacy state files have the flat slice. The migration step in `state.Load`:
+
+1. Read raw JSON into a shadow struct that accepts either shape (`json.RawMessage` or custom unmarshal).
+2. If the legacy slice form is detected, bucket each path under `state.Installed[name].Tools[i]` by position — not by prefix matching. The legacy invariant is that sync populated `Tools` and `Paths` together in install order, so `Paths[i]` belongs to `Tools[i]`. Any leftover paths (if counts diverge for some corrupted state) go under the key `"_unknown"` and are ignored for self-heal.
+3. Write the new shape on the next save.
+
+This migration is deterministic, lossless for well-formed state, and quietly degrades for malformed state without breaking the load.
+
 ## Rollout
 
-Single PR. No feature flag. Migration is a no-op: new `ToolsMode` field defaults to `inherit` for existing state entries, preserving current behavior on the first sync after upgrade.
+Single PR. No feature flag. `ToolsMode` defaults to `inherit` for existing state entries via JSON `omitempty`. `Paths` migration runs automatically on load; no user action required.
 
 The existing global `tools enable/disable` gains the reconcile behavior. Users who previously relied on "enable never touches installed skills" will see a one-time backfill — this is the intended fix for the biggest coarse-toggle pain point, and pinned skills (which don't exist yet for any current user) are still respected.
 
