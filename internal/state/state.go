@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -125,13 +126,13 @@ func Load() (*State, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &State{SchemaVersion: 3, Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill)}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return &State{SchemaVersion: 3, Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill)}, nil
 	}
 	return parseAndMigrate(data)
 }
@@ -142,8 +143,8 @@ func Load() (*State, error) {
 //  3. Namespace bare keys using Registries[0] owner prefix
 //  4. Schema v2: convert to bare keys, populate Sources, set Revision
 //  5. Schema v3: bump the state schema while preserving existing Sources.
-//     Older LastSHA values may still be commit SHAs, but the next blob-SHA
-//     based sync can refresh them in place without forcing reinstall flows.
+//  6. Schema v4: normalize branch-backed LastSHA values to the locally cached
+//     SKILL.md blob SHA so blob-SHA diffs do not force needless reinstalls.
 func parseAndMigrate(data []byte) (*State, error) {
 	var legacy legacyState
 	if err := json.Unmarshal(data, &legacy); err != nil {
@@ -259,6 +260,10 @@ func parseAndMigrate(data []byte) (*State, error) {
 	if s.SchemaVersion < 3 {
 		s.SchemaVersion = 3
 	}
+	if s.SchemaVersion < 4 {
+		normalizeBranchSourceSHAs(s)
+		s.SchemaVersion = 4
+	}
 
 	return s, nil
 }
@@ -368,4 +373,57 @@ func appendUniqueSources(base, extra []SkillSource) []SkillSource {
 
 func statePath() (string, error) {
 	return paths.StatePath()
+}
+
+func normalizeBranchSourceSHAs(s *State) {
+	storeDir, err := paths.StoreDir()
+	if err != nil {
+		return
+	}
+
+	for name, skill := range s.Installed {
+		if skill.Type == "package" {
+			continue
+		}
+		changed := false
+		for i := range skill.Sources {
+			if !isBranchRef(skill.Sources[i].Ref) {
+				continue
+			}
+			blobSHA := installedSkillBlobSHA(storeDir, name)
+			if blobSHA == "" || skill.Sources[i].LastSHA == blobSHA {
+				continue
+			}
+			skill.Sources[i].LastSHA = blobSHA
+			changed = true
+		}
+		if changed {
+			s.Installed[name] = skill
+		}
+	}
+}
+
+func isBranchRef(ref string) bool {
+	return !strings.HasPrefix(ref, "v") || !strings.Contains(ref, ".")
+}
+
+func installedSkillBlobSHA(storeDir, skillName string) string {
+	baseDir := filepath.Join(storeDir, skillName)
+	for _, candidate := range []string{
+		filepath.Join(baseDir, ".scribe-base.md"),
+		filepath.Join(baseDir, "SKILL.md"),
+	} {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
+		}
+		return gitBlobSHA(data)
+	}
+	return ""
+}
+
+func gitBlobSHA(data []byte) string {
+	payload := append([]byte(fmt.Sprintf("blob %d\x00", len(data))), data...)
+	sum := sha1.Sum(payload)
+	return fmt.Sprintf("%x", sum)
 }
