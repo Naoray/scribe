@@ -610,8 +610,8 @@ func TestRenderDetailPane_UnmanagedHint(t *testing.T) {
 
 	out := m.renderDetailPane(unmanagedRow, 60)
 
-	if !strings.Contains(out, "unmanaged") {
-		t.Errorf("detail pane for unmanaged skill should contain 'unmanaged', got:\n%s", out)
+	if !strings.Contains(out, "Managed") || !strings.Contains(out, "no") {
+		t.Errorf("detail pane for unmanaged skill should contain 'Managed' and 'no', got:\n%s", out)
 	}
 	if !strings.Contains(out, "scribe adopt bare-skill") {
 		t.Errorf("detail pane for unmanaged skill should contain 'scribe adopt bare-skill', got:\n%s", out)
@@ -693,7 +693,8 @@ func TestBuildLocalRows_ManagedAndOriginPopulated(t *testing.T) {
 	if byName["bare"].Managed {
 		t.Error("bare: Managed should be false")
 	}
-	if byName["bare"].Origin != state.OriginRegistry {
-		t.Errorf("bare: Origin = %q, want %q (zero value)", byName["bare"].Origin, state.OriginRegistry)
+	// bare skill has no state entry → Origin stays at zero value, not an explicit OriginRegistry assignment.
+	if byName["bare"].Origin != "" {
+		t.Errorf("bare row: expected zero-value origin, got %q", byName["bare"].Origin)
 	}
 }

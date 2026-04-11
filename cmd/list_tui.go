@@ -1297,7 +1297,7 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 		pairs = append(pairs, kv{"Status", row.Status.Display().Label})
 	}
 	if !row.Managed {
-		pairs = append(pairs, kv{"Status", "unmanaged"})
+		pairs = append(pairs, kv{"Managed", "no"})
 	}
 	if row.Version != "" {
 		pairs = append(pairs, kv{"Version", row.Version})
