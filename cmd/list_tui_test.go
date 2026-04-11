@@ -167,6 +167,38 @@ func TestRegistryGroupFromName(t *testing.T) {
 	}
 }
 
+func TestRefreshFilteredBuildsGroupCounts(t *testing.T) {
+	m := listModel{
+		rows: []listRow{
+			{Name: "alpha", Group: "g1"},
+			{Name: "beta", Group: "g1"},
+			{Name: "delta", Group: "g1"},
+			{Name: "gamma", Group: "g2"},
+		},
+		search: "elt",
+		cursor: 2,
+		offset: 1,
+	}
+
+	m = m.refreshFiltered()
+
+	if got := len(m.filtered); got != 1 {
+		t.Fatalf("filtered len = %d, want 1", got)
+	}
+	if got := m.filtered[0].Name; got != "delta" {
+		t.Fatalf("filtered[0].Name = %q, want %q", got, "delta")
+	}
+	if got := m.groupCounts["g1"]; got != 1 {
+		t.Fatalf("groupCounts[g1] = %d, want 1", got)
+	}
+	if got := m.groupCounts["g2"]; got != 0 {
+		t.Fatalf("groupCounts[g2] = %d, want 0", got)
+	}
+	if m.cursor != 0 || m.offset != 0 {
+		t.Fatalf("cursor/offset = %d/%d, want 0/0", m.cursor, m.offset)
+	}
+}
+
 func findAction(actions []actionItem, key string) actionItem {
 	for _, a := range actions {
 		if a.key == key {
