@@ -110,6 +110,10 @@ func (m *mockAdoptTool) Install(skillName, _ string) ([]string, error) {
 	return []string{p}, nil
 }
 
+func (m *mockAdoptTool) SkillPath(skillName string) (string, error) {
+	return filepath.Join(m.name, skillName), nil
+}
+
 var _ tools.Tool = (*mockAdoptTool)(nil)
 
 // ---------------------------------------------------------------------------

@@ -78,6 +78,9 @@ func (m *mockTool) Install(skillName, canonicalDir string) ([]string, error) {
 	return []string{path}, nil
 }
 func (m *mockTool) Uninstall(skillName string) error { return m.uninstallErr }
+func (m *mockTool) SkillPath(skillName string) (string, error) {
+	return filepath.Join(m.name, skillName), nil
+}
 
 // ---------------------------------------------------------------------------
 // TestFindCandidates
@@ -553,5 +556,109 @@ func TestResolve_CleanCandidatesPassThrough(t *testing.T) {
 	out := adopt.Resolve(plan, nil)
 	if len(out) != 2 {
 		t.Errorf("expected 2 candidates, got %d", len(out))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration test: adopting a non-empty real directory
+// ---------------------------------------------------------------------------
+
+// TestApply_RealDirectoryAdoption verifies that applyOne can convert a real
+// (non-empty) skill directory at ~/.claude/skills/<name>/ into a symlink.
+// This exercises the pre-remove step that fixes the ENOTEMPTY bug.
+func TestApply_RealDirectoryAdoption(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create a real (non-empty) skill directory at the Claude-facing path.
+	claudeSkillsDir := filepath.Join(home, ".claude", "skills")
+	skillDir := filepath.Join(claudeSkillsDir, "commit")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillMDContent := "# commit\nUse conventional commits."
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMDContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Add a second file to prove non-empty directories work.
+	if err := os.WriteFile(filepath.Join(skillDir, "notes.md"), []byte("extra notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build adopter with the real ClaudeTool.
+	st := emptyState()
+	adopter := &adopt.Adopter{
+		State: st,
+		Tools: []tools.Tool{tools.ClaudeTool{}},
+		Emit:  func(any) {},
+	}
+
+	// Find candidates — expect exactly 1.
+	candidates, conflicts, err := adopt.FindCandidates(st, adoptionCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("expected 0 conflicts, got %d", len(conflicts))
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d: %v", len(candidates), candidates)
+	}
+
+	// Apply adoption.
+	result := adopter.Apply(candidates)
+
+	if len(result.Failed) != 0 {
+		t.Fatalf("expected no failures, got: %v", result.Failed)
+	}
+	if len(result.Adopted) != 1 || result.Adopted[0] != "commit" {
+		t.Errorf("adopted = %v, want [commit]", result.Adopted)
+	}
+
+	// The Claude-facing path must now be a symlink.
+	claudeLink := filepath.Join(claudeSkillsDir, "commit")
+	info, err := os.Lstat(claudeLink)
+	if err != nil {
+		t.Fatalf("lstat claude link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected symlink at %s, got mode %v", claudeLink, info.Mode())
+	}
+
+	// The symlink must point into the canonical store.
+	target, err := os.Readlink(claudeLink)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	storeSkillDir := filepath.Join(home, ".scribe", "skills", "commit")
+	wantTarget := filepath.Join(storeSkillDir, "SKILL.md")
+	if target != wantTarget {
+		t.Errorf("symlink target = %q, want %q", target, wantTarget)
+	}
+
+	// Canonical store must have SKILL.md.
+	if _, err := os.Stat(filepath.Join(storeSkillDir, "SKILL.md")); err != nil {
+		t.Errorf("canonical SKILL.md missing: %v", err)
+	}
+
+	// State must record the adoption.
+	installed, ok := st.Installed["commit"]
+	if !ok {
+		t.Fatal("commit not in state")
+	}
+	if installed.Origin != state.OriginLocal {
+		t.Errorf("origin = %q, want %q", installed.Origin, state.OriginLocal)
+	}
+	if len(installed.Paths) == 0 {
+		t.Error("Paths should be non-empty")
+	}
+
+	// Idempotency: second FindCandidates should return 0 candidates (already managed).
+	candidates2, conflicts2, err := adopt.FindCandidates(st, adoptionCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates2) != 0 || len(conflicts2) != 0 {
+		t.Errorf("second run: expected no candidates/conflicts, got candidates=%d conflicts=%d", len(candidates2), len(conflicts2))
 	}
 }

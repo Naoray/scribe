@@ -66,6 +66,23 @@ func (a *Adopter) applyOne(cand Candidate, result *Result) error {
 	// Determine which tools to install into.
 	targetTools := a.resolveTargetTools(cand.Targets)
 
+	// Pre-remove: delete the tool-facing path for each target so that
+	// replaceSymlink (called inside Install) never hits ENOTEMPTY on a real
+	// directory. This is the primary failure mode when adopting a skill that
+	// was previously a plain directory rather than a symlink.
+	// os.RemoveAll on a symlink removes the symlink, not the target — canonical
+	// store content written above is safe.
+	for _, tool := range targetTools {
+		skillPath, err := tool.SkillPath(cand.Name)
+		if err != nil || skillPath == "" {
+			// Tool doesn't expose a predictable path (e.g. Gemini); skip.
+			continue
+		}
+		if err := os.RemoveAll(skillPath); err != nil {
+			return fmt.Errorf("pre-remove %s for %s: %w", skillPath, tool.Name(), err)
+		}
+	}
+
 	// Install into each target tool.
 	var installedToolNames []string
 	var allPaths []string
