@@ -82,10 +82,11 @@ func runRestore(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("write restored skill: %w", err)
 	}
 
-	// Bump revision (forward operation).
+	// Bump revision (forward operation). Keep InstalledHash unchanged so the
+	// restored content is treated as a deliberate local modification against the
+	// last synced baseline and preserved on future syncs.
 	newRevision := skill.Revision + 1
 	skill.Revision = newRevision
-	skill.InstalledHash = sync.ComputeFileHash(restoreContent)
 	st.Installed[skillName] = skill
 
 	if err := st.Save(); err != nil {

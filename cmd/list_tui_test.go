@@ -449,13 +449,21 @@ func TestExecuteActionUpdate_PackageUsesExecutor(t *testing.T) {
 	}
 
 	nm, cmd := m.executeAction("update")
-	if cmd == nil {
-		t.Fatal("expected update command")
+	if cmd != nil {
+		t.Fatal("expected update to prompt before running")
 	}
-	if _, ok := nm.(listModel); !ok {
-		t.Fatal("expected listModel result")
+	lm := nm.(listModel)
+	if lm.substate != listSubstateUpdateChoice {
+		t.Fatalf("substate = %v, want listSubstateUpdateChoice", lm.substate)
+	}
+	if lm.updateHasMods {
+		t.Fatal("package update without local edits should not offer merge choices")
 	}
 
+	_, cmd = lm.updateUpdateChoice(key("u"))
+	if cmd == nil {
+		t.Fatal("expected update command after confirmation")
+	}
 	msg := cmd()
 	done, ok := msg.(updateDoneMsg)
 	if !ok {
@@ -471,5 +479,91 @@ func TestExecuteActionUpdate_PackageUsesExecutor(t *testing.T) {
 	}
 	if string(data) != "updated" {
 		t.Errorf("marker content = %q, want %q", string(data), "updated")
+	}
+}
+
+func TestExecuteActionUpdate_ModifiedSkillPromptsForStrategy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(home, ".scribe", "skills", "recap")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("local change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st := &state.State{
+		SchemaVersion: 2,
+		Installed: map[string]state.InstalledSkill{
+			"recap": {
+				InstalledHash: sync.ComputeFileHash([]byte("upstream base\n")),
+			},
+		},
+	}
+
+	m := listModel{
+		bag: &workflow.Bag{State: st},
+		filtered: []listRow{
+			{
+				Name:      "recap",
+				Group:     "owner/repo",
+				Status:    sync.StatusOutdated,
+				HasStatus: true,
+				Entry: &manifest.Entry{
+					Name:   "recap",
+					Source: "github:owner/repo@main",
+				},
+				Local: &discovery.Skill{Name: "recap", LocalPath: skillDir},
+			},
+		},
+	}
+
+	nm, cmd := m.executeAction("update")
+	if cmd != nil {
+		t.Fatal("expected modified skill update to wait for user choice")
+	}
+	lm := nm.(listModel)
+	if lm.substate != listSubstateUpdateChoice {
+		t.Fatalf("substate = %v, want listSubstateUpdateChoice", lm.substate)
+	}
+	if lm.statusMsg == "" {
+		t.Fatal("expected update choice explanation")
+	}
+}
+
+func TestUpdateUpdateChoice_KeepLocalSkipsUpdate(t *testing.T) {
+	m := listModel{
+		substate:      listSubstateUpdateChoice,
+		statusMsg:     "Local edits detected.",
+		updateHasMods: true,
+	}
+
+	nm, cmd := m.updateUpdateChoice(key("l"))
+	if cmd != nil {
+		t.Fatal("keep local should not start an update command")
+	}
+	lm := nm.(listModel)
+	if lm.substate != listSubstateNone {
+		t.Fatalf("substate = %v, want listSubstateNone", lm.substate)
+	}
+	if lm.statusMsg != "Kept local version. Registry update skipped." {
+		t.Fatalf("statusMsg = %q", lm.statusMsg)
+	}
+}
+
+func TestRowHasLocalModifications_UsesDiscoveredSkillState(t *testing.T) {
+	row := listRow{
+		Name: "recap",
+		Local: &discovery.Skill{
+			Name:      "recap",
+			LocalPath: "/some/non-canonical/path",
+			Modified:  true,
+		},
+	}
+
+	if !rowHasLocalModifications(row, &state.State{Installed: map[string]state.InstalledSkill{}}) {
+		t.Fatal("expected discovered Modified=true to trigger update choice")
 	}
 }

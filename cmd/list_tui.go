@@ -20,6 +20,7 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 	"github.com/Naoray/scribe/internal/workflow"
@@ -39,6 +40,14 @@ type listSubstate int
 const (
 	listSubstateNone listSubstate = iota
 	listSubstateConfirm
+	listSubstateUpdateChoice
+)
+
+type updateChoice int
+
+const (
+	updateChoiceMerge updateChoice = iota
+	updateChoicePreferTheirs
 )
 
 // detailFocus indicates which pane has keyboard focus while the split-screen
@@ -132,6 +141,7 @@ type updateDoneMsg struct {
 	err        error
 	merged     bool
 	conflicted bool
+	openPath   string
 }
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -156,6 +166,7 @@ type listModel struct {
 	actionCursor  int
 	substate      listSubstate
 	statusMsg     string
+	updateHasMods bool
 	pendingTickID int
 
 	ctx context.Context
@@ -401,6 +412,7 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.filtered[i].Status = sync.StatusCurrent
 					m.statusMsg = "Updated!"
 				}
+				m.updateHasMods = false
 				break
 			}
 		}
@@ -417,9 +429,17 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.pendingTickID++
 		tickID := m.pendingTickID
-		return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		var cmds []tea.Cmd
+		if msg.openPath != "" {
+			editor := resolveEditor(m.bag.Config)
+			cmds = append(cmds, tea.ExecProcess(exec.Command(editor, msg.openPath), func(err error) tea.Msg {
+				return editorDoneMsg{err: err}
+			}))
+		}
+		cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg {
 			return clipboardTickMsg{id: tickID}
-		})
+		}))
+		return m, tea.Batch(cmds...)
 	case tea.KeyPressMsg:
 		if m.stage == stageLoading {
 			if msg.String() == "ctrl+c" || msg.String() == "q" {
@@ -484,6 +504,9 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.substate == listSubstateConfirm {
 		return m.updateConfirm(msg)
+	}
+	if m.substate == listSubstateUpdateChoice {
+		return m.updateUpdateChoice(msg)
 	}
 
 	if m.cursor >= len(m.filtered) {
@@ -602,6 +625,42 @@ func (m listModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m listModel) updateUpdateChoice(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !m.updateHasMods {
+		switch msg.String() {
+		case "u", "enter":
+			m.substate = listSubstateNone
+			m.statusMsg = "Updating..."
+			return m, m.runUpdate(updateChoiceMerge)
+		case "esc", "escape":
+			m.substate = listSubstateNone
+			m.statusMsg = ""
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "m":
+		m.substate = listSubstateNone
+		m.statusMsg = "Updating..."
+		return m, m.runUpdate(updateChoiceMerge)
+	case "r":
+		m.substate = listSubstateNone
+		m.statusMsg = "Updating..."
+		return m, m.runUpdate(updateChoicePreferTheirs)
+	case "l":
+		m.substate = listSubstateNone
+		m.statusMsg = "Kept local version. Registry update skipped."
+		m.updateHasMods = false
+		return m, nil
+	case "esc", "escape":
+		m.substate = listSubstateNone
+		m.statusMsg = ""
+		m.updateHasMods = false
+	}
+	return m, nil
+}
+
 func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 	row := m.filtered[m.cursor]
 	switch key {
@@ -609,72 +668,16 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 		if row.Entry == nil {
 			return m, nil
 		}
-		m.statusMsg = "Updating..."
-		repo := row.Group
-		ss := sync.SkillStatus{
-			Name:      row.Name,
-			Status:    row.Status,
-			Entry:     row.Entry,
-			IsPackage: row.Entry.IsPackage(),
-			LatestSHA: row.LatestSHA,
+		if rowHasLocalModifications(row, m.bag.State) && !row.Entry.IsPackage() {
+			m.substate = listSubstateUpdateChoice
+			m.updateHasMods = true
+			m.statusMsg = "Local edits detected. Choose: [r]egistry version, keep [l]ocal version, or [m]erge with upstream."
+			return m, nil
 		}
-		if row.Local != nil {
-			if inst, ok := m.bag.State.Installed[row.Name]; ok {
-				ss.Installed = &inst
-			}
-		}
-
-		// Capture whether the local file had unsynced edits BEFORE the sync runs.
-		// Post-sync, SKILL.md has been rewritten (or 3-way merged), so
-		// IsLocallyModified can no longer tell us what we need to know.
-		wasModified := false
-		if ss.Installed != nil {
-			if storeDir, sdErr := tools.StoreDir(); sdErr == nil {
-				skillDir := filepath.Join(storeDir, row.Name)
-				wasModified = sync.IsLocallyModified(skillDir, ss.Installed.InstalledHash)
-			}
-		}
-
-		ctx := m.ctx
-		bag := m.bag
-		return m, func() tea.Msg {
-			syncer := &sync.Syncer{
-				Client:   sync.WrapGitHubClient(bag.Client),
-				Provider: bag.Provider,
-				Tools:    bag.Tools,
-				Executor: &sync.ShellExecutor{},
-				TrustAll: bag.TrustAllFlag,
-			}
-			isTTY := isatty.IsTerminal(os.Stdin.Fd())
-			if isTTY && !bag.TrustAllFlag && !bag.JSONFlag {
-				syncer.ApprovalFunc = func(name, command, source string) bool {
-					var approved bool
-					err := huh.NewConfirm().
-						Title(fmt.Sprintf("Package %q wants to run a shell command", name)).
-						Description(fmt.Sprintf("source:  %s\ncommand: %s", source, command)).
-						Affirmative("Approve").
-						Negative("Deny").
-						Value(&approved).
-						Run()
-					if err != nil {
-						return false
-					}
-					return approved
-				}
-			}
-			err := syncer.RunWithDiff(ctx, repo, []sync.SkillStatus{ss}, bag.State)
-			if err != nil {
-				return updateDoneMsg{name: row.Name, err: err}
-			}
-			// Check if the skill ended up conflicted.
-			localSkills, _ := discovery.OnDisk(bag.State)
-			for _, sk := range localSkills {
-				if sk.Name == row.Name && sk.Conflicted {
-					return updateDoneMsg{name: row.Name, conflicted: true}
-				}
-			}
-			return updateDoneMsg{name: row.Name, merged: wasModified}
-		}
+		m.substate = listSubstateUpdateChoice
+		m.updateHasMods = false
+		m.statusMsg = "No local edits detected. Update will replace the local copy with the registry version."
+		return m, nil
 	}
 	if row.Local == nil {
 		return m, nil
@@ -704,6 +707,104 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m listModel) runUpdate(choice updateChoice) tea.Cmd {
+	if m.cursor >= len(m.filtered) {
+		return nil
+	}
+
+	row := m.filtered[m.cursor]
+	repo := row.Group
+	ss := sync.SkillStatus{
+		Name:      row.Name,
+		Status:    row.Status,
+		Entry:     row.Entry,
+		IsPackage: row.Entry.IsPackage(),
+		LatestSHA: row.LatestSHA,
+	}
+	if row.Local != nil {
+		if inst, ok := m.bag.State.Installed[row.Name]; ok {
+			ss.Installed = &inst
+		}
+	}
+
+	wasModified := rowHasLocalModifications(row, m.bag.State)
+
+	ctx := m.ctx
+	bag := m.bag
+	return func() tea.Msg {
+		syncer := &sync.Syncer{
+			Client:           sync.WrapGitHubClient(bag.Client),
+			Provider:         bag.Provider,
+			Tools:            bag.Tools,
+			Executor:         &sync.ShellExecutor{},
+			TrustAll:         bag.TrustAllFlag,
+			ModifiedStrategy: sync.ModifiedStrategyMerge,
+		}
+		if choice == updateChoicePreferTheirs {
+			syncer.ModifiedStrategy = sync.ModifiedStrategyPreferTheirs
+		}
+		isTTY := isatty.IsTerminal(os.Stdin.Fd())
+		if isTTY && !bag.TrustAllFlag && !bag.JSONFlag {
+			syncer.ApprovalFunc = func(name, command, source string) bool {
+				var approved bool
+				err := huh.NewConfirm().
+					Title(fmt.Sprintf("Package %q wants to run a shell command", name)).
+					Description(fmt.Sprintf("source:  %s\ncommand: %s", source, command)).
+					Affirmative("Approve").
+					Negative("Deny").
+					Value(&approved).
+					Run()
+				if err != nil {
+					return false
+				}
+				return approved
+			}
+		}
+		err := syncer.RunWithDiff(ctx, repo, []sync.SkillStatus{ss}, bag.State)
+		if err != nil {
+			return updateDoneMsg{name: row.Name, err: err}
+		}
+		localSkills, _ := discovery.OnDisk(bag.State)
+		for _, sk := range localSkills {
+			if sk.Name == row.Name && sk.Conflicted {
+				return updateDoneMsg{
+					name:       row.Name,
+					conflicted: true,
+					openPath:   filepath.Join(sk.LocalPath, "SKILL.md"),
+				}
+			}
+		}
+		return updateDoneMsg{name: row.Name, merged: wasModified && choice == updateChoiceMerge}
+	}
+}
+
+func rowHasLocalModifications(row listRow, st *state.State) bool {
+	if row.Local != nil {
+		if row.Local.Modified {
+			return true
+		}
+		if row.Local.LocalPath != "" {
+			installed, ok := st.Installed[row.Name]
+			if !ok {
+				return false
+			}
+			return sync.IsLocallyModified(row.Local.LocalPath, installed.InstalledHash)
+		}
+	}
+	if st == nil {
+		return false
+	}
+	installed, ok := st.Installed[row.Name]
+	if !ok {
+		return false
+	}
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		return false
+	}
+	return sync.IsLocallyModified(filepath.Join(storeDir, row.Name), installed.InstalledHash)
 }
 
 func (m listModel) resetSearch() listModel {
@@ -961,6 +1062,12 @@ func (m listModel) viewSplit() string {
 	switch {
 	case m.substate == listSubstateConfirm:
 		b.WriteString(ltDimStyle.Render("y confirm · n cancel") + "\n")
+	case m.substate == listSubstateUpdateChoice:
+		if m.updateHasMods {
+			b.WriteString(ltDimStyle.Render("r registry · l local · m merge · esc cancel") + "\n")
+		} else {
+			b.WriteString(ltDimStyle.Render("u update · esc cancel") + "\n")
+		}
 	case m.focus == focusList:
 		b.WriteString(ltDimStyle.Render("↑↓ browse skills · →/enter actions · esc close · q quit") + "\n")
 	default:

@@ -27,7 +27,7 @@ func installedWithSource(registry, ref, sha string) *state.InstalledSkill {
 }
 
 func TestCompareEntryMissing(t *testing.T) {
-	got := compareEntry(entry("github:a/b@v1.0.0"), nil, "", "a/b")
+	got := compareEntry(entry("github:a/b@v1.0.0"), nil, "", "a/b", false)
 	if got != StatusMissing {
 		t.Errorf("got %s, want %s", got, StatusMissing)
 	}
@@ -35,7 +35,7 @@ func TestCompareEntryMissing(t *testing.T) {
 
 func TestCompareEntryCurrentBranch(t *testing.T) {
 	inst := installedWithSource("a/b", "main", "abc123")
-	got := compareEntry(entry("github:a/b@main"), inst, "abc123", "a/b")
+	got := compareEntry(entry("github:a/b@main"), inst, "abc123", "a/b", false)
 	if got != StatusCurrent {
 		t.Errorf("got %s, want %s", got, StatusCurrent)
 	}
@@ -43,7 +43,7 @@ func TestCompareEntryCurrentBranch(t *testing.T) {
 
 func TestCompareEntryOutdatedBranch(t *testing.T) {
 	inst := installedWithSource("a/b", "main", "abc123")
-	got := compareEntry(entry("github:a/b@main"), inst, "def456", "a/b")
+	got := compareEntry(entry("github:a/b@main"), inst, "def456", "a/b", false)
 	if got != StatusOutdated {
 		t.Errorf("got %s, want %s", got, StatusOutdated)
 	}
@@ -51,7 +51,7 @@ func TestCompareEntryOutdatedBranch(t *testing.T) {
 
 func TestCompareEntryMissingBranchBlobIsOutdated(t *testing.T) {
 	inst := installedWithSource("a/b", "main", "abc123")
-	got := compareEntry(entry("github:a/b@main"), inst, missingSkillBlobSHA, "a/b")
+	got := compareEntry(entry("github:a/b@main"), inst, missingSkillBlobSHA, "a/b", false)
 	if got != StatusOutdated {
 		t.Errorf("got %s, want %s", got, StatusOutdated)
 	}
@@ -59,7 +59,7 @@ func TestCompareEntryMissingBranchBlobIsOutdated(t *testing.T) {
 
 func TestCompareEntryCurrentTag(t *testing.T) {
 	inst := installedWithSource("a/b", "v1.0.0", "")
-	got := compareEntry(entry("github:a/b@v1.0.0"), inst, "", "a/b")
+	got := compareEntry(entry("github:a/b@v1.0.0"), inst, "", "a/b", false)
 	if got != StatusCurrent {
 		t.Errorf("got %s, want %s", got, StatusCurrent)
 	}
@@ -74,7 +74,7 @@ func TestCompareEntrySourceLookup(t *testing.T) {
 			Ref:      "v1.0.0",
 		}},
 	}
-	got := compareEntry(entry("github:a/b@v1.0.0"), inst, "", "a/b")
+	got := compareEntry(entry("github:a/b@v1.0.0"), inst, "", "a/b", false)
 	if got != StatusMissing {
 		t.Errorf("got %s, want %s", got, StatusMissing)
 	}
@@ -115,7 +115,7 @@ func TestCompareEntry(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := compareEntry(c.entry, c.installed, c.latestSHA, c.registry)
+			got := compareEntry(c.entry, c.installed, c.latestSHA, c.registry, false)
 			if got != c.want {
 				t.Errorf("got %s, want %s", got, c.want)
 			}
@@ -140,10 +140,26 @@ func TestComparePackage(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := compareEntry(c.entry, c.installed, c.latestSHA, c.registry)
+			got := compareEntry(c.entry, c.installed, c.latestSHA, c.registry, false)
 			if got != c.want {
 				t.Errorf("got %s, want %s", got, c.want)
 			}
 		})
+	}
+}
+
+func TestCompareEntryModifiedBranch(t *testing.T) {
+	inst := installedWithSource("a/b", "main", "abc123")
+	got := compareEntry(entry("github:a/b@main"), inst, "abc123", "a/b", true)
+	if got != StatusModified {
+		t.Errorf("got %s, want %s", got, StatusModified)
+	}
+}
+
+func TestCompareEntryModifiedTag(t *testing.T) {
+	inst := installedWithSource("a/b", "v1.0.0", "")
+	got := compareEntry(entry("github:a/b@v1.0.0"), inst, "", "a/b", true)
+	if got != StatusModified {
+		t.Errorf("got %s, want %s", got, StatusModified)
 	}
 }

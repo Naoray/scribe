@@ -37,6 +37,10 @@ type Syncer struct {
 	Emit     func(any) // receives events defined in events.go
 	Executor CommandExecutor
 
+	// ModifiedStrategy controls what to do when an outdated skill also has
+	// unsynced local edits on disk.
+	ModifiedStrategy ModifiedStrategy
+
 	// TrustAll skips approval prompts for packages (--trust-all flag).
 	TrustAll bool
 
@@ -45,6 +49,14 @@ type Syncer struct {
 	// If nil and TrustAll is false, packages needing approval are skipped.
 	ApprovalFunc func(name, command, source string) bool
 }
+
+// ModifiedStrategy controls how sync treats outdated skills with local edits.
+type ModifiedStrategy int
+
+const (
+	ModifiedStrategyMerge ModifiedStrategy = iota
+	ModifiedStrategyPreferTheirs
+)
 
 // FetchManifest tries Provider.Discover first (if set), then falls back to
 // direct file fetch with scribe.yaml → scribe.toml fallback.
@@ -94,6 +106,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 	}
 
 	var statuses []SkillStatus
+	storeDir, _ := tools.StoreDir()
 	// Cache for package commit SHAs keyed by owner/repo/ref.
 	commitSHACache := map[string]string{}
 	// Cache for branch-skill tree listings keyed by owner/repo/ref.
@@ -106,6 +119,10 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		entry := &m.Catalog[i]
 		// Use bare name for lookup — flat storage model.
 		installedPtr := lookupInstalled(st, entry.Name)
+		locallyModified := false
+		if installedPtr != nil && storeDir != "" {
+			locallyModified = IsLocallyModified(filepath.Join(storeDir, entry.Name), installedPtr.InstalledHash)
+		}
 
 		latestSHA := ""
 		src, err := manifest.ParseSource(entry.Source)
@@ -148,7 +165,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 			}
 		}
 
-		status := compareEntry(*entry, installedPtr, latestSHA, teamRepo)
+		status := compareEntry(*entry, installedPtr, latestSHA, teamRepo, locallyModified)
 		statuses = append(statuses, SkillStatus{
 			Name:       entry.Name,
 			Status:     status,
@@ -276,7 +293,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				storeDir, sdErr := tools.StoreDir()
 				if sdErr == nil {
 					skillDir := filepath.Join(storeDir, sk.Name)
-					if IsLocallyModified(skillDir, installed.InstalledHash) {
+					if IsLocallyModified(skillDir, installed.InstalledHash) && s.ModifiedStrategy != ModifiedStrategyPreferTheirs {
 						// Find the new upstream SKILL.md content for merge.
 						var upstreamContent []byte
 						for _, f := range tFiles {
