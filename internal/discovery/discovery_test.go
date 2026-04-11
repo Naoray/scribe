@@ -285,6 +285,41 @@ func TestOnDiskFileSymlinks(t *testing.T) {
 	}
 }
 
+func TestOnDiskCodexSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	scribeSkills := filepath.Join(home, ".scribe", "skills")
+	skillDir := filepath.Join(scribeSkills, "codex-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Codex Skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	codexSkills := filepath.Join(home, ".codex", "skills")
+	if err := os.MkdirAll(codexSkills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(skillDir, filepath.Join(codexSkills, "codex-skill")); err != nil {
+		t.Fatal(err)
+	}
+
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+	skills, err := OnDisk(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d: %+v", len(skills), skills)
+	}
+	if skills[0].Name != "codex-skill" {
+		t.Errorf("expected codex-skill, got %q", skills[0].Name)
+	}
+}
+
 func TestHasConflictMarkers(t *testing.T) {
 	tests := []struct {
 		name    string

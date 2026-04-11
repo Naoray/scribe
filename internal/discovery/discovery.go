@@ -38,8 +38,8 @@ type rawFrontmatter struct {
 
 // reservedNames lists directory names that should be skipped during scanning.
 var reservedNames = map[string]bool{
-	"versions": true,
-	".git":     true,
+	"versions":  true,
+	".git":      true,
 	".DS_Store": true,
 }
 
@@ -56,9 +56,11 @@ type Skill struct {
 	Revision    int      // from state
 }
 
-// OnDisk scans ~/.scribe/skills/ (flat directories) and ~/.claude/skills/ (file symlinks)
-// for installed skills. Cross-references state.json for tracked skill metadata.
-// Deduplicates by resolved path (a skill found via both locations is one skill).
+// OnDisk scans ~/.scribe/skills/ plus tool-facing install locations that are
+// directly visible on disk. Cross-references state.json for tracked skill
+// metadata. Deduplicates by skill name, preferring the canonical Scribe store.
+// Gemini-managed installs are not scanned from disk in v1; Scribe relies on
+// state for those.
 func OnDisk(st *state.State) ([]Skill, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -66,7 +68,6 @@ func OnDisk(st *state.State) ([]Skill, error) {
 	}
 
 	scribeSkills := filepath.Join(home, ".scribe", "skills")
-	claudeSkills := filepath.Join(home, ".claude", "skills")
 
 	// seen tracks skill names we've already processed (dedup by name).
 	seen := map[string]bool{}
@@ -96,53 +97,18 @@ func OnDisk(st *state.State) ([]Skill, error) {
 		skills = append(skills, sk)
 	}
 
-	// 2. Scan ~/.claude/skills/ — file symlinks to ~/.scribe/skills/<name>/SKILL.md.
-	claudeEntries, err := os.ReadDir(claudeSkills)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("read %s: %w", claudeSkills, err)
-	}
-	for _, entry := range claudeEntries {
-		name := entry.Name()
-		if reservedNames[name] || !validSkillName.MatchString(name) {
-			continue
+	for _, scan := range []struct {
+		dir    string
+		target string
+	}{
+		{dir: filepath.Join(home, ".claude", "skills"), target: "claude"},
+		{dir: filepath.Join(home, ".codex", "skills"), target: "codex"},
+	} {
+		found, scanErr := scanToolSkills(scan.dir, scan.target, seen, st)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-
-		entryPath := filepath.Join(claudeSkills, name)
-
-		// Resolve the symlink to find the actual skill directory.
-		resolved, err := filepath.EvalSymlinks(entryPath)
-		if err != nil {
-			continue // broken symlink, skip
-		}
-
-		// For file symlinks (pointing to SKILL.md), the skill dir is the parent.
-		// For directory symlinks (legacy), the skill dir is the resolved path itself.
-		info, err := os.Stat(resolved)
-		if err != nil {
-			continue
-		}
-
-		var skillDir string
-		if info.IsDir() {
-			skillDir = resolved
-		} else {
-			skillDir = filepath.Dir(resolved)
-		}
-
-		// Derive the skill name from the scribe store directory name.
-		skillName := filepath.Base(skillDir)
-		if seen[skillName] {
-			continue // already found via scribe store
-		}
-
-		// Verify SKILL.md exists in the resolved directory.
-		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-			continue
-		}
-
-		seen[skillName] = true
-		sk := buildSkill(skillName, skillDir, filepath.Dir(skillDir), "claude", st)
-		skills = append(skills, sk)
+		skills = append(skills, found...)
 	}
 
 	// 3. Include state-tracked skills not found on disk (orphans).
@@ -172,6 +138,52 @@ func OnDisk(st *state.State) ([]Skill, error) {
 		return skills[i].Name < skills[j].Name
 	})
 
+	return skills, nil
+}
+
+func scanToolSkills(dir, target string, seen map[string]bool, st *state.State) ([]Skill, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", dir, err)
+	}
+
+	var skills []Skill
+	for _, entry := range entries {
+		name := entry.Name()
+		if reservedNames[name] || !validSkillName.MatchString(name) {
+			continue
+		}
+
+		entryPath := filepath.Join(dir, name)
+		resolved, err := filepath.EvalSymlinks(entryPath)
+		if err != nil {
+			continue
+		}
+
+		info, err := os.Stat(resolved)
+		if err != nil {
+			continue
+		}
+
+		skillDir := resolved
+		if !info.IsDir() {
+			skillDir = filepath.Dir(resolved)
+		}
+
+		skillName := filepath.Base(skillDir)
+		if seen[skillName] {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
+			continue
+		}
+
+		seen[skillName] = true
+		skills = append(skills, buildSkill(skillName, skillDir, filepath.Dir(skillDir), target, st))
+	}
 	return skills, nil
 }
 
@@ -359,4 +371,3 @@ func truncateDescription(s string) string {
 	}
 	return s
 }
-

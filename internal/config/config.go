@@ -31,8 +31,13 @@ type RegistryConfig struct {
 
 // ToolConfig describes an AI tool target for skill installation.
 type ToolConfig struct {
-	Name    string `yaml:"name"`
-	Enabled bool   `yaml:"enabled"`
+	Name      string `yaml:"name"`
+	Enabled   bool   `yaml:"enabled"`
+	Type      string `yaml:"type,omitempty"`      // "builtin" or "custom"
+	Detect    string `yaml:"detect,omitempty"`    // shell command used to detect custom tools
+	Install   string `yaml:"install,omitempty"`   // shell command template for custom tools
+	Uninstall string `yaml:"uninstall,omitempty"` // shell command template for custom tools
+	Path      string `yaml:"path,omitempty"`      // optional installed-path template for custom tools
 }
 
 // Config holds user preferences from ~/.scribe/config.yaml.
@@ -188,4 +193,3 @@ func (c *Config) Save() error {
 	}
 	return nil
 }
-

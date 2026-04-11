@@ -440,16 +440,14 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		if m.search != "" {
-			m.search = ""
-			m = m.refreshFiltered()
+			m = m.resetSearch()
 			return m, nil
 		}
 		m.quitting = true
 		return m, tea.Quit
 	case "esc", "escape":
 		if m.search != "" {
-			m.search = ""
-			m = m.refreshFiltered()
+			m = m.resetSearch()
 		}
 		return m, nil
 	case "up", "k":
@@ -476,15 +474,9 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.statusMsg = ""
 		}
 	case "backspace":
-		if len(m.search) > 0 {
-			m.search = m.search[:len(m.search)-1]
-			m = m.refreshFiltered()
-		}
+		m = m.backspaceSearch()
 	default:
-		if len(msg.String()) == 1 {
-			m.search += msg.String()
-			m = m.refreshFiltered()
-		}
+		m = m.appendSearch(msg.String())
 	}
 	return m, nil
 }
@@ -534,7 +526,8 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focus == focusList {
 		// Browsing the list with the detail pane open: arrow keys move
 		// the row cursor and the right pane refreshes live. Right/enter
-		// hands focus to the action menu.
+		// hands focus to the action menu. Character keys still filter the
+		// left list without forcing the user to close the detail pane first.
 		switch key {
 		case "up", "k":
 			if m.cursor > 0 {
@@ -553,6 +546,23 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "right", "l", "enter":
 			m.focus = focusActions
 			m.actionCursor = 0
+		case "backspace":
+			m = m.backspaceSearch()
+			m.actionCursor = 0
+			m.statusMsg = ""
+			if !m.selected {
+				m.focus = focusList
+			}
+		default:
+			next := m.appendSearch(key)
+			if next.search != m.search {
+				m = next
+				m.actionCursor = 0
+				m.statusMsg = ""
+				if !m.selected {
+					m.focus = focusList
+				}
+			}
 		}
 		return m, nil
 	}
@@ -696,6 +706,42 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m listModel) resetSearch() listModel {
+	m.search = ""
+	m.filtered = m.applyFilter()
+	m.cursor, m.offset = 0, 0
+	if len(m.filtered) == 0 {
+		m.selected = false
+	}
+	return m
+}
+
+func (m listModel) backspaceSearch() listModel {
+	if len(m.search) == 0 {
+		return m
+	}
+	m.search = m.search[:len(m.search)-1]
+	m.filtered = m.applyFilter()
+	m.cursor, m.offset = 0, 0
+	if len(m.filtered) == 0 {
+		m.selected = false
+	}
+	return m
+}
+
+func (m listModel) appendSearch(key string) listModel {
+	if len(key) != 1 {
+		return m
+	}
+	m.search += key
+	m.filtered = m.applyFilter()
+	m.cursor, m.offset = 0, 0
+	if len(m.filtered) == 0 {
+		m.selected = false
+	}
+	return m
+}
+
 func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 	row := m.filtered[m.cursor]
 	if row.Local == nil {
@@ -708,6 +754,7 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 	allowedPrefixes := []string{
 		filepath.Join(home, ".scribe", "skills"),
 		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".codex", "skills"),
 	}
 
 	pathAllowed := false
@@ -724,16 +771,17 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Uninstall from all tools that had this skill installed.
+	// Uninstall from every tool that originally installed the skill, even if
+	// that tool is now disabled. Resolving from installed.Tools instead of
+	// ResolveActive prevents orphaning Gemini/custom-tool installs whenever
+	// the user disables a tool after installing a skill.
 	if installed, ok := m.bag.State.Installed[sk.Name]; ok {
-		detectedTools := tools.DetectTools()
-		for _, tool := range detectedTools {
-			for _, t := range installed.Tools {
-				if t == tool.Name() {
-					_ = tool.Uninstall(sk.Name)
-					break
-				}
+		for _, name := range installed.Tools {
+			tool, err := tools.ResolveByName(m.bag.Config, name)
+			if err != nil {
+				continue
 			}
+			_ = tool.Uninstall(sk.Name)
 		}
 	}
 
