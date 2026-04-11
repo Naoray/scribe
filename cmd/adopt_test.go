@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -197,41 +198,20 @@ func TestAdopt_UnknownNameExitCode(t *testing.T) {
 }
 
 // TestAdopt_NonTTYNoYesErrors verifies non-interactive mode without --yes returns an error.
-// In test mode os.Stdin is not a TTY, so the non-TTY branch is exercised automatically.
+// Go test binaries have non-TTY stdin/stdout by default, so the non-TTY guard fires
+// when no --yes, --json, or --dry-run flags are passed.
 func TestAdopt_NonTTYNoYesErrors(t *testing.T) {
 	setupAdoptHome(t, "some-skill", "# some-skill\ncontent")
 
-	// Force non-TTY stdout so useJSON=false path is hit.
-	// os.Stdin is already non-TTY in test mode.
-	// We need useJSON=false (no --json) AND non-TTY stdin AND no --yes.
-	// However, since isatty returns false for test stdin, the runAdopt fn
-	// checks isTTY (stdin+stdout both TTY) which will be false here.
-	// But the non-TTY guard only fires when !useJSON — and useJSON is set when
-	// stdout is not a TTY (which it isn't in tests). So to hit the non-TTY guard
-	// we need to not have stdout as a pipe AND not pass --json.
-	// The simplest test: call RunE directly with no flags; useJSON will be
-	// determined at runtime. Since stdout in tests is not a TTY, useJSON=true,
-	// and the code falls into "non-TTY + json without --yes" → dry-run. That's fine.
-	//
-	// To specifically test the error message path we verify RunE behavior with
-	// a scenario where we force the condition via mocked state.
-	// For now, verify that without --yes and without --json and without --dry-run
-	// the command still succeeds (dry-run path via useJSON=true from non-TTY stdout).
 	cmd := newAdoptCommand()
-	cmd.SetArgs([]string{}) // no --yes, no --json
+	cmd.SetArgs([]string{}) // no --yes, no --json, no --dry-run
 
-	// Redirect stdout.
-	oldOut := os.Stdout
-	_, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := cmd.Execute()
-	w.Close()
-	os.Stdout = oldOut
-
-	// In test mode stdout is non-TTY so useJSON=true, which triggers dry-run.
-	// Expect no error (graceful degradation).
-	if err != nil {
-		t.Logf("note: got error %v (may be expected for non-TTY path)", err)
+	err := cmd.RunE(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected error for non-TTY without --yes, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "non-interactive") && !strings.Contains(msg, "--yes") {
+		t.Errorf("expected error mentioning non-interactive or --yes, got: %q", msg)
 	}
 }
