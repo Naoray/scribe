@@ -49,6 +49,14 @@ func TestCompareEntryOutdatedBranch(t *testing.T) {
 	}
 }
 
+func TestCompareEntryMissingBranchBlobIsOutdated(t *testing.T) {
+	inst := installedWithSource("a/b", "main", "abc123")
+	got := compareEntry(entry("github:a/b@main"), inst, missingSkillBlobSHA, "a/b")
+	if got != StatusOutdated {
+		t.Errorf("got %s, want %s", got, StatusOutdated)
+	}
+}
+
 func TestCompareEntryCurrentTag(t *testing.T) {
 	inst := installedWithSource("a/b", "v1.0.0", "")
 	got := compareEntry(entry("github:a/b@v1.0.0"), inst, "", "a/b")
@@ -96,6 +104,7 @@ func TestCompareEntry(t *testing.T) {
 		// Branch refs: SHA comparison
 		{"branch same sha", entry("github:a/b@main"), installedWithSource("a/b", "main", "abc123"), "abc123", "a/b", StatusCurrent},
 		{"branch diff sha", entry("github:a/b@main"), installedWithSource("a/b", "main", "abc123"), "def456", "a/b", StatusOutdated},
+		{"branch missing skill file", entry("github:a/b@main"), installedWithSource("a/b", "main", "abc123"), missingSkillBlobSHA, "a/b", StatusOutdated},
 
 		// Branch with empty SHA (API unreachable) → assume current
 		{"branch empty sha", entry("github:a/b@main"), installedWithSource("a/b", "main", "abc123"), "", "a/b", StatusCurrent},

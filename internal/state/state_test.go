@@ -1,6 +1,8 @@
 package state_test
 
 import (
+	"crypto/sha1"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,8 +23,8 @@ func TestLoadMissing(t *testing.T) {
 	if len(s.Installed) != 0 {
 		t.Errorf("expected empty Installed, got %d entries", len(s.Installed))
 	}
-	if s.SchemaVersion != 3 {
-		t.Errorf("expected SchemaVersion=3, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 4 {
+		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
 	}
 }
 
@@ -54,8 +56,8 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.LastSync.IsZero() {
 		t.Error("expected LastSync to be set")
 	}
-	if loaded.SchemaVersion != 3 {
-		t.Errorf("expected SchemaVersion=3, got %d", loaded.SchemaVersion)
+	if loaded.SchemaVersion != 4 {
+		t.Errorf("expected SchemaVersion=4, got %d", loaded.SchemaVersion)
 	}
 
 	skill, ok := loaded.Installed["gstack"]
@@ -257,7 +259,7 @@ func TestMigrationNamespacesKeys(t *testing.T) {
 
 	skill := s.Installed["gstack"]
 	if len(skill.Sources) != 1 {
-		t.Fatalf("expected sources to be preserved by v3 migration, got %v", skill.Sources)
+		t.Fatalf("expected sources to be preserved by migration, got %v", skill.Sources)
 	}
 	if skill.Sources[0].Registry != "garrytan/gstack" || skill.Sources[0].Ref != "v0.12.9.0" {
 		t.Errorf("unexpected migrated sources: %v", skill.Sources)
@@ -273,8 +275,8 @@ func TestMigrationNamespacesKeys(t *testing.T) {
 		t.Errorf("expected Revision=1, got %d", skill.Revision)
 	}
 
-	if s.SchemaVersion != 3 {
-		t.Errorf("expected SchemaVersion=3, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 4 {
+		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
 	}
 }
 
@@ -416,7 +418,7 @@ func TestStateNamespaceKeysNoRegistries(t *testing.T) {
 }
 
 // TestStateMigrateV2ToV3 verifies that a v2 state (bare keys, populated
-// Sources) gets upgraded to v3 with both sources and non-source fields
+// Sources) gets upgraded to the current schema with both sources and non-source fields
 // preserved.
 func TestStateMigrateV2ToV3(t *testing.T) {
 	home := t.TempDir()
@@ -459,13 +461,13 @@ func TestStateMigrateV2ToV3(t *testing.T) {
 		t.Errorf("expected InstalledHash=abc123, got %q", skill.InstalledHash)
 	}
 	if len(skill.Sources) != 1 {
-		t.Fatalf("expected sources preserved by v3 migration, got %v", skill.Sources)
+		t.Fatalf("expected sources preserved by migration, got %v", skill.Sources)
 	}
 	if skill.Sources[0].Registry != "ArtistfyHQ/team-skills" || skill.Sources[0].LastSHA != "def456" {
 		t.Errorf("unexpected migrated sources: %v", skill.Sources)
 	}
-	if s.SchemaVersion != 3 {
-		t.Errorf("expected SchemaVersion=3, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 4 {
+		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
 	}
 }
 
@@ -502,8 +504,8 @@ func TestMigrationSchemaV2(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 3 {
-		t.Errorf("expected SchemaVersion=3, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 4 {
+		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
 	}
 
 	// Qualified key should become bare.
@@ -519,7 +521,7 @@ func TestMigrationSchemaV2(t *testing.T) {
 		t.Errorf("expected bare key 'my-tool', got keys: %v", installedKeys(s))
 	}
 
-	// v3 migration preserves sources gathered during migration.
+	// Schema migration preserves sources gathered during migration.
 	deploy := s.Installed["deploy"]
 	if len(deploy.Sources) != 1 {
 		t.Fatalf("expected deploy sources preserved, got %v", deploy.Sources)
@@ -540,7 +542,7 @@ func TestMigrationSchemaV2(t *testing.T) {
 	}
 }
 
-// TestMigrationPreservesRevisionAndHash verifies v2→v3 migration preserves
+// TestMigrationPreservesRevisionAndHash verifies migration preserves
 // both source metadata and non-source fields.
 func TestMigrationPreservesRevisionAndHash(t *testing.T) {
 	home := t.TempDir()
@@ -568,8 +570,8 @@ func TestMigrationPreservesRevisionAndHash(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 3 {
-		t.Errorf("SchemaVersion: got %d, want 3", s.SchemaVersion)
+	if s.SchemaVersion != 4 {
+		t.Errorf("SchemaVersion: got %d, want 4", s.SchemaVersion)
 	}
 	skill := s.Installed["gstack"]
 	if skill.Revision != 5 {
@@ -579,7 +581,7 @@ func TestMigrationPreservesRevisionAndHash(t *testing.T) {
 		t.Errorf("InstalledHash: got %q", skill.InstalledHash)
 	}
 	if len(skill.Sources) != 1 {
-		t.Fatalf("Sources: expected preserve on v3 migration, got %v", skill.Sources)
+		t.Fatalf("Sources: expected preserve on migration, got %v", skill.Sources)
 	}
 	if skill.Sources[0].Registry != "garrytan/gstack" || skill.Sources[0].LastSHA != "commit123" {
 		t.Errorf("unexpected preserved sources: %v", skill.Sources)
@@ -712,7 +714,7 @@ func TestMigrationBareKeyCollisionCollapses(t *testing.T) {
 	os.MkdirAll(dir, 0o755)
 
 	// Two qualified keys collapse to the same bare name "deploy".
-	// Schema v3 preserves merged sources while the newer entry wins as base.
+	// Migration preserves merged sources while the newer entry wins as base.
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
 		"installed": {
 			"org-a/deploy": {
@@ -739,8 +741,8 @@ func TestMigrationBareKeyCollisionCollapses(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 3 {
-		t.Errorf("expected SchemaVersion 3, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 4 {
+		t.Errorf("expected SchemaVersion 4, got %d", s.SchemaVersion)
 	}
 
 	// Should have exactly one "deploy" key, not two.
@@ -754,7 +756,7 @@ func TestMigrationBareKeyCollisionCollapses(t *testing.T) {
 	}
 
 	if len(skill.Sources) != 2 {
-		t.Fatalf("expected merged sources preserved in v3, got %d: %v", len(skill.Sources), skill.Sources)
+		t.Fatalf("expected merged sources preserved, got %d: %v", len(skill.Sources), skill.Sources)
 	}
 
 	// Newer entry (org-a, 2026-04-01) should win as the base.
@@ -772,15 +774,23 @@ func installedKeys(s *state.State) []string {
 	return keys
 }
 
-// TestMigrationSchemaV3PreservesSources verifies that loading a v2 state keeps
-// SkillSource entries intact so the first sync after upgrade can refresh
-// metadata in place instead of forcing reinstalls.
-func TestMigrationSchemaV3PreservesSources(t *testing.T) {
+// TestMigrationSchemaV4NormalizesBranchBlobSHA verifies that loading an older
+// state rewrites branch-backed skill SHAs to the locally cached blob SHA while
+// leaving package commit SHAs alone.
+func TestMigrationSchemaV4NormalizesBranchBlobSHA(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	dir := filepath.Join(home, ".scribe")
 	os.MkdirAll(dir, 0o755)
+	storeDir := filepath.Join(dir, "skills", "xray")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	baseContent := []byte("# Xray\n\nUpstream content.\n")
+	if err := os.WriteFile(filepath.Join(storeDir, ".scribe-base.md"), baseContent, 0o644); err != nil {
+		t.Fatalf("WriteFile .scribe-base.md: %v", err)
+	}
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
 		"schema_version": 2,
 		"last_sync": "2026-04-01T00:00:00Z",
@@ -810,8 +820,8 @@ func TestMigrationSchemaV3PreservesSources(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 3 {
-		t.Errorf("SchemaVersion: got %d, want 3", s.SchemaVersion)
+	if s.SchemaVersion != 4 {
+		t.Errorf("SchemaVersion: got %d, want 4", s.SchemaVersion)
 	}
 
 	xray, ok := s.Installed["xray"]
@@ -821,7 +831,7 @@ func TestMigrationSchemaV3PreservesSources(t *testing.T) {
 	if len(xray.Sources) != 1 {
 		t.Fatalf("xray sources: got %v, want preserved source", xray.Sources)
 	}
-	if xray.Sources[0].Registry != "Artistfy/hq" || xray.Sources[0].LastSHA != "commit-xyz" {
+	if xray.Sources[0].Registry != "Artistfy/hq" || xray.Sources[0].LastSHA != gitBlobSHAForTest(baseContent) {
 		t.Errorf("xray sources: got %v", xray.Sources)
 	}
 	// Non-source fields must be preserved so the skill is still recognised.
@@ -854,16 +864,16 @@ func TestMigrationSchemaV3PreservesSources(t *testing.T) {
 	}
 }
 
-// TestMigrationSchemaV3Idempotent verifies that a v3 state passes through
-// unchanged — sources are preserved, schema stays 3.
-func TestMigrationSchemaV3Idempotent(t *testing.T) {
+// TestMigrationSchemaV4Idempotent verifies that a current-schema state passes
+// through unchanged.
+func TestMigrationSchemaV4Idempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	dir := filepath.Join(home, ".scribe")
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
-		"schema_version": 3,
+		"schema_version": 4,
 		"last_sync": "2026-04-11T00:00:00Z",
 		"installed": {
 			"xray": {
@@ -882,14 +892,20 @@ func TestMigrationSchemaV3Idempotent(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 3 {
-		t.Errorf("SchemaVersion: got %d, want 3", s.SchemaVersion)
+	if s.SchemaVersion != 4 {
+		t.Errorf("SchemaVersion: got %d, want 4", s.SchemaVersion)
 	}
 	xray := s.Installed["xray"]
 	if len(xray.Sources) != 1 {
-		t.Fatalf("xray sources: got %d, want 1 (preserved on v3 passthrough)", len(xray.Sources))
+		t.Fatalf("xray sources: got %d, want 1 (preserved on passthrough)", len(xray.Sources))
 	}
 	if xray.Sources[0].LastSHA != "blob-abc" {
 		t.Errorf("xray LastSHA: got %q, want blob-abc", xray.Sources[0].LastSHA)
 	}
+}
+
+func gitBlobSHAForTest(data []byte) string {
+	payload := append([]byte(fmt.Sprintf("blob %d\x00", len(data))), data...)
+	sum := sha1.Sum(payload)
+	return fmt.Sprintf("%x", sum)
 }
