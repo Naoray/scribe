@@ -20,8 +20,6 @@ func (a *Adopter) Apply(candidates []Candidate) Result {
 	}
 
 	for _, cand := range candidates {
-		a.emit(AdoptStartedMsg{Name: cand.Name})
-
 		if err := a.applyOne(cand, &result); err != nil {
 			a.emit(AdoptErrorMsg{Name: cand.Name, Err: err})
 			result.Failed[cand.Name] = err

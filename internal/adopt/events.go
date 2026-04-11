@@ -1,8 +1,5 @@
 package adopt
 
-// AdoptStartedMsg is emitted when Apply begins processing a candidate.
-type AdoptStartedMsg struct{ Name string }
-
 // AdoptedMsg is emitted when a candidate is successfully adopted.
 type AdoptedMsg struct {
 	Name  string
