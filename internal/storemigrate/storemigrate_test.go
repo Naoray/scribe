@@ -293,3 +293,91 @@ func TestMigrateCreatesBase(t *testing.T) {
 		t.Errorf(".scribe-base.md content differs from SKILL.md:\nbase: %q\nskill: %q", baseData, skillData)
 	}
 }
+
+func TestMigrateUpdatesClaudeDirectorySymlink(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	storeDir := filepath.Join(tmp, ".scribe", "skills")
+	oldDir := filepath.Join(storeDir, "owner-repo", "cleanup")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, "SKILL.md"), []byte("# Cleanup\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeLink := filepath.Join(tmp, ".claude", "skills", "cleanup")
+	if err := os.MkdirAll(filepath.Dir(claudeLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(oldDir, claudeLink); err != nil {
+		t.Fatal(err)
+	}
+
+	st := &state.State{
+		SchemaVersion: 1,
+		Installed: map[string]state.InstalledSkill{
+			"cleanup": {Paths: []string{claudeLink}},
+		},
+	}
+
+	if _, err := Migrate(storeDir, st); err != nil {
+		t.Fatalf("Migrate failed: %v", err)
+	}
+
+	got, err := os.Readlink(claudeLink)
+	if err != nil {
+		t.Fatalf("Readlink: %v", err)
+	}
+	want := filepath.Join(storeDir, "cleanup")
+	if got != want {
+		t.Errorf("claude symlink target = %q, want %q", got, want)
+	}
+}
+
+func TestMigrateUpdatesCursorRuleSymlinkFromStatePath(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	storeDir := filepath.Join(tmp, ".scribe", "skills")
+	oldDir := filepath.Join(storeDir, "owner-repo", "cleanup")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, "SKILL.md"), []byte("# Cleanup\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldCursorTarget := filepath.Join(oldDir, ".cursor.mdc")
+	if err := os.WriteFile(oldCursorTarget, []byte("cursor rule"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cursorLink := filepath.Join(tmp, "project", ".cursor", "rules", "cleanup.mdc")
+	if err := os.MkdirAll(filepath.Dir(cursorLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(oldCursorTarget, cursorLink); err != nil {
+		t.Fatal(err)
+	}
+
+	st := &state.State{
+		SchemaVersion: 1,
+		Installed: map[string]state.InstalledSkill{
+			"cleanup": {Paths: []string{cursorLink}},
+		},
+	}
+
+	if _, err := Migrate(storeDir, st); err != nil {
+		t.Fatalf("Migrate failed: %v", err)
+	}
+
+	got, err := os.Readlink(cursorLink)
+	if err != nil {
+		t.Fatalf("Readlink: %v", err)
+	}
+	want := filepath.Join(storeDir, "cleanup", ".cursor.mdc")
+	if got != want {
+		t.Errorf("cursor symlink target = %q, want %q", got, want)
+	}
+}

@@ -69,6 +69,15 @@ func TestRunResolve_Ours(t *testing.T) {
 		t.Errorf("expected ours content, got %q", string(got))
 	}
 
+	// The upstream base must stay unchanged when resolving with --ours.
+	gotBase, err := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotBase) != "upstream stuff\n" {
+		t.Errorf("expected base to remain upstream content, got %q", string(gotBase))
+	}
+
 	// Verify state was updated.
 	st2, err := state.Load()
 	if err != nil {

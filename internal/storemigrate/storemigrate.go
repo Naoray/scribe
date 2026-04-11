@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -36,8 +37,8 @@ func Migrate(storeDir string, st *state.State) (warnings []string, err error) {
 		return nil, nil
 	}
 
-	// movedSkills maps old SKILL.md path → new SKILL.md path for symlink updates.
-	movedSkills := make(map[string]string)
+	// movedTargets maps old on-disk targets → new flat-store targets for symlink updates.
+	movedTargets := make(map[string]string)
 
 	// Scan for two-level directories: <slug>/<name>/SKILL.md
 	slugDirs, err := os.ReadDir(storeDir)
@@ -116,7 +117,9 @@ func Migrate(storeDir string, st *state.State) (warnings []string, err error) {
 				if err := os.Rename(oldDir, targetDir); err != nil {
 					return nil, fmt.Errorf("rename %s → %s: %w", oldDir, targetDir, err)
 				}
-				movedSkills[oldSkill] = targetSkill
+				movedTargets[oldDir] = targetDir
+				movedTargets[oldSkill] = targetSkill
+				movedTargets[filepath.Join(oldDir, ".cursor.mdc")] = filepath.Join(targetDir, ".cursor.mdc")
 			} else {
 				return nil, fmt.Errorf("stat target %s: %w", targetSkill, err)
 			}
@@ -152,8 +155,8 @@ func Migrate(storeDir string, st *state.State) (warnings []string, err error) {
 	}
 
 	// Update symlinks pointing to old slug paths.
-	if len(movedSkills) > 0 {
-		if err := updateSymlinks(movedSkills); err != nil {
+	if len(movedTargets) > 0 {
+		if err := updateSymlinks(movedTargets, st); err != nil {
 			return warnings, fmt.Errorf("update symlinks: %w", err)
 		}
 	}
@@ -199,48 +202,94 @@ func contentHash(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil))[:8], nil
 }
 
-// updateSymlinks rewrites symlinks in tool dirs to point to the new flat paths.
-func updateSymlinks(movedSkills map[string]string) error {
+// updateSymlinks rewrites symlinks in tool dirs and recorded install paths to
+// point at the new flat-store targets.
+func updateSymlinks(movedTargets map[string]string, st *state.State) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
 	}
 
-	// Tool skill directories that may contain symlinks.
+	seen := make(map[string]struct{})
+	var links []string
+
+	// Tool roots that may contain symlinks. Claude links may be nested under
+	// ~/.claude/skills/<registry>/<name>, so walk recursively.
 	toolDirs := []string{
 		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".cursor", "skills"),
 	}
 
 	for _, toolDir := range toolDirs {
-		entries, err := os.ReadDir(toolDir)
+		err := filepath.WalkDir(toolDir, func(path string, d fs.DirEntry, err error) error {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			info, statErr := d.Info()
+			if statErr != nil {
+				return statErr
+			}
+			if info.Mode()&os.ModeSymlink == 0 {
+				return nil
+			}
+			if _, ok := seen[path]; !ok {
+				seen[path] = struct{}{}
+				links = append(links, path)
+			}
+			return nil
+		})
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("read tool dir %s: %w", toolDir, err)
+			return fmt.Errorf("walk tool dir %s: %w", toolDir, err)
+		}
+	}
+
+	// Recorded install paths capture project-local Cursor rules symlinks that do
+	// not live under a single global directory.
+	for _, skill := range st.Installed {
+		for _, path := range skill.Paths {
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			links = append(links, path)
+		}
+	}
+
+	for _, link := range links {
+		target, err := os.Readlink(link)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			continue // Not a symlink, or unreadable.
 		}
 
-		for _, entry := range entries {
-			link := filepath.Join(toolDir, entry.Name())
-			target, err := os.Readlink(link)
-			if err != nil {
-				continue // Not a symlink.
-			}
+		targetKey := target
+		if !filepath.IsAbs(targetKey) {
+			targetKey = filepath.Clean(filepath.Join(filepath.Dir(link), targetKey))
+		}
 
-			// Check if this symlink points to any old path.
-			if newPath, ok := movedSkills[target]; ok {
-				// Replace symlink: remove then create.
-				if err := os.Remove(link); err != nil {
-					return fmt.Errorf("remove symlink %s: %w", link, err)
-				}
-				if err := os.Symlink(newPath, link); err != nil {
-					return fmt.Errorf("create symlink %s → %s: %w", link, newPath, err)
-				}
-			}
+		newPath, ok := movedTargets[targetKey]
+		if !ok {
+			continue
+		}
+
+		// Replace symlink: remove then create.
+		if err := os.Remove(link); err != nil {
+			return fmt.Errorf("remove symlink %s: %w", link, err)
+		}
+		if err := os.Symlink(newPath, link); err != nil {
+			return fmt.Errorf("create symlink %s → %s: %w", link, newPath, err)
 		}
 	}
 
 	return nil
 }
-

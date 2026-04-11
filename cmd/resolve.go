@@ -88,11 +88,14 @@ func runResolve(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("write resolved skill: %w", err)
 	}
 
-	// Advance the merge base to the resolved content so the next sync starts
-	// from a clean 3-way merge baseline, and drop the conflict sidecar.
-	basePath := filepath.Join(skillDir, ".scribe-base.md")
-	if err := os.WriteFile(basePath, content, 0o644); err != nil {
-		return fmt.Errorf("update merge base: %w", err)
+	// Keep the existing merge base when resolving with --ours so the next sync
+	// still merges against the last upstream ancestor. Only advance the base
+	// when the user accepts the upstream side.
+	if theirs {
+		basePath := filepath.Join(skillDir, ".scribe-base.md")
+		if err := os.WriteFile(basePath, content, 0o644); err != nil {
+			return fmt.Errorf("update merge base: %w", err)
+		}
 	}
 	_ = os.Remove(theirsPath)
 
