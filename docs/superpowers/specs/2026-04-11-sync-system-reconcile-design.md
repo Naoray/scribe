@@ -17,6 +17,7 @@ This closes the current gap where Scribe manages a skill in `~/.scribe/skills/<n
 3. Detect duplicate or drifted unmanaged copies in tool directories during normal sync
 4. Preserve user data by refusing to auto-overwrite divergent unmanaged content
 5. Ensure Codex-visible installed skills actually appear under `~/.codex/skills/`
+6. Preserve per-skill tool intent while still repairing tool-facing projections
 
 ## Non-Goals
 
@@ -24,6 +25,7 @@ This closes the current gap where Scribe manages a skill in `~/.scribe/skills/<n
 - Three-way merge across multiple unmanaged tool copies
 - Background or daemon-based reconciliation outside explicit `scribe sync`
 - Reworking package install behavior in this pass
+- Full drift inspection for non-filesystem-backed tool integrations in v1
 
 ---
 
@@ -78,9 +80,9 @@ The preferred order is:
 
 1. resolve active tools
 2. adoption scan/import for unmanaged skills
-3. local system reconcile for all state-managed skills
+3. local system reconcile for all filesystem-backed, state-managed skills
 4. upstream registry sync/update
-5. final local system reconcile for any newly installed or tool-changed skills
+5. final local system reconcile for any newly installed or tool-changed filesystem-backed skills
 
 The second reconcile pass matters because registry sync may install new skills, change effective tools, or refresh canonical content. Ending with reconcile ensures the machine is correct after all mutations, not just midway through the run.
 
@@ -88,16 +90,18 @@ The second reconcile pass matters because registry sync may install new skills, 
 
 Introduce a reconcile engine driven from `state.Installed`.
 
+V1 reconcile applies only to tools with inspectable filesystem projections, such as Claude, Cursor, and Codex. Tools like Gemini that are managed through an external CLI and do not expose a stable `SkillPath` are out of scope for drift inspection in this pass. They still participate in normal install/uninstall flows, but not in path healing or hash-based conflict detection.
+
 For each installed skill:
 
-1. Resolve its effective target tools from `InstalledSkill.Tools`, `ToolsMode`, config tool enablement, and tool availability
+1. Resolve its desired target tools from `InstalledSkill.Tools`, `ToolsMode`, config tool enablement, and tool availability
 2. Compute the expected canonical dir: `~/.scribe/skills/<name>/`
 3. For each expected tool path:
    - if missing: install the symlink or link projection
    - if already points to canonical content: no-op
    - if it is a same-hash real copy: replace with the canonical link
    - if it is different content: emit a reconcile conflict and leave it untouched
-4. For each recorded-but-no-longer-expected tool path:
+4. For each previously managed filesystem projection that is no longer expected:
    - uninstall it unless doing so would remove divergent unmanaged content not created by Scribe
 
 The default posture is:
@@ -146,10 +150,29 @@ TTY output should stay compact:
 
 ```text
 conflict: recap in codex differs from managed copy
-run `scribe adopt recap` to inspect/resolve
+run `scribe skill repair recap --tool codex` to resolve
 ```
 
 `--verbose` and `--json` can include hashes and paths.
+
+### Conflict resolution command
+
+Managed-skill drift should not be resolved through `scribe adopt`. `adopt` is for unmanaged skill intake.
+
+Add a dedicated repair path for already-managed skills:
+
+```bash
+scribe skill repair <name> --tool <tool>
+```
+
+Initial behavior can stay narrow and explicit:
+
+- inspect the conflict
+- choose whether the canonical store wins or the tool-local copy wins
+- if canonical wins: replace the divergent projection with the canonical link
+- if tool-local wins: promote the tool-local copy into the canonical store, snapshotting current canonical content first
+
+This gives managed drift an operator-facing home without overloading `adopt`.
 
 ## 6. Codex Installation And Autocomplete
 
@@ -169,6 +192,7 @@ Result:
 
 - `sync` is the automatic system reconciler
 - `adopt` is the explicit intake and conflict-resolution command for unmanaged skills
+- `skill repair` is the explicit repair command for managed-skill drift
 
 That means:
 - `sync` should still run the adoption scan
@@ -179,7 +203,7 @@ In other words: `adopt` becomes a focused maintenance command, not a prerequisit
 
 ## 8. State And API Changes
 
-This design does not require a new ownership model, but it does require explicit reconcile data structures and events.
+This design does not require a new ownership model, but it does require explicit reconcile data structures, a clean split between intent and projection, and new workflow events.
 
 ### New reconcile result types
 
@@ -209,11 +233,54 @@ type SkillConflict struct {
 
 These should be emitted as workflow events so the existing formatter layer can keep UI concerns out of core logic.
 
+### State model split
+
+`InstalledSkill.Tools` must remain desired intent, not observed output.
+
+That means:
+
+- `Tools` continues to represent the tools the skill should be installed into
+- `ToolsMode` continues to control whether that intent is inherited or pinned
+- reconcile must not rewrite `Tools` based on temporary tool absence, inspection gaps, or unresolved conflicts
+
+Observed projections need separate tracking. Add a new field:
+
+```go
+type InstalledSkill struct {
+    // existing fields
+    Paths []string `json:"paths"`
+
+    // New: filesystem-backed paths Scribe currently believes it created and manages.
+    ManagedPaths []string `json:"managed_paths,omitempty"`
+}
+```
+
+`Paths` should remain for backward compatibility during transition, but implementation should converge on `ManagedPaths` as the projection ledger used by reconcile and remove.
+
 ### State updates
 
-When reconcile heals installs, `state.Installed[name].Paths` and `Tools` should be refreshed to reflect the actual installed projections. This keeps later uninstall and display behavior correct.
+When reconcile heals installs, it should refresh `ManagedPaths` to reflect the actual filesystem-backed projections Scribe currently manages. It must not rewrite `Tools`.
 
-No new persisted field is required for v1 of reconcile if the effective tool set can still be derived from existing `Tools`, `ToolsMode`, and config.
+For unresolved divergent paths that Scribe intentionally leaves in place, do not record them as managed projections. They are conflict residue, not healthy installs.
+
+### Conflict residue
+
+Preserved divergent paths need explicit state so the user is not trapped in an unexplained recurring warning. Add lightweight conflict tracking:
+
+```go
+type ProjectionConflict struct {
+    Tool      string    `json:"tool"`
+    Path      string    `json:"path"`
+    FoundHash string    `json:"found_hash"`
+    SeenAt    time.Time `json:"seen_at"`
+}
+```
+
+Store these per skill as unresolved reconcile conflicts. They are:
+
+- shown in `scribe list` and `scribe sync --json`
+- cleared when the path is removed, normalized, or repaired via `scribe skill repair`
+- ignored by `scribe remove` cleanup except for a warning telling the user the divergent path was intentionally left alone
 
 ## 9. Algorithm Sketch
 
@@ -222,8 +289,9 @@ No new persisted field is required for v1 of reconcile if the effective tool set
 For each `InstalledSkill`:
 
 1. Resolve effective tools using existing tool-resolution logic
-2. Build `expectedTools[name]`
-3. Skip package skills for now or leave them to package-specific logic
+2. Filter to filesystem-backed tools that expose a stable `SkillPath`
+3. Build `expectedTools[name]`
+4. Skip package skills for now or leave them to package-specific logic
 
 ### Inspect current tool paths
 
@@ -249,11 +317,24 @@ For each expected tool:
 
 ### Remove stale installs
 
-For tool paths recorded in state but not in the effective tool set:
+For tool paths recorded in `ManagedPaths` but not in the effective tool set:
 - if path is the expected canonical projection, uninstall it
-- if path now contains divergent content, leave it and emit a warning/conflict rather than deleting user material
+- if path now contains divergent content, leave it and record a projection conflict rather than deleting user material
 
-## 10. Output Design
+## 10. Remove And Cleanup Semantics
+
+`scribe remove` currently uninstalls via tool hooks and then deletes `installed.Paths`. With reconcile, cleanup must distinguish between Scribe-managed projections and preserved divergent residue.
+
+New rule:
+
+- remove tool-managed projections from `ManagedPaths`
+- remove canonical store content
+- clear state entry
+- if unresolved projection conflicts exist, warn that Scribe intentionally left divergent local content untouched and print the paths in `--verbose` or `--json`
+
+This prevents `remove` from accidentally deleting user-owned divergent content that sync preserved on purpose.
+
+## 11. Output Design
 
 Default sync output should stay terse.
 
@@ -275,7 +356,9 @@ If nothing needed repair, omit the line entirely. If only Codex links were recre
 - removed stale installs count
 - reconcile conflicts array
 
-## 11. Testing
+The default text output for a managed drift conflict should point to `scribe skill repair`, not `adopt`.
+
+## 12. Testing
 
 Add table-driven tests covering:
 
@@ -286,32 +369,48 @@ Add table-driven tests covering:
 5. disabled or unavailable tool is not force-installed
 6. stale tool path is removed when no longer expected
 7. stale tool path with divergent content is preserved and reported
+8. pinned `Tools` intent survives a reconcile run even when a tool is temporarily unavailable
+9. non-filesystem-backed tools are skipped by drift inspection without corrupting state
+10. `remove` only deletes `ManagedPaths`, not preserved conflict residue
 
 Workflow tests should verify ordering:
 - adoption scan before registry sync
 - system reconcile after adoption
 - final reconcile after registry install/update
 
-## 12. Migration And Rollout
+## 13. Migration And Rollout
 
-This should ship without state migration.
+This requires a small state migration if `ManagedPaths` and projection conflict tracking are added.
 
 Existing users benefit automatically on next `scribe sync`:
 - missing `~/.codex/skills/*` links are recreated
 - same-hash duplicates are normalized
 - divergent copies are surfaced as conflicts instead of silently ignored
 
-No new command is required. Documentation should update `scribe sync` to mean:
+Migration rule:
+
+- seed `ManagedPaths` from existing `Paths`
+- leave `Tools` unchanged
+- initialize projection conflicts empty
+
+Documentation should update `scribe sync` to mean:
 
 > Keep connected registries, local skills, and installed tool projections in sync.
 
-## 13. Open Questions Deferred
+`scribe skill repair` is new, but it is required to make managed-drift conflicts actionable.
+
+Package note:
+
+- this pass does not make package installs fully drift-healable
+- docs must say that the machine-health guarantee is complete for filesystem-backed skill projections and best-effort for package-backed or external-CLI-managed installs
+
+## 14. Open Questions Deferred
 
 These are intentionally out of scope for this pass:
 
 1. conflict-resolution flags such as `scribe sync --prefer-managed`
 2. auto-merge between canonical and divergent unmanaged tool copies
-3. a dedicated `scribe doctor` or `scribe repair` command
+3. a broader `scribe doctor` command beyond the narrowly scoped `scribe skill repair`
 4. package reconcile behavior for tools that do not use per-skill symlinks
 
 The design should leave room for a future explicit conflict-resolution workflow, but default sync behavior should already satisfy the north star: one command that keeps the machine healthy without surprising data loss.
