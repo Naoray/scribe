@@ -12,7 +12,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-isatty"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -596,6 +598,7 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 			Name:      row.Name,
 			Status:    row.Status,
 			Entry:     row.Entry,
+			IsPackage: row.Entry.IsPackage(),
 			LatestSHA: row.LatestSHA,
 		}
 		if row.Local != nil {
@@ -622,6 +625,25 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 				Client:   sync.WrapGitHubClient(bag.Client),
 				Provider: bag.Provider,
 				Tools:    bag.Tools,
+				Executor: &sync.ShellExecutor{},
+				TrustAll: bag.TrustAllFlag,
+			}
+			isTTY := isatty.IsTerminal(os.Stdin.Fd())
+			if isTTY && !bag.TrustAllFlag && !bag.JSONFlag {
+				syncer.ApprovalFunc = func(name, command, source string) bool {
+					var approved bool
+					err := huh.NewConfirm().
+						Title(fmt.Sprintf("Package %q wants to run a shell command", name)).
+						Description(fmt.Sprintf("source:  %s\ncommand: %s", source, command)).
+						Affirmative("Approve").
+						Negative("Deny").
+						Value(&approved).
+						Run()
+					if err != nil {
+						return false
+					}
+					return approved
+				}
 			}
 			err := syncer.RunWithDiff(ctx, repo, []sync.SkillStatus{ss}, bag.State)
 			if err != nil {

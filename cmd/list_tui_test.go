@@ -1,11 +1,18 @@
 package cmd
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Naoray/scribe/internal/discovery"
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 // key builds a KeyPressMsg whose String() matches the given label. Letter/char
@@ -307,5 +314,68 @@ func TestBuildLocalRowsExcluding_PreservesUnmatchedSameName(t *testing.T) {
 	}
 	if rows[0].Name != "ascii" {
 		t.Errorf("row name = %q, want 'ascii'", rows[0].Name)
+	}
+}
+
+func TestExecuteActionUpdate_PackageUsesExecutor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	markerFile := filepath.Join(home, "updated.txt")
+	st := &state.State{
+		SchemaVersion: 2,
+		Installed: map[string]state.InstalledSkill{
+			"pkg-skill": {
+				Type: "package",
+			},
+		},
+	}
+
+	m := listModel{
+		ctx: context.Background(),
+		bag: &workflow.Bag{
+			State: st,
+			Tools: nil,
+		},
+		filtered: []listRow{
+			{
+				Name:      "pkg-skill",
+				Group:     "owner/repo",
+				Status:    sync.StatusOutdated,
+				HasStatus: true,
+				Entry: &manifest.Entry{
+					Name:   "pkg-skill",
+					Source: "github:owner/repo@main",
+					Type:   manifest.EntryTypePackage,
+					Update: "printf updated > " + markerFile,
+				},
+				Local: &discovery.Skill{Name: "pkg-skill", LocalPath: filepath.Join(home, ".scribe", "skills", "pkg-skill")},
+			},
+		},
+	}
+
+	nm, cmd := m.executeAction("update")
+	if cmd == nil {
+		t.Fatal("expected update command")
+	}
+	if _, ok := nm.(listModel); !ok {
+		t.Fatal("expected listModel result")
+	}
+
+	msg := cmd()
+	done, ok := msg.(updateDoneMsg)
+	if !ok {
+		t.Fatalf("expected updateDoneMsg, got %T", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("update returned error: %v", done.err)
+	}
+
+	data, err := os.ReadFile(markerFile)
+	if err != nil {
+		t.Fatalf("expected update command to write marker file: %v", err)
+	}
+	if string(data) != "updated" {
+		t.Errorf("marker content = %q, want %q", string(data), "updated")
 	}
 }
