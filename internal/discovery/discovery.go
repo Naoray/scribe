@@ -360,27 +360,3 @@ func truncateDescription(s string) string {
 	return s
 }
 
-// isDirEmpty reports whether a directory has no files (ignoring subdirectories).
-func isDirEmpty(dir string) (bool, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false, err
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			return false, nil
-		}
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			empty, err := isDirEmpty(filepath.Join(dir, e.Name()))
-			if err != nil {
-				return false, err
-			}
-			if !empty {
-				return false, nil
-			}
-		}
-	}
-	return true, nil
-}

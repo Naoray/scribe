@@ -229,22 +229,9 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 		if derr != nil {
 			return nil, fmt.Errorf("%s: %w", repo, derr)
 		}
-		slug := tools.SlugifyRegistry(repo)
 		for _, ss := range statuses {
-			// A local skill may be discovered under either its slug-qualified
-			// name (e.g. "Artistfy-hq/ascii" if it lives at
-			// ~/.scribe/skills/Artistfy-hq/ascii) or its bare name
-			// (e.g. "ascii" if installed at ~/.claude/skills/ascii). Prefer
-			// the slug-qualified form so a same-named top-level skill from a
-			// different source can't be mis-attributed to this registry row.
-			// Only mark the matched key so unrelated same-named skills aren't
-			// suppressed from the untracked-pass below.
-			qualifiedKey := slug + "/" + ss.Name
-			local := localByName[qualifiedKey]
+			local := localByName[ss.Name]
 			if local != nil {
-				matchedLocal[qualifiedKey] = true
-			} else if bare := localByName[ss.Name]; bare != nil {
-				local = bare
 				matchedLocal[ss.Name] = true
 			}
 			row := listRow{
