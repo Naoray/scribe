@@ -165,21 +165,30 @@ func TestRefreshFilteredBuildsGroupCounts(t *testing.T) {
 		rows: []listRow{
 			{Name: "alpha", Group: "g1"},
 			{Name: "beta", Group: "g1"},
+			{Name: "delta", Group: "g1"},
 			{Name: "gamma", Group: "g2"},
 		},
-		search: "a",
+		search: "elt",
+		cursor: 2,
+		offset: 1,
 	}
 
 	m = m.refreshFiltered()
 
-	if got := len(m.filtered); got != 3 {
-		t.Fatalf("filtered len = %d, want 3", got)
+	if got := len(m.filtered); got != 1 {
+		t.Fatalf("filtered len = %d, want 1", got)
 	}
-	if got := m.groupCounts["g1"]; got != 2 {
-		t.Fatalf("groupCounts[g1] = %d, want 2", got)
+	if got := m.filtered[0].Name; got != "delta" {
+		t.Fatalf("filtered[0].Name = %q, want %q", got, "delta")
 	}
-	if got := m.groupCounts["g2"]; got != 1 {
-		t.Fatalf("groupCounts[g2] = %d, want 1", got)
+	if got := m.groupCounts["g1"]; got != 1 {
+		t.Fatalf("groupCounts[g1] = %d, want 1", got)
+	}
+	if got := m.groupCounts["g2"]; got != 0 {
+		t.Fatalf("groupCounts[g2] = %d, want 0", got)
+	}
+	if m.cursor != 0 || m.offset != 0 {
+		t.Fatalf("cursor/offset = %d/%d, want 0/0", m.cursor, m.offset)
 	}
 }
 
