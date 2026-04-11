@@ -99,6 +99,8 @@ type listRow struct {
 	Entry     *manifest.Entry  // from SkillStatus.Entry, nil for local-only
 	LatestSHA string           // for triggering update
 	Excerpt   string           // first ~8 lines of SKILL.md body
+	Managed   bool             // true when tracked in state AND path is inside ~/.scribe/skills/
+	Origin    state.Origin     // how the skill was acquired; OriginLocal for adopted/hand-written
 }
 
 // ── Action items ───────────────────────────────────────────────────────────
@@ -224,7 +226,7 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 
 	// Local-only mode: no team registries connected.
 	if len(repos) == 0 {
-		return buildLocalRows(localSkills), nil
+		return buildLocalRows(localSkills, bag.State), nil
 	}
 
 	// Registry mode: filter, then diff per repo.
@@ -269,6 +271,12 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 				Entry:     ss.Entry,
 				LatestSHA: ss.LatestSHA,
 			}
+			if local != nil {
+				row.Managed = local.Managed
+			}
+			if installed, ok := bag.State.Installed[ss.Name]; ok {
+				row.Origin = installed.Origin
+			}
 			if ss.Installed != nil {
 				row.Targets = ss.Installed.Tools
 			}
@@ -282,14 +290,14 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 	// Append every local skill that didn't surface through any team registry.
 	// These show up under their package (or "uncategorized") with no status
 	// column — they're outside the team-registry concept entirely.
-	rows = append(rows, buildLocalRowsExcluding(localSkills, matchedLocal)...)
+	rows = append(rows, buildLocalRowsExcluding(localSkills, matchedLocal, bag.State)...)
 	return rows, nil
 }
 
 // buildLocalRowsExcluding returns local rows for every skill whose name is
 // not present in the matched set, grouped/sorted the same way as the
 // local-only fallback view.
-func buildLocalRowsExcluding(skills []discovery.Skill, matched map[string]bool) []listRow {
+func buildLocalRowsExcluding(skills []discovery.Skill, matched map[string]bool, st *state.State) []listRow {
 	var remaining []discovery.Skill
 	for _, sk := range skills {
 		if matched[sk.Name] {
@@ -297,7 +305,7 @@ func buildLocalRowsExcluding(skills []discovery.Skill, matched map[string]bool) 
 		}
 		remaining = append(remaining, sk)
 	}
-	return buildLocalRows(remaining)
+	return buildLocalRows(remaining, st)
 }
 
 const unmanagedGroup = "Local (unmanaged)"
@@ -315,7 +323,7 @@ func registryGroupFromName(name string) string {
 	return unmanagedGroup
 }
 
-func buildLocalRows(skills []discovery.Skill) []listRow {
+func buildLocalRows(skills []discovery.Skill, st *state.State) []listRow {
 	groups := map[string][]listRow{}
 	for i := range skills {
 		sk := &skills[i]
@@ -325,6 +333,10 @@ func buildLocalRows(skills []discovery.Skill) []listRow {
 			Group:   g,
 			Targets: sk.Targets,
 			Local:   sk,
+			Managed: sk.Managed,
+		}
+		if installed, ok := st.Installed[sk.Name]; ok {
+			row.Origin = installed.Origin
 		}
 		if sk.LocalPath != "" {
 			row.Excerpt = readExcerpt(sk.LocalPath, 8)
@@ -1197,10 +1209,18 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 
 	if compact {
 		if !row.HasStatus {
-			return prefix + nameStyle.Render(name)
+			line := prefix + nameStyle.Render(name)
+			if !row.Managed {
+				line += " " + ltDimStyle.Render("[unmanaged]")
+			}
+			return line
 		}
 		icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
-		return prefix + nameStyle.Render(name) + "  " + icon
+		line := prefix + nameStyle.Render(name) + "  " + icon
+		if !row.Managed {
+			line += " " + ltDimStyle.Render("[unmanaged]")
+		}
+		return line
 	}
 
 	// Full view: name + version + author + status
@@ -1224,6 +1244,10 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 		icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
 		label := statusStyles[row.Status].Render(row.Status.Display().Label)
 		line += "  " + icon + " " + label
+	}
+
+	if !row.Managed {
+		line += " " + ltDimStyle.Render("[unmanaged]")
 	}
 
 	return line
@@ -1272,6 +1296,9 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	if row.HasStatus {
 		pairs = append(pairs, kv{"Status", row.Status.Display().Label})
 	}
+	if !row.Managed {
+		pairs = append(pairs, kv{"Status", "unmanaged"})
+	}
 	if row.Version != "" {
 		pairs = append(pairs, kv{"Version", row.Version})
 	}
@@ -1280,6 +1307,9 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	}
 	if row.Group != "" {
 		pairs = append(pairs, kv{"Registry", row.Group})
+	}
+	if row.Origin == state.OriginLocal {
+		pairs = append(pairs, kv{"Source", "(local)"})
 	}
 	if len(row.Targets) > 0 {
 		pairs = append(pairs, kv{"Tools", strings.Join(row.Targets, ", ")})
@@ -1294,6 +1324,10 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 
 	for _, p := range pairs {
 		b.WriteString(ltMetaKeyStyle.Render(p.key) + ltMetaValStyle.Render(p.value) + "\n")
+	}
+
+	if !row.Managed {
+		b.WriteString(ltDimStyle.Render("run: scribe adopt "+row.Name) + "\n")
 	}
 
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")

@@ -130,7 +130,7 @@ func TestBuildLocalRows_GroupsAndOrders(t *testing.T) {
 		{Name: "gstack/beta"},
 		{Name: "local/gamma"},
 	}
-	rows := buildLocalRows(skills)
+	rows := buildLocalRows(skills, &state.State{Installed: map[string]state.InstalledSkill{}})
 
 	if len(rows) != 4 {
 		t.Fatalf("expected 4 rows, got %d", len(rows))
@@ -383,7 +383,7 @@ func TestBuildLocalRowsExcluding_DedupsSlugQualified(t *testing.T) {
 	matched := map[string]bool{
 		"Artistfy-hq/ascii": true,
 	}
-	rows := buildLocalRowsExcluding(skills, matched)
+	rows := buildLocalRowsExcluding(skills, matched, &state.State{Installed: map[string]state.InstalledSkill{}})
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row, got %d: %+v", len(rows), rows)
 	}
@@ -402,7 +402,7 @@ func TestBuildLocalRowsExcluding_PreservesUnmatchedSameName(t *testing.T) {
 	matched := map[string]bool{
 		"Artistfy-hq/ascii": true, // bare "ascii" NOT in matched set
 	}
-	rows := buildLocalRowsExcluding(skills, matched)
+	rows := buildLocalRowsExcluding(skills, matched, &state.State{Installed: map[string]state.InstalledSkill{}})
 	if len(rows) != 1 {
 		t.Fatalf("expected bare-name 'ascii' to survive, got %d rows", len(rows))
 	}
