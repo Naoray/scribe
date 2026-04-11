@@ -112,6 +112,46 @@ func TestReconcilePreservesDivergentDirectoryAsConflict(t *testing.T) {
 	}
 }
 
+func TestReconcileDetectsCodexSubfileDrift(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	files := []tools.SkillFile{
+		{Path: "SKILL.md", Content: []byte("# recap\ncanonical\n")},
+		{Path: "scripts/run.sh", Content: []byte("#!/bin/sh\necho canonical\n")},
+	}
+	if _, err := tools.WriteToStore("recap", files); err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+	toolPath := filepath.Join(home, ".codex", "skills", "recap")
+	if err := os.MkdirAll(filepath.Join(toolPath, "scripts"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Identical SKILL.md — old hash strategy would call these equal.
+	if err := os.WriteFile(filepath.Join(toolPath, "SKILL.md"), []byte("# recap\ncanonical\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile SKILL.md: %v", err)
+	}
+	// Drift buried in a subfile — must be caught by the tree hash.
+	if err := os.WriteFile(filepath.Join(toolPath, "scripts", "run.sh"), []byte("#!/bin/sh\necho drifted\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile scripts/run.sh: %v", err)
+	}
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"recap": {Revision: 1, Tools: []string{"codex"}, ToolsMode: state.ToolsModePinned},
+	}}
+	engine := reconcile.Engine{Tools: []tools.Tool{tools.CodexTool{}}, Now: func() time.Time { return time.Unix(4, 0).UTC() }}
+	summary, _, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Relinked != 0 {
+		t.Fatalf("Relinked = %d, want 0 — subfile drift must not be silently relinked", summary.Relinked)
+	}
+	if len(summary.Conflicts) != 1 {
+		t.Fatalf("Conflicts = %d, want 1 (subfile drift)", len(summary.Conflicts))
+	}
+}
+
 func TestReconcileRemovesStaleManagedProjection(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
