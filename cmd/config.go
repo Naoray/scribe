@@ -5,8 +5,6 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-
-	"github.com/Naoray/scribe/internal/config"
 )
 
 func newConfigCommand() *cobra.Command {
@@ -40,8 +38,9 @@ Example:
 
 func runConfigSetEditor(cmd *cobra.Command, args []string) error {
 	editor := args[0]
+	factory := newCommandFactory()
 
-	cfg, err := config.Load()
+	cfg, err := factory.Config()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

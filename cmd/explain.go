@@ -20,7 +20,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/discovery"
-	"github.com/Naoray/scribe/internal/state"
 )
 
 var (
@@ -57,8 +56,9 @@ Falls back to rendering the SKILL.md directly if no LLM is available.`,
 func runExplain(cmd *cobra.Command, args []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	rawFlag, _ := cmd.Flags().GetBool("raw")
+	factory := newCommandFactory()
 
-	st, err := state.Load()
+	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}

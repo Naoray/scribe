@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/config"
-	"github.com/Naoray/scribe/internal/tools"
+	itools "github.com/Naoray/scribe/internal/tools"
 )
 
 func newToolsCommand() *cobra.Command {
@@ -56,8 +56,9 @@ func newToolsDisableCommand() *cobra.Command {
 
 func runToolsList(cmd *cobra.Command, _ []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
+	factory := newCommandFactory()
 
-	cfg, err := config.Load()
+	cfg, err := factory.Config()
 	if err != nil {
 		return err
 	}
@@ -87,7 +88,8 @@ func runToolsDisable(cmd *cobra.Command, args []string) error {
 }
 
 func setToolEnabled(name string, enabled bool) error {
-	cfg, err := config.Load()
+	factory := newCommandFactory()
+	cfg, err := factory.Config()
 	if err != nil {
 		return err
 	}
@@ -128,7 +130,7 @@ func ensureToolsPopulated(cfg *config.Config) {
 	if len(cfg.Tools) > 0 {
 		return
 	}
-	detected := tools.DetectTools()
+	detected := itools.DetectTools()
 	for _, t := range detected {
 		cfg.Tools = append(cfg.Tools, config.ToolConfig{
 			Name:    t.Name(),

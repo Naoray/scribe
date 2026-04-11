@@ -22,12 +22,13 @@ const labelWidth = 10 // "Registries" is the longest label at 10 chars
 
 func runHub(cmd *cobra.Command, args []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
+	factory := newCommandFactory()
 
-	cfg, err := config.Load()
+	cfg, err := factory.Config()
 	if err != nil {
 		cfg = &config.Config{}
 	}
-	st, err := state.Load()
+	st, err := factory.State()
 	if err != nil {
 		st = &state.State{Installed: make(map[string]state.InstalledSkill)}
 	}
@@ -130,4 +131,3 @@ func writeStatusStyled(w io.Writer, cfg *config.Config, st *state.State) {
 	}
 	fmt.Fprintln(w)
 }
-

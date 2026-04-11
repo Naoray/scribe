@@ -61,6 +61,16 @@ var (
 	ltDivStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	ltGroupStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
 	ltSpinnerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF"))
+	ltUpdateStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	ltRemoveStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06060"))
+	ltNeutralStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
+	ltDescStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#aaaaaa"))
+	ltMetaKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Width(10)
+	ltMetaValStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
+	ltReasonStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Italic(true)
+	ltExcerptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	ltPaneStyle    = lipgloss.NewStyle()
+	ltErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
 )
 
 // ── Row data ────────────────────────────────────────────────────────────────
@@ -102,11 +112,11 @@ func actionsForRow(row listRow) []actionItem {
 		updateReason = "source unknown"
 	}
 	return []actionItem{
-		{label: "update", key: "update", disabled: !canUpdate, reason: updateReason, style: lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))},
-		{label: "remove", key: "remove", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#e06060"))},
+		{label: "update", key: "update", disabled: !canUpdate, reason: updateReason, style: ltUpdateStyle},
+		{label: "remove", key: "remove", disabled: !hasLocal, reason: "not on disk", style: ltRemoveStyle},
 		{label: "add to category", key: "category", disabled: true, reason: "coming soon", style: ltDimStyle},
-		{label: "copy path", key: "copy", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
-		{label: "open in editor", key: "edit", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
+		{label: "copy path", key: "copy", disabled: !hasLocal, reason: "not on disk", style: ltNeutralStyle},
+		{label: "open in editor", key: "edit", disabled: !hasLocal, reason: "not on disk", style: ltNeutralStyle},
 	}
 }
 
@@ -672,7 +682,7 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 			}),
 		)
 	case "edit":
-		editor := resolveEditor()
+		editor := resolveEditor(m.bag.Config)
 		skillMD := filepath.Join(sk.LocalPath, "SKILL.md")
 		c := exec.Command(editor, skillMD)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
@@ -838,7 +848,7 @@ func (m listModel) viewLoading() string {
 }
 
 func (m listModel) viewError() string {
-	return "\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render("Error: "+m.err.Error()) + "\n"
+	return "\n  " + ltErrorStyle.Render("Error: "+m.err.Error()) + "\n"
 }
 
 // viewListFull is the default browse view: full-width list with status icons
@@ -896,10 +906,10 @@ func (m listModel) viewSplit() string {
 	}
 	rightContent = strings.Join(rightLines[:contentHeight], "\n")
 
-	leftRendered := lipgloss.NewStyle().Width(leftWidth).Height(contentHeight).Render(leftContent)
+	leftRendered := ltPaneStyle.Width(leftWidth).Height(contentHeight).Render(leftContent)
 	divider := strings.TrimRight(strings.Repeat("│\n", contentHeight), "\n")
-	divRendered := lipgloss.NewStyle().Height(contentHeight).Foreground(lipgloss.Color("#555555")).Render(divider)
-	rightRendered := lipgloss.NewStyle().Width(rightWidth).Height(contentHeight).Render(rightContent)
+	divRendered := ltDivStyle.Height(contentHeight).Render(divider)
+	rightRendered := ltPaneStyle.Width(rightWidth).Height(contentHeight).Render(rightContent)
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, divRendered, rightRendered)
 	b.WriteString(body)
@@ -1100,8 +1110,7 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	b.WriteString(ltCursorStyle.Render(row.Name) + "\n")
 
 	if row.Local != nil && row.Local.Description != "" {
-		descStyle := lipgloss.NewStyle().Width(width - 2).Foreground(lipgloss.Color("#aaaaaa"))
-		b.WriteString(descStyle.Render(row.Local.Description) + "\n")
+		b.WriteString(ltDescStyle.Width(width-2).Render(row.Local.Description) + "\n")
 	}
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
 
@@ -1131,10 +1140,8 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 		pairs = append(pairs, kv{"Path", path})
 	}
 
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Width(10)
-	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
 	for _, p := range pairs {
-		b.WriteString(keyStyle.Render(p.key) + valueStyle.Render(p.value) + "\n")
+		b.WriteString(ltMetaKeyStyle.Render(p.key) + ltMetaValStyle.Render(p.value) + "\n")
 	}
 
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
@@ -1155,7 +1162,7 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 			label := ltDimStyle.Render(a.label)
 			reason := ""
 			if a.reason != "" {
-				reason = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Italic(true).Render(a.reason)
+				reason = " " + ltReasonStyle.Render(a.reason)
 			}
 			b.WriteString(prefix + label + reason + "\n")
 		} else {
@@ -1169,17 +1176,16 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 
 	if row.Excerpt != "" {
 		b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
-		excerptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Width(width - 2)
-		b.WriteString(excerptStyle.Render(row.Excerpt) + "\n")
+		b.WriteString(ltExcerptStyle.Width(width-2).Render(row.Excerpt) + "\n")
 	}
 	return b.String()
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-func resolveEditor() string {
+func resolveEditor(cfg *config.Config) string {
 	// 1. Check config
-	if cfg, err := config.Load(); err == nil && cfg.Editor != "" {
+	if cfg != nil && cfg.Editor != "" {
 		return cfg.Editor
 	}
 	// 2. Environment

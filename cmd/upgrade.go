@@ -9,7 +9,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/upgrade"
 )
@@ -26,6 +25,7 @@ func newUpgradeCommand() *cobra.Command {
 
 func runUpgrade(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
+	factory := newCommandFactory()
 
 	// Dev builds should not attempt self-upgrade.
 	isDevBuild, _ := upgrade.NeedsUpgrade(Version, "")
@@ -39,12 +39,15 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Installed via: %s\n", method)
 
 	// Fetch latest release.
-	cfg, err := config.Load()
+	_, err := factory.Config()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	client := github.NewClient(ctx, cfg.Token)
+	client, err := factory.Client()
+	if err != nil {
+		return fmt.Errorf("load github client: %w", err)
+	}
 	release, err := client.LatestRelease(ctx, "Naoray", "scribe")
 	if err != nil {
 		return fmt.Errorf("check latest version: %w", err)

@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -36,12 +35,13 @@ func runResolve(cmd *cobra.Command, args []string) error {
 	skillName := args[0]
 	ours, _ := cmd.Flags().GetBool("ours")
 	theirs, _ := cmd.Flags().GetBool("theirs")
+	factory := newCommandFactory()
 
 	if ours == theirs {
 		return fmt.Errorf("specify exactly one of --ours or --theirs")
 	}
 
-	st, err := state.Load()
+	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}

@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/config"
-	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -51,9 +50,10 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
+	factory := newCommandFactory()
 
 	// Load state.
-	st, err := state.Load()
+	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
@@ -82,7 +82,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	installed := st.Installed[key]
 
 	// Check if managed by a registry.
-	cfg, err := config.Load()
+	cfg, err := factory.Config()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

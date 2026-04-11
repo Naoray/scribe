@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"github.com/Naoray/scribe/internal/config"
 )
 
 func newRegistryEnableCommand() *cobra.Command {
@@ -35,7 +33,8 @@ func runRegistryDisable(cmd *cobra.Command, args []string) error {
 }
 
 func setRegistryEnabled(repo string, enabled bool) error {
-	cfg, err := config.Load()
+	factory := newCommandFactory()
+	cfg, err := factory.Config()
 	if err != nil {
 		return err
 	}
