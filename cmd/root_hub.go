@@ -20,7 +20,11 @@ import (
 
 const labelWidth = 10 // "Registries" is the longest label at 10 chars
 
-func runHub(cmd *cobra.Command, args []string) error {
+func runDefault(cmd *cobra.Command, args []string) error {
+	return runList(cmd, args)
+}
+
+func runStatus(cmd *cobra.Command, args []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	factory := newCommandFactory()
 
@@ -34,7 +38,7 @@ func runHub(cmd *cobra.Command, args []string) error {
 	}
 
 	if jsonFlag || !isatty.IsTerminal(os.Stdout.Fd()) || os.Getenv("CI") != "" {
-		return writeHubJSON(os.Stdout, Version, cfg, st)
+		return writeStatusJSON(os.Stdout, Version, cfg, st)
 	}
 
 	if os.Getenv("TERM") == "dumb" {
@@ -50,14 +54,10 @@ func runHub(cmd *cobra.Command, args []string) error {
 
 	logo.Render(os.Stdout, Version, width)
 	writeStatusStyled(os.Stdout, cfg, st)
-
-	// Show the standard cobra help below the logo + status so users see every
-	// available command at a glance.
-	cmd.SetOut(os.Stdout)
-	return cmd.Help()
+	return nil
 }
 
-func writeHubJSON(w io.Writer, version string, cfg *config.Config, st *state.State) error {
+func writeStatusJSON(w io.Writer, version string, cfg *config.Config, st *state.State) error {
 	repos := cfg.TeamRepos()
 
 	status := struct {

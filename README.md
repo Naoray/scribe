@@ -123,10 +123,12 @@ ArtistfyHQ/team-skills/
 
 | Command | What it does |
 |---|---|
+| `scribe` | Open the local skill manager |
 | `scribe list` | Show all skills on this machine |
 | `scribe add [query]` | Find and install skills from registries |
 | `scribe remove <skill>` | Remove a skill from this machine |
 | `scribe sync` | Pull updates from connected registries |
+| `scribe status` | Show connected registries, installed count, and last sync |
 | `scribe tools` | List detected AI tools, enable/disable |
 | `scribe explain <skill>` | AI-powered skill explanation (or `--raw` for rendered SKILL.md) |
 
@@ -197,8 +199,9 @@ Auth fallback chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/confi
 Scribe auto-detects non-TTY environments (CI, agent invocations). `--json` flag gives structured output:
 
 ```bash
-scribe sync --json
+scribe --json
 scribe list --json
+scribe status --json
 scribe add --json skillname --yes
 ```
 
