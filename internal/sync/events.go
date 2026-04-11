@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -42,12 +43,12 @@ func (s Status) String() string {
 type SkillStatus struct {
 	Name       string
 	Status     Status
-	Installed  *state.InstalledSkill  // nil if not installed
-	Entry      *manifest.Entry        // catalog entry, nil for StatusExtra
-	LoadoutRef string                 // the ref from the manifest (e.g. "v1.0.0", "main")
+	Installed  *state.InstalledSkill // nil if not installed
+	Entry      *manifest.Entry       // catalog entry, nil for StatusExtra
+	LoadoutRef string                // the ref from the manifest (e.g. "v1.0.0", "main")
 	Maintainer string
 	IsPackage  bool
-	LatestSHA  string                 // resolved SHA for branch-pinned skills; empty if unavailable
+	LatestSHA  string // resolved SHA for branch-pinned skills; empty if unavailable
 }
 
 // DisplayVersion returns the best human-readable version for this skill.
@@ -139,6 +140,15 @@ type SyncCompleteMsg struct {
 	Updated   int
 	Skipped   int
 	Failed    int
+}
+
+type ReconcileConflictMsg struct {
+	Name     string
+	Conflict state.ProjectionConflict
+}
+
+type ReconcileCompleteMsg struct {
+	Summary reconcile.Summary
 }
 
 // LegacyFormatMsg is sent when a registry still uses scribe.toml (TOML format).

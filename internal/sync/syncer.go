@@ -440,6 +440,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				Tools:         toolNames,
 				ToolsMode:     toolsMode,
 				Paths:         paths,
+				ManagedPaths:  append([]string(nil), paths...),
 			})
 			// Save after each successful install — partial sync is safe.
 			if err := st.Save(); err != nil {

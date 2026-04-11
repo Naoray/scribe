@@ -100,3 +100,21 @@ func WriteToStore(skillName string, files []SkillFile) (string, error) {
 func StoreDir() (string, error) {
 	return paths.StoreDir()
 }
+
+// WriteCanonicalSkill rewrites the canonical SKILL.md content and refreshes the
+// stored merge base to match. Used by repair flows that promote a tool-local
+// single-file projection back into the canonical store.
+func WriteCanonicalSkill(canonicalDir string, skillMD []byte) error {
+	if err := os.MkdirAll(canonicalDir, 0o755); err != nil {
+		return fmt.Errorf("create store dir: %w", err)
+	}
+	skillPath := filepath.Join(canonicalDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, skillMD, 0o644); err != nil {
+		return fmt.Errorf("write canonical skill: %w", err)
+	}
+	basePath := filepath.Join(canonicalDir, ".scribe-base.md")
+	if err := os.WriteFile(basePath, skillMD, 0o644); err != nil {
+		return fmt.Errorf("write canonical base: %w", err)
+	}
+	return nil
+}

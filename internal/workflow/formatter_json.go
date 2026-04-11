@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 )
 
@@ -14,6 +15,14 @@ type jsonFormatter struct {
 	current    *registryResult
 	summary    sync.SyncCompleteMsg
 	adoption   adoptionResult
+	reconcile  *reconcileResult
+}
+
+type reconcileResult struct {
+	Installed int                        `json:"installed"`
+	Relinked  int                        `json:"relinked"`
+	Removed   int                        `json:"removed"`
+	Conflicts []state.ProjectionConflict `json:"conflicts,omitempty"`
 }
 
 type adoptedSkill struct {
@@ -111,6 +120,22 @@ func (f *jsonFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 		f.registries = append(f.registries, *f.current)
 		f.current = nil
 	}
+}
+
+func (f *jsonFormatter) OnReconcileConflict(_ string, conflict state.ProjectionConflict) {
+	if f.reconcile == nil {
+		f.reconcile = &reconcileResult{}
+	}
+	f.reconcile.Conflicts = append(f.reconcile.Conflicts, conflict)
+}
+
+func (f *jsonFormatter) OnReconcileComplete(msg sync.ReconcileCompleteMsg) {
+	if f.reconcile == nil {
+		f.reconcile = &reconcileResult{}
+	}
+	f.reconcile.Installed += msg.Summary.Installed
+	f.reconcile.Relinked += msg.Summary.Relinked
+	f.reconcile.Removed += msg.Summary.Removed
 }
 
 func (f *jsonFormatter) OnPackageInstallPrompt(name, command, source string) {}
@@ -234,6 +259,9 @@ func (f *jsonFormatter) Flush() error {
 	}
 	if f.adoption.active || f.adoption.Skipped != "" || f.adoption.Conflicts > 0 {
 		out["adoption"] = f.adoption
+	}
+	if f.reconcile != nil {
+		out["reconcile"] = f.reconcile
 	}
 	return json.NewEncoder(f.out).Encode(out)
 }

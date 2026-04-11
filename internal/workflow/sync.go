@@ -13,6 +13,7 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -28,7 +29,9 @@ func SyncSteps() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"Adopt", StepAdopt},
+		{"ReconcileSystem", StepReconcileSystem},
 		{"SyncSkills", StepSyncSkills},
+		{"ReconcileSystem", StepReconcileSystem},
 	}
 }
 
@@ -38,7 +41,29 @@ func SyncTail() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepSyncSkills},
+		{"ReconcileSystem", StepReconcileSystem},
 	}
+}
+
+func StepReconcileSystem(_ context.Context, b *Bag) error {
+	engine := reconcile.Engine{Tools: b.Tools}
+	summary, actions, err := engine.Run(b.State)
+	if err != nil {
+		return fmt.Errorf("reconcile system: %w", err)
+	}
+	for _, action := range actions {
+		if action.Kind != reconcile.ActionConflict {
+			continue
+		}
+		for _, conflict := range b.State.Installed[action.Name].Conflicts {
+			if conflict.Path == action.Path && conflict.Tool == action.Tool {
+				b.Formatter.OnReconcileConflict(action.Name, conflict)
+				break
+			}
+		}
+	}
+	b.Formatter.OnReconcileComplete(sync.ReconcileCompleteMsg{Summary: summary})
+	return b.State.Save()
 }
 
 func StepLoadConfig(ctx context.Context, b *Bag) error {

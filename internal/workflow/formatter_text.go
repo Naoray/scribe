@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 )
 
@@ -67,6 +68,27 @@ func (f *textFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 
 	if f.multiRegistry {
 		fmt.Fprintln(f.out)
+	}
+}
+
+func (f *textFormatter) OnReconcileConflict(name string, conflict state.ProjectionConflict) {
+	tool := conflict.Tool
+	if tool == "" {
+		tool = "tool"
+	}
+	fmt.Fprintf(f.errOut, "conflict: %s in %s differs from managed copy\n", name, tool)
+	fmt.Fprintf(f.errOut, "run `scribe skill repair %s --tool %s` to resolve\n", name, tool)
+}
+
+func (f *textFormatter) OnReconcileComplete(msg sync.ReconcileCompleteMsg) {
+	if msg.Summary.Installed == 0 && msg.Summary.Relinked == 0 && msg.Summary.Removed == 0 && len(msg.Summary.Conflicts) == 0 {
+		return
+	}
+	if msg.Summary.Installed+msg.Summary.Relinked+msg.Summary.Removed > 0 {
+		fmt.Fprintf(f.out, "repaired %d tool installs\n", msg.Summary.Installed+msg.Summary.Relinked+msg.Summary.Removed)
+	}
+	if len(msg.Summary.Conflicts) > 0 {
+		fmt.Fprintf(f.errOut, "%d conflict(s) skipped\n", len(msg.Summary.Conflicts))
 	}
 }
 

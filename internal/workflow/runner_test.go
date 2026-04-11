@@ -78,12 +78,12 @@ func TestSyncSteps_Composition(t *testing.T) {
 		t.Fatal("SyncSteps() returned empty list")
 	}
 
-	// First step should be LoadConfig, last should be SyncSkills
+	// First step should be LoadConfig, last should be the final system reconcile.
 	if steps[0].Name != "LoadConfig" {
 		t.Errorf("expected first step LoadConfig, got %s", steps[0].Name)
 	}
-	if steps[len(steps)-1].Name != "SyncSkills" {
-		t.Errorf("expected last step SyncSkills, got %s", steps[len(steps)-1].Name)
+	if steps[len(steps)-1].Name != "ReconcileSystem" {
+		t.Errorf("expected last step ReconcileSystem, got %s", steps[len(steps)-1].Name)
 	}
 }
 
@@ -95,11 +95,11 @@ func TestSyncTail_Composition(t *testing.T) {
 	}
 
 	// SyncTail is the shared sync suffix reused by connect and create-registry.
-	// It must end with SyncSkills and must NOT contain Adopt (adoption is a
+	// It must end with ReconcileSystem and must NOT contain Adopt (adoption is a
 	// sync-only prelude; connect flows should not trigger adoption).
 	last := tail[len(tail)-1]
-	if last.Name != "SyncSkills" {
-		t.Errorf("expected SyncTail to end with SyncSkills, got %s", last.Name)
+	if last.Name != "ReconcileSystem" {
+		t.Errorf("expected SyncTail to end with ReconcileSystem, got %s", last.Name)
 	}
 
 	for _, s := range tail {

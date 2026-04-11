@@ -49,14 +49,16 @@ const (
 
 // InstalledSkill records everything needed to detect updates and uninstall.
 type InstalledSkill struct {
-	Revision      int           `json:"revision"`
-	InstalledHash string        `json:"installed_hash"`
-	Sources       []SkillSource `json:"sources,omitempty"`
-	InstalledAt   time.Time     `json:"installed_at"`
-	Tools         []string      `json:"tools"`
-	ToolsMode     ToolsMode     `json:"tools_mode,omitempty"`
-	Paths         []string      `json:"paths"`
-	Origin        Origin        `json:"origin,omitempty"`
+	Revision      int                  `json:"revision"`
+	InstalledHash string               `json:"installed_hash"`
+	Sources       []SkillSource        `json:"sources,omitempty"`
+	InstalledAt   time.Time            `json:"installed_at"`
+	Tools         []string             `json:"tools"`
+	ToolsMode     ToolsMode            `json:"tools_mode,omitempty"`
+	Paths         []string             `json:"paths"`
+	ManagedPaths  []string             `json:"managed_paths,omitempty"`
+	Conflicts     []ProjectionConflict `json:"projection_conflicts,omitempty"`
+	Origin        Origin               `json:"origin,omitempty"`
 
 	// Package-specific fields (omitted for regular skills).
 	Type       string    `json:"type,omitempty"`
@@ -73,6 +75,15 @@ type SkillSource struct {
 	Ref        string    `json:"ref"`
 	LastSHA    string    `json:"last_sha"`
 	LastSynced time.Time `json:"last_synced"`
+}
+
+// ProjectionConflict records a divergent tool-facing projection that Scribe
+// intentionally preserved during reconcile.
+type ProjectionConflict struct {
+	Tool      string    `json:"tool"`
+	Path      string    `json:"path"`
+	FoundHash string    `json:"found_hash"`
+	SeenAt    time.Time `json:"seen_at"`
 }
 
 // Legacy structs for migration from older state formats.
@@ -293,6 +304,7 @@ func parseAndMigrate(data []byte) (*State, error) {
 		normalizeBranchSourceSHAs(s)
 		s.SchemaVersion = 4
 	}
+	seedManagedPaths(s)
 
 	return s, nil
 }
@@ -376,6 +388,7 @@ func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
 		Tools:         ls.Tools,
 		ToolsMode:     ls.ToolsMode,
 		Paths:         ls.Paths,
+		ManagedPaths:  append([]string(nil), ls.Paths...),
 		Origin:        ls.Origin,
 		Type:          ls.Type,
 		InstallCmd:    ls.InstallCmd,
@@ -429,6 +442,15 @@ func normalizeBranchSourceSHAs(s *State) {
 			changed = true
 		}
 		if changed {
+			s.Installed[name] = skill
+		}
+	}
+}
+
+func seedManagedPaths(s *State) {
+	for name, skill := range s.Installed {
+		if len(skill.ManagedPaths) == 0 && len(skill.Paths) > 0 {
+			skill.ManagedPaths = append([]string(nil), skill.Paths...)
 			s.Installed[name] = skill
 		}
 	}
