@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
@@ -25,14 +26,31 @@ during sync.
 
 Examples:
   scribe tools                # list tools and status
+  scribe tools add gemini     # force-add a builtin tool
+  scribe tools add aider      # add a custom tool
   scribe tools enable cursor  # enable a tool
   scribe tools disable cursor # disable a tool`,
 		Args: cobra.NoArgs,
 		RunE: runToolsList,
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	cmd.AddCommand(newToolsAddCommand())
 	cmd.AddCommand(newToolsEnableCommand())
 	cmd.AddCommand(newToolsDisableCommand())
+	return cmd
+}
+
+func newToolsAddCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add a builtin or custom tool definition",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runToolsAdd,
+	}
+	cmd.Flags().String("detect", "", "Shell command used to detect the tool")
+	cmd.Flags().String("install", "", "Shell command template used to install a skill")
+	cmd.Flags().String("uninstall", "", "Shell command template used to uninstall a skill")
+	cmd.Flags().String("path", "", "Optional installed-path template recorded in state")
 	return cmd
 }
 
@@ -62,11 +80,14 @@ func runToolsList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ensureToolsPopulated(cfg)
+	statuses, err := tools.ResolveStatuses(cfg)
+	if err != nil {
+		return err
+	}
 
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	if useJSON {
-		out, err := formatToolsListJSON(cfg.Tools)
+		out, err := formatToolsListJSON(statuses)
 		if err != nil {
 			return err
 		}
@@ -74,7 +95,71 @@ func runToolsList(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	fmt.Print(formatToolsList(cfg.Tools))
+	fmt.Print(formatToolsList(statuses))
+	return nil
+}
+
+func runToolsAdd(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	name := strings.TrimSpace(args[0])
+	detect, _ := cmd.Flags().GetString("detect")
+	install, _ := cmd.Flags().GetString("install")
+	uninstall, _ := cmd.Flags().GetString("uninstall")
+	pathTemplate, _ := cmd.Flags().GetString("path")
+
+	if _, ok := tools.BuiltinByName(name); ok {
+		upsertToolConfig(cfg, config.ToolConfig{
+			Name:    name,
+			Type:    tools.ToolTypeBuiltin,
+			Enabled: true,
+		})
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+		fmt.Printf("Tool %s added\n", name)
+		return nil
+	}
+
+	if isatty.IsTerminal(os.Stdin.Fd()) {
+		if strings.TrimSpace(detect) == "" {
+			_ = huh.NewInput().Title("Detect command (optional)").Value(&detect).Run()
+		}
+		if strings.TrimSpace(install) == "" {
+			if err := huh.NewInput().Title("Install command").Value(&install).Run(); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(uninstall) == "" {
+			if err := huh.NewInput().Title("Uninstall command").Value(&uninstall).Run(); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(pathTemplate) == "" {
+			_ = huh.NewInput().Title("Installed path template (optional)").Value(&pathTemplate).Run()
+		}
+	}
+
+	if strings.TrimSpace(install) == "" || strings.TrimSpace(uninstall) == "" {
+		return fmt.Errorf("custom tool %q requires --install and --uninstall", name)
+	}
+
+	upsertToolConfig(cfg, config.ToolConfig{
+		Name:      name,
+		Type:      tools.ToolTypeCustom,
+		Enabled:   true,
+		Detect:    strings.TrimSpace(detect),
+		Install:   strings.TrimSpace(install),
+		Uninstall: strings.TrimSpace(uninstall),
+		Path:      strings.TrimSpace(pathTemplate),
+	})
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	fmt.Printf("Tool %s added\n", name)
 	return nil
 }
 
@@ -92,76 +177,89 @@ func setToolEnabled(name string, enabled bool) error {
 		return err
 	}
 
-	ensureToolsPopulated(cfg)
-
-	found := false
 	for i := range cfg.Tools {
 		if strings.EqualFold(cfg.Tools[i].Name, name) {
 			cfg.Tools[i].Enabled = enabled
-			found = true
-			break
+			if err := cfg.Save(); err != nil {
+				return err
+			}
+			printToolAction(name, enabled)
+			return nil
 		}
 	}
 
-	if !found {
-		known := make([]string, len(cfg.Tools))
-		for i, t := range cfg.Tools {
-			known[i] = t.Name
+	if _, ok := tools.BuiltinByName(name); ok {
+		upsertToolConfig(cfg, config.ToolConfig{
+			Name:    name,
+			Type:    tools.ToolTypeBuiltin,
+			Enabled: enabled,
+		})
+		if err := cfg.Save(); err != nil {
+			return err
 		}
-		return fmt.Errorf("unknown tool %q — known tools: %s", name, strings.Join(known, ", "))
+		printToolAction(name, enabled)
+		return nil
 	}
 
-	if err := cfg.Save(); err != nil {
+	statuses, err := tools.ResolveStatuses(cfg)
+	if err != nil {
 		return err
 	}
+	known := make([]string, len(statuses))
+	for i, st := range statuses {
+		known[i] = st.Name
+	}
+	return fmt.Errorf("unknown tool %q — known tools: %s", name, strings.Join(known, ", "))
+}
 
+func printToolAction(name string, enabled bool) {
 	action := "enabled"
 	if !enabled {
 		action = "disabled"
 	}
 	fmt.Printf("Tool %s %s\n", name, action)
-	return nil
 }
 
-// ensureToolsPopulated auto-populates cfg.Tools from detected tools if empty.
-func ensureToolsPopulated(cfg *config.Config) {
-	if len(cfg.Tools) > 0 {
-		return
-	}
-	detected := tools.DetectTools()
-	for _, t := range detected {
-		cfg.Tools = append(cfg.Tools, config.ToolConfig{
-			Name:    t.Name(),
-			Enabled: true,
-		})
-	}
-}
-
-// formatToolsList returns a tab-formatted table of tools and their statuses.
-func formatToolsList(toolCfgs []config.ToolConfig) string {
-	if len(toolCfgs) == 0 {
-		return "No tools detected. Install Claude or Cursor and try again.\n"
+func formatToolsList(statuses []tools.Status) string {
+	if len(statuses) == 0 {
+		return "No tools detected or configured.\n"
 	}
 
 	var buf strings.Builder
 	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "TOOL\tSTATUS")
-	for _, t := range toolCfgs {
+	fmt.Fprintln(w, "TOOL\tTYPE\tSTATUS\tDETECTED\tSOURCE")
+	for _, t := range statuses {
 		status := "enabled"
 		if !t.Enabled {
 			status = "disabled"
 		}
-		fmt.Fprintf(w, "%s\t%s\n", t.Name, status)
+		detected := "n/a"
+		if t.DetectKnown {
+			detected = "no"
+			if t.Detected {
+				detected = "yes"
+			}
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", t.Name, t.Type, status, detected, t.Source)
 	}
 	w.Flush()
 	return buf.String()
 }
 
-// formatToolsListJSON returns JSON-encoded tool configs.
-func formatToolsListJSON(toolCfgs []config.ToolConfig) (string, error) {
-	data, err := json.MarshalIndent(toolCfgs, "", "  ")
+func formatToolsListJSON(statuses []tools.Status) (string, error) {
+	data, err := json.MarshalIndent(statuses, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("encode tools JSON: %w", err)
 	}
 	return string(data), nil
+}
+
+func upsertToolConfig(cfg *config.Config, tc config.ToolConfig) {
+	for i := range cfg.Tools {
+		if strings.EqualFold(cfg.Tools[i].Name, tc.Name) {
+			cfg.Tools[i] = tc
+			return
+		}
+	}
+	cfg.Tools = append(cfg.Tools, tc)
 }

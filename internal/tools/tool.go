@@ -3,6 +3,8 @@
 // the agent's expected directory structure.
 package tools
 
+import "os"
+
 // SkillFile represents a file to be written to the skill store.
 type SkillFile struct {
 	Path    string // relative to the skill root (e.g. "scripts/deploy.sh")
@@ -22,14 +24,28 @@ type Tool interface {
 	Detect() bool
 }
 
+// DefaultTools returns the standard set of supported AI tools.
+func DefaultTools() []Tool {
+	return []Tool{
+		ClaudeTool{},
+		CursorTool{},
+		GeminiTool{},
+		CodexTool{},
+	}
+}
+
 // DetectTools returns tools that are actually installed on this machine.
 func DetectTools() []Tool {
-	all := []Tool{ClaudeTool{}, CursorTool{}}
 	var detected []Tool
-	for _, t := range all {
+	for _, t := range DefaultTools() {
 		if t.Detect() {
 			detected = append(detected, t)
 		}
 	}
 	return detected
+}
+
+func homeDirExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

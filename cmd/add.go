@@ -86,7 +86,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 	client := gh.NewClient(ctx, cfg.Token)
-	targets := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
+	targets, err := tools.ResolveActive(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve tools: %w", err)
+	}
 
 	// Direct install: owner/repo:skillname.
 	if len(args) == 1 && skillRefPattern.MatchString(args[0]) {

@@ -743,6 +743,7 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 	allowedPrefixes := []string{
 		filepath.Join(home, ".scribe", "skills"),
 		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".codex", "skills"),
 	}
 
 	pathAllowed := false
@@ -761,12 +762,14 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 
 	// Uninstall from all tools that had this skill installed.
 	if installed, ok := m.bag.State.Installed[sk.Name]; ok {
-		detectedTools := tools.DetectTools()
-		for _, tool := range detectedTools {
-			for _, t := range installed.Tools {
-				if t == tool.Name() {
-					_ = tool.Uninstall(sk.Name)
-					break
+		resolvedTools, err := tools.ResolveActive(m.bag.Config)
+		if err == nil {
+			for _, tool := range resolvedTools {
+				for _, t := range installed.Tools {
+					if t == tool.Name() {
+						_ = tool.Uninstall(sk.Name)
+						break
+					}
 				}
 			}
 		}

@@ -31,7 +31,7 @@ files are uploaded directly to the target registry.
 If the argument looks like "owner/repo", it's treated as a package
 reference. When the upstream repo exposes a scribe.yaml package manifest,
 its declared install commands are used automatically. Otherwise Scribe
-prompts for an install command per detected tool (claude, cursor). Use
+prompts for an install command per detected tool. Use
 --install tool=command (repeatable) to supply commands non-interactively.
 
 With no arguments in a terminal, shows an interactive browser to select
@@ -78,7 +78,14 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}
 
-	targets := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
+	targetStatuses, err := tools.ResolveStatuses(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve tools: %w", err)
+	}
+	targets, err := tools.ResolveActive(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve active tools: %w", err)
+	}
 	adder := &add.Adder{Client: client, Tools: targets}
 
 	// Resolve target registry.
@@ -96,7 +103,7 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 
 	// Package ref fast path — doesn't need local/remote discovery.
 	if len(args) == 1 && strings.Contains(args[0], "/") {
-		return runRegistryAddPackageRef(ctx, args[0], installFlags, adder, targetRepo, st, client, targets, useJSON, isTTY)
+		return runRegistryAddPackageRef(ctx, args[0], installFlags, adder, targetRepo, st, client, targets, targetStatuses, useJSON, isTTY)
 	}
 
 	// Discover candidates.
@@ -156,6 +163,7 @@ func runRegistryAddPackageRef(
 	st *state.State,
 	client *gh.Client,
 	targets []tools.Tool,
+	knownTargets []tools.Status,
 	useJSON bool,
 	isTTY bool,
 ) error {
@@ -173,7 +181,7 @@ func runRegistryAddPackageRef(
 	}
 
 	// Gather install commands.
-	installs, perr := collectInstallCommands(packageRepo, installFlags, targets, isTTY)
+	installs, perr := collectInstallCommands(packageRepo, installFlags, knownTargets, isTTY)
 	if perr != nil {
 		return perr
 	}
@@ -210,12 +218,12 @@ func isPackageManifestMissingErr(err error) bool {
 
 // collectInstallCommands returns a map of tool name → install command,
 // either from --install flags or by prompting the user.
-func collectInstallCommands(packageRepo string, flags []string, targets []tools.Tool, isTTY bool) (map[string]string, error) {
+func collectInstallCommands(packageRepo string, flags []string, knownTargets []tools.Status, isTTY bool) (map[string]string, error) {
 	// Parse --install flags first — they always win.
 	installs := map[string]string{}
 	validTools := map[string]bool{}
-	for _, t := range targets {
-		validTools[t.Name()] = true
+	for _, t := range knownTargets {
+		validTools[t.Name] = true
 	}
 
 	for _, raw := range flags {
@@ -229,7 +237,7 @@ func collectInstallCommands(packageRepo string, flags []string, targets []tools.
 			return nil, fmt.Errorf("invalid --install value %q: tool and command must be non-empty", raw)
 		}
 		if !validTools[tool] {
-			return nil, fmt.Errorf("unknown tool %q in --install — expected one of: %s", tool, strings.Join(toolNames(targets), ", "))
+			return nil, fmt.Errorf("unknown tool %q in --install — expected one of: %s", tool, strings.Join(toolNames(knownTargets), ", "))
 		}
 		installs[tool] = cmd
 	}
@@ -248,10 +256,10 @@ func collectInstallCommands(packageRepo string, flags []string, targets []tools.
 	fmt.Println("Enter the install command for each tool (leave blank to skip):")
 	fmt.Println()
 
-	for _, t := range targets {
+	for _, t := range knownTargets {
 		var value string
 		prompt := huh.NewInput().
-			Title(fmt.Sprintf("Install command for %s", t.Name())).
+			Title(fmt.Sprintf("Install command for %s", t.Name)).
 			Placeholder("e.g. /plugin install superpowers").
 			Value(&value)
 		if err := prompt.Run(); err != nil {
@@ -259,16 +267,16 @@ func collectInstallCommands(packageRepo string, flags []string, targets []tools.
 		}
 		value = strings.TrimSpace(value)
 		if value != "" {
-			installs[t.Name()] = value
+			installs[t.Name] = value
 		}
 	}
 	return installs, nil
 }
 
-func toolNames(targets []tools.Tool) []string {
+func toolNames(targets []tools.Status) []string {
 	names := make([]string, 0, len(targets))
 	for _, t := range targets {
-		names = append(names, t.Name())
+		names = append(names, t.Name)
 	}
 	return names
 }

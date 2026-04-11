@@ -115,8 +115,11 @@ func runRemove(cmd *cobra.Command, args []string) error {
 
 	// Uninstall from all tools.
 	var errs []string
-	detectedTools := tools.DetectTools()
-	for _, tool := range detectedTools {
+	resolvedTools, err := tools.ResolveActive(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve tools: %w", err)
+	}
+	for _, tool := range resolvedTools {
 		// Only uninstall from tools that had the skill installed.
 		for _, t := range installed.Tools {
 			if t == tool.Name() {
