@@ -119,9 +119,17 @@ func (c *Config) AdoptionPaths() ([]string, error) {
 		return nil, fmt.Errorf("get home dir: %w", err)
 	}
 
+	// Resolve symlinks on home dir so comparisons work on macOS where
+	// os.UserHomeDir() returns /Users/alice but /tmp and /var are symlinked
+	// under /private/. EvalSymlinks requires the path to exist; home always does.
+	resolvedHome := home
+	if rh, err := filepath.EvalSymlinks(home); err == nil {
+		resolvedHome = rh
+	}
+
 	builtins := []string{
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".codex", "skills"),
+		filepath.Join(resolvedHome, ".claude", "skills"),
+		filepath.Join(resolvedHome, ".codex", "skills"),
 	}
 
 	result := make([]string, 0, len(builtins)+len(c.Adoption.Paths))
@@ -138,8 +146,27 @@ func (c *Config) AdoptionPaths() ([]string, error) {
 		}
 		resolved = filepath.Clean(resolved)
 
-		// Reject paths outside home dir.
-		rel, err := filepath.Rel(home, resolved)
+		// Attempt to resolve symlinks so that e.g. /private/Users/alice/skills
+		// compares correctly against resolvedHome=/private/Users/alice.
+		// Adoption paths may not exist yet — that is fine; we handle ErrNotExist
+		// by rebasing any home-relative path onto resolvedHome so the boundary
+		// check stays consistent even when the path doesn't exist on disk yet.
+		if rp, err := filepath.EvalSymlinks(resolved); err == nil {
+			resolved = rp
+		} else if errors.Is(err, fs.ErrNotExist) {
+			// Path doesn't exist yet. If it starts with home, rebase onto
+			// resolvedHome so the Rel comparison works correctly (avoids
+			// mismatches when home itself is a symlink, e.g. macOS /var →
+			// /private/var).
+			if rel, relErr := filepath.Rel(home, resolved); relErr == nil && !strings.HasPrefix(rel, "..") {
+				resolved = filepath.Join(resolvedHome, rel)
+			}
+		}
+		// For other EvalSymlinks errors (permission denied, etc.) keep cleaned path.
+
+		// Use filepath.Rel rather than strings.HasPrefix so that
+		// /Users/alice-other is not mistakenly accepted as inside /Users/alice.
+		rel, err := filepath.Rel(resolvedHome, resolved)
 		if err != nil || strings.HasPrefix(rel, "..") {
 			return nil, fmt.Errorf("adoption.paths entry %q is outside home", p)
 		}

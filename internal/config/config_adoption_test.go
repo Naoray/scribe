@@ -8,6 +8,16 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 )
 
+// realPath resolves symlinks on an existing path, falling back to the
+// original if EvalSymlinks fails. Used in tests to build expected values
+// that match what AdoptionPaths returns after its own EvalSymlinks pass.
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
+}
+
 func TestAdoptionMode(t *testing.T) {
 	cases := []struct {
 		name string
@@ -42,9 +52,10 @@ func TestAdoptionPaths(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+		rHome := realPath(home)
 		want := []string{
-			filepath.Join(home, ".claude", "skills"),
-			filepath.Join(home, ".codex", "skills"),
+			filepath.Join(rHome, ".claude", "skills"),
+			filepath.Join(rHome, ".codex", "skills"),
 		}
 		if len(paths) != len(want) {
 			t.Fatalf("got %d paths, want %d: %v", len(paths), len(want), paths)
@@ -69,7 +80,7 @@ func TestAdoptionPaths(t *testing.T) {
 		if len(paths) != 3 {
 			t.Fatalf("got %d paths, want 3: %v", len(paths), paths)
 		}
-		want := filepath.Join(home, "src", "my-skills")
+		want := filepath.Join(realPath(home), "src", "my-skills")
 		if paths[2] != want {
 			t.Errorf("expanded path = %q, want %q", paths[2], want)
 		}
@@ -87,7 +98,7 @@ func TestAdoptionPaths(t *testing.T) {
 		if len(paths) != 3 {
 			t.Fatalf("got %d paths, want 3: %v", len(paths), paths)
 		}
-		want := filepath.Join(home, "relative", "dir")
+		want := filepath.Join(realPath(home), "relative", "dir")
 		if paths[2] != want {
 			t.Errorf("resolved path = %q, want %q", paths[2], want)
 		}
@@ -104,6 +115,49 @@ func TestAdoptionPaths(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "outside home") {
 			t.Errorf("error %q should contain %q", err.Error(), "outside home")
+		}
+	})
+
+	t.Run("sibling dir with same prefix is rejected", func(t *testing.T) {
+		// /Users/alice-other must NOT be accepted as inside /Users/alice.
+		// filepath.Rel is used (not strings.HasPrefix) to avoid this false pass.
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		// Build a sibling path: parent of home + suffix that shares home's base name.
+		parent := filepath.Dir(home)
+		base := filepath.Base(home)
+		sibling := filepath.Join(parent, base+"-other", "skills")
+
+		cfg := &config.Config{Adoption: config.AdoptionConfig{Paths: []string{sibling}}}
+		_, err := cfg.AdoptionPaths()
+		if err == nil {
+			t.Fatal("expected error for sibling-dir path outside home")
+		}
+		if !strings.Contains(err.Error(), "outside home") {
+			t.Errorf("error %q should contain %q", err.Error(), "outside home")
+		}
+	})
+
+	t.Run("non-existent path under home is accepted", func(t *testing.T) {
+		// Adoption paths may not exist yet; AdoptionPaths must not require existence.
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		nonExistent := filepath.Join(home, "does", "not", "exist", "skills")
+		cfg := &config.Config{Adoption: config.AdoptionConfig{Paths: []string{nonExistent}}}
+		paths, err := cfg.AdoptionPaths()
+		if err != nil {
+			t.Fatalf("unexpected error for non-existent under-home path: %v", err)
+		}
+		if len(paths) != 3 {
+			t.Fatalf("got %d paths, want 3: %v", len(paths), paths)
+		}
+		// AdoptionPaths rebases non-existent paths onto the symlink-resolved home,
+		// so compare against realPath(home) rather than the raw TempDir value.
+		wantNonExistent := filepath.Join(realPath(home), "does", "not", "exist", "skills")
+		if paths[2] != wantNonExistent {
+			t.Errorf("paths[2] = %q, want %q", paths[2], wantNonExistent)
 		}
 	})
 
