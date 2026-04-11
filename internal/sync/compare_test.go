@@ -136,6 +136,34 @@ func TestComparePackage(t *testing.T) {
 		{"package current", packageEntry("github:a/b@main"), installedWithSource("a/b", "main", "abc123"), "abc123", "a/b", StatusCurrent},
 		{"package outdated", packageEntry("github:a/b@main"), installedWithSource("a/b", "main", "abc123"), "def456", "a/b", StatusOutdated},
 		{"package empty sha assumes current", packageEntry("github:a/b@main"), installedWithSource("a/b", "main", "abc123"), "", "a/b", StatusCurrent},
+
+		// Catalogued under team registry "team/repo" but installed state records
+		// the upstream repo as source (migrated from legacy schema). Should match
+		// by name regardless of source registry.
+		{
+			"package cataloged by team registry, source stores upstream",
+			packageEntry("github:upstream/pkg@main"),
+			installedWithSource("upstream/pkg", "main", "abc123"),
+			"abc123",
+			"team/repo",
+			StatusCurrent,
+		},
+		{
+			"package with mismatched source registry and outdated sha",
+			packageEntry("github:upstream/pkg@main"),
+			installedWithSource("upstream/pkg", "main", "abc123"),
+			"def456",
+			"team/repo",
+			StatusOutdated,
+		},
+		{
+			"package legacy-migrated with empty LastSHA assumed current",
+			packageEntry("github:upstream/pkg@main"),
+			installedWithSource("upstream/pkg", "main", ""),
+			"def456",
+			"team/repo",
+			StatusCurrent,
+		},
 	}
 
 	for _, c := range cases {

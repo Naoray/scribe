@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -207,6 +208,206 @@ func TestCursorUninstall(t *testing.T) {
 	}
 }
 
+func TestGeminiDetect(t *testing.T) {
+	home := t.TempDir()
+	binDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", binDir)
+
+	tool := tools.GeminiTool{}
+	if tool.Detect() {
+		t.Error("should not detect gemini when binary is missing")
+	}
+
+	writeExecutable(t, filepath.Join(binDir, "gemini"), "#!/bin/sh\nexit 0\n")
+	if !tool.Detect() {
+		t.Error("should detect gemini when binary exists on PATH")
+	}
+}
+
+func TestGeminiInstallAndUninstall(t *testing.T) {
+	canonicalDir := setup(t)
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gemini.log")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeExecutable(t, filepath.Join(binDir, "gemini"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \""+logPath+"\"\n")
+
+	tool := tools.GeminiTool{}
+	paths, err := tool.Install("deploy", canonicalDir)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if len(paths) != 1 || paths[0] != "gemini:user:deploy" {
+		t.Fatalf("unexpected install paths: %v", paths)
+	}
+
+	if err := tool.Uninstall("deploy"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(logData)
+	if !strings.Contains(log, "skills link "+canonicalDir+" --scope user --consent") {
+		t.Errorf("missing install call in log:\n%s", log)
+	}
+	if !strings.Contains(log, "skills uninstall deploy --scope user") {
+		t.Errorf("missing uninstall call in log:\n%s", log)
+	}
+}
+
+func TestCodexDetect(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+
+	tool := tools.CodexTool{}
+	if tool.Detect() {
+		t.Error("should not detect codex when ~/.codex and binary are missing")
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatalf("mkdir .codex: %v", err)
+	}
+	if !tool.Detect() {
+		t.Error("should detect codex when ~/.codex exists")
+	}
+}
+
+func TestCodexInstallAndUninstall(t *testing.T) {
+	canonicalDir := setup(t)
+
+	tool := tools.CodexTool{}
+	paths, err := tool.Install("deploy", canonicalDir)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("expected 1 symlink path, got %d", len(paths))
+	}
+
+	resolved, err := os.Readlink(paths[0])
+	if err != nil {
+		t.Fatalf("Readlink: %v", err)
+	}
+	if resolved != canonicalDir {
+		t.Errorf("symlink points to %q, want %q", resolved, canonicalDir)
+	}
+
+	if err := tool.Uninstall("deploy"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if _, err := os.Lstat(paths[0]); !os.IsNotExist(err) {
+		t.Error("expected codex symlink to be removed after uninstall")
+	}
+}
+
+func TestDefaultToolsIncludesGeminiAndCodex(t *testing.T) {
+	var names []string
+	for _, tool := range tools.DefaultTools() {
+		names = append(names, tool.Name())
+	}
+
+	for _, want := range []string{"claude", "cursor", "gemini", "codex"} {
+		if !strings.Contains(strings.Join(names, ","), want) {
+			t.Errorf("DefaultTools missing %q: %v", want, names)
+		}
+	}
+}
+
+func TestResolveActiveIncludesConfiguredBuiltinAndCustom(t *testing.T) {
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{Name: "gemini", Type: tools.ToolTypeBuiltin, Enabled: true},
+			{Name: "aider", Type: tools.ToolTypeCustom, Enabled: true, Install: "echo install", Uninstall: "echo uninstall"},
+			{Name: "cursor", Type: tools.ToolTypeBuiltin, Enabled: false},
+		},
+	}
+
+	resolved, err := tools.ResolveActive(cfg)
+	if err != nil {
+		t.Fatalf("ResolveActive: %v", err)
+	}
+
+	var names []string
+	for _, tool := range resolved {
+		names = append(names, tool.Name())
+	}
+	if !strings.Contains(strings.Join(names, ","), "gemini") {
+		t.Errorf("expected gemini in active tools, got %v", names)
+	}
+	if !strings.Contains(strings.Join(names, ","), "aider") {
+		t.Errorf("expected aider in active tools, got %v", names)
+	}
+	if strings.Contains(strings.Join(names, ","), "cursor") {
+		t.Errorf("did not expect disabled cursor in active tools, got %v", names)
+	}
+}
+
+func TestResolveStatusesForManualBuiltinAndCustom(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{Name: "codex", Type: tools.ToolTypeBuiltin, Enabled: true},
+			{Name: "aider", Type: tools.ToolTypeCustom, Enabled: true, Install: "echo install", Uninstall: "echo uninstall"},
+		},
+	}
+
+	statuses, err := tools.ResolveStatuses(cfg)
+	if err != nil {
+		t.Fatalf("ResolveStatuses: %v", err)
+	}
+
+	joined := make([]string, 0, len(statuses))
+	for _, st := range statuses {
+		joined = append(joined, st.Name+":"+st.Type+":"+st.Source)
+	}
+	all := strings.Join(joined, ",")
+	if !strings.Contains(all, "codex:builtin:manual") {
+		t.Errorf("expected manual builtin codex status, got %s", all)
+	}
+	if !strings.Contains(all, "aider:custom:manual") {
+		t.Errorf("expected custom aider status, got %s", all)
+	}
+}
+
+func TestCommandToolInstallAndUninstall(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "cmdtool.log")
+	cmd := tools.CommandTool{
+		ToolName:         "aider",
+		InstallCommand:   "printf '%s\\n' '{{tool_name}} {{skill_name}} {{canonical_dir}} {{skill_md}}' >> " + logPath,
+		UninstallCommand: "printf '%s\\n' 'remove {{tool_name}} {{skill_name}}' >> " + logPath,
+		PathTemplate:     "/tmp/{{tool_name}}/{{skill_name}}",
+	}
+
+	paths, err := cmd.Install("deploy", "/tmp/store/deploy")
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if len(paths) != 1 || paths[0] != "/tmp/aider/deploy" {
+		t.Fatalf("unexpected install paths: %v", paths)
+	}
+	if err := cmd.Uninstall("deploy"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "aider deploy /tmp/store/deploy /tmp/store/deploy/SKILL.md") {
+		t.Errorf("install command placeholders not rendered: %s", log)
+	}
+	if !strings.Contains(log, "remove aider deploy") {
+		t.Errorf("uninstall command placeholders not rendered: %s", log)
+	}
+}
+
 func TestSlugifyRegistry(t *testing.T) {
 	cases := []struct {
 		input string
@@ -266,5 +467,72 @@ func TestCursorInstallBareName(t *testing.T) {
 	expectedLink := filepath.Join(workDir, ".cursor", "rules", "deploy.mdc")
 	if paths[0] != expectedLink {
 		t.Errorf("symlink path = %q, want %q", paths[0], expectedLink)
+	}
+}
+
+func writeExecutable(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", path, err)
+	}
+}
+
+func TestResolveByNameReturnsDisabledBuiltin(t *testing.T) {
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{Name: "gemini", Type: tools.ToolTypeBuiltin, Enabled: false},
+		},
+	}
+
+	tool, err := tools.ResolveByName(cfg, "gemini")
+	if err != nil {
+		t.Fatalf("ResolveByName: %v", err)
+	}
+	if tool.Name() != "gemini" {
+		t.Errorf("got %q, want gemini", tool.Name())
+	}
+}
+
+func TestResolveByNameReturnsDisabledCustom(t *testing.T) {
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{Name: "aider", Type: tools.ToolTypeCustom, Enabled: false, Install: "echo i", Uninstall: "echo u"},
+		},
+	}
+
+	tool, err := tools.ResolveByName(cfg, "aider")
+	if err != nil {
+		t.Fatalf("ResolveByName: %v", err)
+	}
+	if tool.Name() != "aider" {
+		t.Errorf("got %q, want aider", tool.Name())
+	}
+}
+
+func TestResolveByNameReturnsBuiltinWhenConfigNil(t *testing.T) {
+	tool, err := tools.ResolveByName(nil, "claude")
+	if err != nil {
+		t.Fatalf("ResolveByName: %v", err)
+	}
+	if tool.Name() != "claude" {
+		t.Errorf("got %q, want claude", tool.Name())
+	}
+}
+
+func TestResolveByNameUnknown(t *testing.T) {
+	if _, err := tools.ResolveByName(nil, "nope"); err == nil {
+		t.Fatal("expected error for unknown tool")
+	}
+}
+
+func TestGeminiUninstallFailsWhenBinaryMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	err := tools.GeminiTool{}.Uninstall("deploy")
+	if err == nil {
+		t.Fatal("expected error when gemini binary is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "gemini CLI not found") {
+		t.Errorf("error message should mention missing CLI, got: %v", err)
 	}
 }

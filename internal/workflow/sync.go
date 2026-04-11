@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
@@ -136,24 +135,11 @@ func StepResolveFormatter(_ context.Context, b *Bag) error {
 
 func StepResolveTools(_ context.Context, b *Bag) error {
 	if b.Tools == nil {
-		detected := tools.DetectTools()
-		// Filter out tools disabled in config.
-		if b.Config != nil && len(b.Config.Tools) > 0 {
-			disabled := make(map[string]bool)
-			for _, t := range b.Config.Tools {
-				if !t.Enabled {
-					disabled[strings.ToLower(t.Name)] = true
-				}
-			}
-			var filtered []tools.Tool
-			for _, t := range detected {
-				if !disabled[strings.ToLower(t.Name())] {
-					filtered = append(filtered, t)
-				}
-			}
-			detected = filtered
+		resolved, err := tools.ResolveActive(b.Config)
+		if err != nil {
+			return fmt.Errorf("resolve tools: %w", err)
 		}
-		b.Tools = detected
+		b.Tools = resolved
 	}
 	return nil
 }

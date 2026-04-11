@@ -781,6 +781,9 @@ func (m listModel) runUpdate(choice updateChoice) tea.Cmd {
 }
 
 func rowHasLocalModifications(row listRow, st *state.State) bool {
+	if st == nil {
+		return false
+	}
 	if row.Local != nil {
 		if row.Local.Modified {
 			return true
@@ -792,9 +795,6 @@ func rowHasLocalModifications(row listRow, st *state.State) bool {
 			}
 			return sync.IsLocallyModified(row.Local.LocalPath, installed.InstalledHash)
 		}
-	}
-	if st == nil {
-		return false
 	}
 	installed, ok := st.Installed[row.Name]
 	if !ok {
@@ -852,6 +852,7 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 	allowedPrefixes := []string{
 		filepath.Join(home, ".scribe", "skills"),
 		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".codex", "skills"),
 	}
 
 	pathAllowed := false
@@ -868,16 +869,17 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Uninstall from all tools that had this skill installed.
+	// Uninstall from every tool that originally installed the skill, even if
+	// that tool is now disabled. Resolving from installed.Tools instead of
+	// ResolveActive prevents orphaning Gemini/custom-tool installs whenever
+	// the user disables a tool after installing a skill.
 	if installed, ok := m.bag.State.Installed[sk.Name]; ok {
-		detectedTools := tools.DetectTools()
-		for _, tool := range detectedTools {
-			for _, t := range installed.Tools {
-				if t == tool.Name() {
-					_ = tool.Uninstall(sk.Name)
-					break
-				}
+		for _, name := range installed.Tools {
+			tool, err := tools.ResolveByName(m.bag.Config, name)
+			if err != nil {
+				continue
 			}
+			_ = tool.Uninstall(sk.Name)
 		}
 	}
 

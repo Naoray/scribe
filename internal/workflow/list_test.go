@@ -11,14 +11,17 @@ import (
 
 func TestListLoadSteps_Composition(t *testing.T) {
 	steps := ListLoadSteps()
-	if len(steps) != 2 {
-		t.Fatalf("ListLoadSteps() = %d steps, want 2", len(steps))
+	if len(steps) != 3 {
+		t.Fatalf("ListLoadSteps() = %d steps, want 3", len(steps))
 	}
 	if steps[0].Name != "LoadConfig" {
 		t.Errorf("step[0] = %s, want LoadConfig", steps[0].Name)
 	}
 	if steps[1].Name != "LoadState" {
 		t.Errorf("step[1] = %s, want LoadState", steps[1].Name)
+	}
+	if steps[2].Name != "ResolveTools" {
+		t.Errorf("step[2] = %s, want ResolveTools", steps[2].Name)
 	}
 }
 

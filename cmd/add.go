@@ -90,7 +90,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load github client: %w", err)
 	}
-	targets := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
+	targets, err := tools.ResolveActive(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve tools: %w", err)
+	}
 
 	// Direct install: owner/repo:skillname.
 	if len(args) == 1 && skillRefPattern.MatchString(args[0]) {
