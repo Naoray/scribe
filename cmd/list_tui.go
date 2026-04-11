@@ -708,8 +708,7 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 
 func (m listModel) resetSearch() listModel {
 	m.search = ""
-	m.filtered = m.applyFilter()
-	m.cursor, m.offset = 0, 0
+	m = m.refreshFiltered()
 	if len(m.filtered) == 0 {
 		m.selected = false
 	}
@@ -721,8 +720,7 @@ func (m listModel) backspaceSearch() listModel {
 		return m
 	}
 	m.search = m.search[:len(m.search)-1]
-	m.filtered = m.applyFilter()
-	m.cursor, m.offset = 0, 0
+	m = m.refreshFiltered()
 	if len(m.filtered) == 0 {
 		m.selected = false
 	}
@@ -734,8 +732,7 @@ func (m listModel) appendSearch(key string) listModel {
 		return m
 	}
 	m.search += key
-	m.filtered = m.applyFilter()
-	m.cursor, m.offset = 0, 0
+	m = m.refreshFiltered()
 	if len(m.filtered) == 0 {
 		m.selected = false
 	}
