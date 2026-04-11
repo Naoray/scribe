@@ -1,8 +1,5 @@
 package adopt
 
-// AdoptCandidateFoundMsg is emitted for each candidate discovered by FindCandidates.
-type AdoptCandidateFoundMsg struct{ Candidate Candidate }
-
 // AdoptStartedMsg is emitted when Apply begins processing a candidate.
 type AdoptStartedMsg struct{ Name string }
 

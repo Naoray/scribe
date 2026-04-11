@@ -17,6 +17,9 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
+// blobSHA duplicates the package-internal gitBlobSHA.
+// Intentional: test is black-box (package adopt_test) so can't call the unexported fn.
+// Drift risk: keep in sync with candidate.go — drift documented here.
 func blobSHA(data []byte) string {
 	payload := append([]byte(fmt.Sprintf("blob %d\x00", len(data))), data...)
 	sum := sha1.Sum(payload)

@@ -96,6 +96,7 @@ func (a *Adopter) applyOne(cand Candidate, result *Result) error {
 		Tools:         installedToolNames,
 		Paths:         allPaths,
 		Origin:        state.OriginLocal,
+		// TODO: set ToolsMode: state.ToolsModeInherit when per-skill tool mgmt lands
 	})
 
 	if err := a.State.Save(); err != nil {
