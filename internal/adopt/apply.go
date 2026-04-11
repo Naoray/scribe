@@ -188,6 +188,21 @@ func collectSkillFiles(skillDir string) ([]tools.SkillFile, error) {
 			return nil // recurse
 		}
 
+		// Symlinks: WalkDir reports them via Lstat, so IsDir() is false even when
+		// the target is a directory. Resolve with Stat; skip dir targets (a sibling
+		// dir inside skillDir is walked on its own; external dirs would leak content)
+		// and also skip dangling links. File targets fall through to ReadFile, which
+		// dereferences naturally.
+		if d.Type()&fs.ModeSymlink != 0 {
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				return nil
+			}
+			if info.IsDir() {
+				return nil
+			}
+		}
+
 		// Read file content.
 		content, err := os.ReadFile(path)
 		if err != nil {
