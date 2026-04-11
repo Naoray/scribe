@@ -1,89 +1,171 @@
 # Per-Skill Tool Management
 
 **Date:** 2026-04-11
-**Status:** Design
-**Author:** brainstorming session
+**Status:** Design (revision 2)
+**Author:** brainstorming session + counselors review round 1
 
 ## Problem
 
 Scribe currently installs every skill into every globally-enabled tool. Users need finer control: install skill X into Claude only, keep skill Y on both Claude and Cursor, skip Codex entirely for a subset. The global `scribe tools enable/disable` toggle is too coarse — it is all-or-nothing per tool, across every skill.
 
-The infrastructure already exists: `state.InstalledSkill.Tools []string` stores which tools each installed skill lives on. What is missing is any way for the user to edit that list.
+The infrastructure partly exists: `state.InstalledSkill.Tools []string` already stores which tools each installed skill lives on, but the field is populated automatically by sync and does not record user intent. It cannot distinguish "the user chose these tools" from "these were the globally enabled tools at install time."
 
 ## Goals
 
 - Let the user toggle, per skill, which tools receive it.
 - Let the user bulk-edit one tool's skill loadout.
-- Make the state the source of truth so `scribe sync` respects choices on subsequent runs.
+- Record user intent explicitly so `scribe sync` respects deliberate choices without freezing skills that were never touched.
 - Provide a non-interactive path for CI and agent scripting.
-- Preserve the existing global `tools enable/disable` as the default for newly installed skills.
+- Preserve the existing global `tools enable/disable` as the default for skills the user has not explicitly assigned.
+- Keep `tools enable` useful: enabling a new tool globally should backfill it onto existing skills that are still using defaults.
 
 ## Non-Goals
 
 - Registry-side assignment (e.g., a manifest declaring "this skill is Claude-only"). Out of scope; may layer on later.
 - Project-scoped tool assignment. Assignment is machine-global, matching how `~/.scribe/state.json` already works.
+- Per-skill control for **Cursor**. Cursor installs symlinks into `<cwd>/.cursor/rules/`, which is project-scoped, not machine-global. Machine-wide toggles for Cursor would mean "install to whatever directory scribe happens to run in," which is not durable. v1 leaves Cursor under the existing global `tools enable/disable` behavior only. Per-project Cursor assignment is a separate spec.
+- Per-skill control for **package** sources. `applyPackage` in the syncer does not populate `InstalledSkill.Tools` today and package content is tool-specific by construction. v1 excludes packages from per-skill assignment. The UI greys them out with the annotation `(package)`.
 - Snippets/CLAUDE.md sync. Tracked separately.
 
 ## Key Decisions
 
-### 1. State is the source of truth
+### 1. Explicit assignment mode on `InstalledSkill`
 
-`state.InstalledSkill.Tools` is already the per-skill tool list. All assignment UI mutates this list and runs matching install/uninstall side effects. No new schema field, no new file. Migration is unnecessary because `Tools` is already populated for existing installs.
+Add a new field:
 
-### 2. Global enable/disable becomes "default for new installs"
+```go
+// ToolsMode controls how sync reconciles the Tools list.
+type ToolsMode string
 
-`scribe tools enable/disable` continues to gate which tools a freshly installed skill initially lands on. Once installed, the per-skill `Tools` list is authoritative — toggling `tools disable cursor` does not strip Cursor from already-installed skills. This is the minimum-surprise behavior and matches how the user chose explicit assignments per skill.
+const (
+    ToolsModeInherit ToolsMode = "" // default: recompute from globally enabled tools
+    ToolsModePinned  ToolsMode = "pinned" // user explicitly chose; sync respects verbatim
+)
 
-### 3. Side effects are synchronous in the per-skill TUI
+type InstalledSkill struct {
+    // ... existing fields
+    Tools     []string  `json:"tools"`
+    Paths     []string  `json:"paths"`
+    ToolsMode ToolsMode `json:"tools_mode,omitempty"`
+}
+```
 
-Toggling a tool on in the list TUI immediately calls `tool.Install(skillName, canonicalDir)` and updates state. Toggling off calls `tool.Uninstall(skillName)` and updates state. No staged "save" step. Rationale: one-skill edits are cheap (one symlink), errors are cheaper to surface immediately, and the convenience north star rewards zero-ceremony edits.
+- `inherit` (default, zero value) — sync recomputes the tool set from the globally enabled, detected tools on every run. Legacy state entries without the field load as inherit.
+- `pinned` — user explicitly touched this skill via the per-skill TUI, the bulk `tools loadout` TUI, or the `skill edit --tools` CLI. Sync uses `Tools` verbatim. Global `tools enable/disable` does not affect pinned skills.
 
-### 4. Side effects are batched in the bulk TUI
+Rationale: overloading "non-empty `Tools`" to mean "pinned" would instantly freeze every existing install, because today sync populates `Tools` for every skill. An explicit flag is the only way to preserve meaningful defaults.
 
-`scribe tools edit <name>` presents every installed skill with a checkbox. Toggles mutate a pending in-memory diff. `s` applies the full diff in one wave. `esc` discards. Rationale: bulk edits benefit from preview + undo; a "space to toggle, immediately sync" pattern on 50 skills is noisy and accident-prone.
+### 2. Reconcile on global `tools enable/disable`
 
-### 5. Undetected tools are visible but non-interactive
+When the user runs `scribe tools enable gemini`, scribe iterates `state.Installed`, and for every skill with `ToolsMode == ToolsModeInherit`:
+- If gemini is detected and not already in `Tools`, install gemini for that skill and append.
+- If the skill is a package source, skip.
 
-Tools whose `Detect()` returns false render in the toggle list as grey + italic, with `(not found)` annotation. Space and enter are no-ops. Reason: hiding them makes the feature feel inconsistent when a user reinstalls Cursor and expects it to appear.
+`scribe tools disable gemini` does the symmetric uninstall for inherit-mode skills.
 
-### 6. Globally disabled tools stay togglable
+Pinned skills are never touched by reconcile. This matches the user's explicit intent.
 
-A tool disabled via `tools disable cursor` still appears in the toggle list in grey with `(disabled)` annotation, and the user may toggle it on. This per-skill opt-in overrides the global disable for that skill only. Rationale: global disable should not be a hard block on per-skill choice.
+Reconcile runs inline at the end of `tools enable/disable` and prints a one-line summary per skill affected. The command stays non-destructive for pinned skills.
+
+### 3. State is the source of truth; operations are install-first
+
+Reordered from the original spec. For a single skill's `(current, desired)` diff:
+
+1. Compute `install, uninstall := assign.Plan(current, desired)`.
+2. For each tool in `install`: run `tool.Install(skillName, canonicalDir)`. On success, merge into an in-memory "applied" set. On failure, record the error and continue.
+3. For each tool in `uninstall`: run `tool.Uninstall(skillName)`. On success, drop from the applied set. On failure, record the error and continue.
+4. Compute the new state: start from the current `Tools` slice, apply only the successful install/uninstall results.
+5. Save state atomically with both `Tools` and `Paths` updated (install results carry the new paths; uninstall results carry the paths to remove).
+
+Rationale:
+- Install-first means a failed add → remove swap leaves the skill on the **old** tool, not nothing. Availability > consistency for this workflow.
+- Per-tool success gates per-tool state merge. A failed install never lands in `Tools`; a failed uninstall stays in `Tools`. State always reflects what is actually on disk, not what the user asked for.
+- Partial failures do not block other successful changes.
+
+### 4. Self-healing sync
+
+Even outside the assignment flow, the syncer already does a full re-link on every run for skills it touches. Revision: when sync encounters a pinned skill whose state lists a tool that is no longer present on disk (symlink missing, target deleted), it re-runs `Install` for that tool. This makes the system robust to manual `rm -rf ~/.claude/skills/<name>` and to partial failures in the assignment flow.
+
+### 5. Per-skill TUI uses deferred apply
+
+Revised from the original "immediate apply" semantics. The per-skill tool toggles in the list TUI right pane are staged in an in-memory overlay. The apply happens when focus leaves the tools pane (tab away, esc, or close the detail view). This unifies the mental model with the bulk TUI (both are staged + applied on commit), eliminates N-sequential-saves on rapid toggles, and gives the user an implicit "change my mind" window.
+
+A small footer hint makes the model visible: `space toggle · tab/esc apply · a abort`.
+
+### 6. CLI surface rename
+
+Final shape:
+
+- `scribe skill edit <name> [--tools claude,codex] [--add gemini] [--remove cursor] [--pin|--inherit]` — non-interactive edit of one skill's assignment. Mutates `Tools` and optionally flips `ToolsMode`. Default is `--pin` (any explicit assignment pins the skill).
+- `scribe tools loadout <tool>` — renamed from the original `tools edit`. Opens the bulk TUI for one tool. Clearer: "show me this tool's skill loadout."
+
+The existing `scribe tools enable/disable` commands stay.
+
+This removes the `tools` double-meaning: global commands live on `scribe tools`, per-skill edits live on `scribe skill edit`.
+
+### 7. Canonical path helper extraction
+
+Before implementation, extract `internal/paths.SkillStore(name string) string` returning `~/.scribe/skills/<name>`. The current syncer, list TUI, and any new assignment code consume this helper. This is a small pre-refactor that prevents every caller from duplicating the path math.
+
+### 8. Undetected tools must still appear in the resolver
+
+`tools.ResolveStatuses` currently starts from detected builtins + manual config. A builtin that is not installed and not in config is invisible. For the tools pane to render `[ ] codex (not found)` consistently, the resolver needs to always include every builtin, with `DetectKnown: true, Detected: false`. One-line change in `internal/tools/runtime.go`.
+
+### 9. Visual differentiation of "not found" vs "disabled"
+
+Two states render differently in the tools pane:
+
+| State | Render | Togglable |
+|---|---|---|
+| Enabled, detected, in `Tools` | `[x] claude` | yes |
+| Enabled, detected, not in `Tools` | `[ ] claude` | yes |
+| Globally disabled, detected | `( ) gemini (disabled)` | yes (per-skill override) |
+| Not detected | `[-] codex (not found)` | no |
+| Cursor (project-scoped) | `[-] cursor (project-scoped)` | no |
+| Skill is a package source | `[-] <tool> (package)` | no |
+
+Cursor is never togglable in the per-skill or bulk TUIs (see Non-Goals). Packages are never togglable.
 
 ## User Experience
 
-### A. Per-skill toggle in list TUI
+### A. Per-skill tool toggles in list TUI
 
-Right pane of the split view gains a third section between Detail and Actions:
-
-```
-┌─ commit ─────────────────┐
-│ source: Naoray/scribe    │
-│ rev:    12               │
-│ hash:   abc1234          │
-├─ Tools ──────────────────┤
-│ [x] claude               │
-│ [x] cursor               │
-│ [ ] gemini   (disabled)  │
-│ [ ] codex    (not found) │
-├─ Actions ────────────────┤
-│   remove                 │
-└──────────────────────────┘
-```
-
-- Tab cycles focus: list → tools → actions → list
-- Shift+Tab reverses
-- In tools section: `space`/`enter` toggles the current row, `↑↓` moves
-- Each toggle immediately runs install or uninstall, updates state, and re-renders with fresh counts
-- Status bar shows transient confirmation: `✓ commit installed on gemini`
-- Failures show in status bar and do not mutate state: `✗ gemini install failed: <err>`
-
-### B. Bulk TUI: `scribe tools edit <name>`
+Right pane of the split view gains a middle section between Detail and Actions:
 
 ```
-$ scribe tools edit cursor
+┌─ commit ─────────────────────┐
+│ source: Naoray/scribe        │
+│ rev:    12                   │
+│ hash:   abc1234              │
+│ mode:   inherit              │
+├─ Tools ──────────────────────┤
+│ [x] claude                   │
+│ [ ] codex                    │
+│ ( ) gemini (disabled)        │
+│ [-] cursor (project-scoped)  │
+│ [-] aider  (not found)       │
+├─ Actions ────────────────────┤
+│   remove                     │
+└──────────────────────────────┘
 
-cursor · 12 skills installed · 3 pending changes
+space toggle · tab apply · a abort · q quit
+```
+
+- Tab cycles focus: list → tools → actions → list.
+- In tools section: `space`/`enter` toggles the current row into a pending state; `↑↓` moves; `a` aborts all pending changes for this skill.
+- Pending rows render with a `*` prefix: `* [x] codex` means the row is currently unchecked on disk but will be installed on apply.
+- Apply happens when focus leaves the tools pane for any reason (tab, esc, arrow out).
+- The first pending toggle flips `ToolsMode` to `pinned` on apply. Confirmation appears in status bar: `✓ commit pinned to [claude codex]`.
+- The `mode` field in the Detail pane reflects `inherit` or `pinned` live.
+
+### B. Bulk TUI: `scribe tools loadout <tool>`
+
+Unchanged from the original spec except for the rename:
+
+```
+$ scribe tools loadout codex
+
+codex · 12 skills installed · 3 pending changes
 
 [x] commit
 [x] plan-design-review
@@ -95,120 +177,136 @@ cursor · 12 skills installed · 3 pending changes
 space toggle · s save · esc cancel · q quit
 ```
 
-- Shows every skill in `state.Installed`, checked if `cursor` is in its `Tools` list
-- `space` toggles the pending state; marker shows `(pending: add)` or `(pending: remove)`
-- `s` runs the diff: a sequence of `Install`/`Uninstall` calls, each wrapped in an emitted event
-- After save, prints a one-line summary (`✓ 3 changes applied to cursor`) and exits back to the shell
-- `esc` or `q` with pending changes prompts: `Discard 3 pending changes? (y/n)`
+Save applies all pending changes in one wave using the same install-first ordering. Every affected skill gets pinned. Package skills are not listed.
 
-### C. Scripting: `scribe skill tools <name>`
-
-Non-interactive flat command for agents and CI.
+### C. Non-interactive: `scribe skill edit <name>`
 
 ```
-scribe skill tools commit                   # print current tool list
-scribe skill tools commit --add gemini      # idempotent add
-scribe skill tools commit --remove cursor   # idempotent remove
-scribe skill tools commit --set claude,codex  # exact set (installs/uninstalls diff)
-scribe skill tools commit --json            # machine output: {"tools":["claude","codex"]}
+scribe skill edit commit                       # print current assignment + mode
+scribe skill edit commit --tools claude,codex  # exact set, pins
+scribe skill edit commit --add gemini          # idempotent add, pins
+scribe skill edit commit --remove codex        # idempotent remove, pins
+scribe skill edit commit --inherit             # return to inherit mode; sync will recompute
+scribe skill edit commit --json                # machine output
 ```
 
-- `--add`, `--remove`, and `--set` are mutually exclusive
-- Errors on unknown skill name with actionable message
-- Runs the same install/uninstall side effects as the TUIs
-- Exits non-zero if any side effect fails, with all successful changes preserved
+- `--tools`, `--add`, `--remove`, `--inherit` are mutually exclusive except that `--add` and `--remove` can be combined.
+- Any mutation implicitly pins the skill unless `--inherit` is passed.
+- Exits non-zero on unknown skill, partial failure, or invalid tool name.
+
+### D. Reconcile in `scribe tools enable/disable`
+
+```
+$ scribe tools enable gemini
+Enabled gemini globally.
+Backfilling inherit-mode skills...
+  ✓ commit          (+gemini)
+  ✓ plan-design-review (+gemini)
+  ⏭ my-override     (pinned, skipped)
+  ✓ audit-drift     (+gemini)
+3 skills updated, 1 skipped.
+```
+
+Uses the same install-first ordering and partial-failure semantics.
 
 ## Architecture
 
-### Core package changes
+### `tools.Tool` interface change
 
-A new UI-agnostic helper package `internal/tools/assign` exposes pure functions the TUIs and the CLI share:
+`Uninstall` must report which paths it removed so the merge step can drop them from `state.InstalledSkill.Paths`. Current signature is `Uninstall(skillName string) error`; new signature is `Uninstall(skillName string) (removed []string, err error)`. Four existing implementations update (`ClaudeTool`, `CursorTool`, `GeminiTool`, `CodexTool`) plus the custom-tool runtime wrapper. This is strictly additive from the caller's perspective — existing `_ = tool.Uninstall(...)` sites become `_, _ = tool.Uninstall(...)`.
+
+Rationale: `state.InstalledSkill.Paths` is a flat slice without a per-tool key. Without a return value from `Uninstall`, there is no reliable way to know which paths to drop when only one tool is removed. Re-deriving the path from convention is fragile (custom tools define arbitrary install paths).
+
+### New package: `internal/tools/assign`
+
+Pure functions shared by TUIs, CLI, and the reconcile path:
 
 ```go
 package assign
 
-// Plan returns the tool names to install and uninstall to move from
-// current to desired. Pure; no side effects.
-func Plan(current, desired []string) (install, uninstall []string)
+type Mode int
+const (
+    ModeAdd    Mode = iota // successful install adds to state.Tools
+    ModeRemove              // successful uninstall drops from state.Tools
+)
 
-// Apply runs install/uninstall side effects for one skill. The caller
-// resolves the tool-name slices from Plan into concrete Tool instances
-// before invoking Apply.
+type Op struct {
+    Tool string
+    Mode Mode
+}
+
+// Plan returns the install and uninstall Ops needed to move current → desired.
+// Pure; no side effects.
+func Plan(current, desired []string) (install, uninstall []Op)
+
+// Result records the outcome of one Op.
+type Result struct {
+    Op    Op
+    Paths []string // populated on successful install
+    Err   error
+}
+
+// Apply runs Ops in install-first order, returning per-Op results. Caller
+// resolves tool names to concrete tools.Tool instances before invoking.
 func Apply(skillName, canonicalDir string, install, uninstall []tools.Tool) []Result
 
-type Result struct {
-    Tool string
-    Op   Op     // OpInstall | OpUninstall
-    Err  error
-}
+// Merge folds successful Results into a copy of the current state slice,
+// updating both Tools and Paths. Failed ops leave their tool unchanged.
+func Merge(installed state.InstalledSkill, results []Result) state.InstalledSkill
 ```
 
-Keeping this in its own subpackage avoids bloating `internal/tools/tool.go` and gives the TUIs a narrow seam to mock in tests.
+### Syncer changes
 
-The `Syncer` in `internal/sync/` is updated in one place: when a skill already appears in `state.Installed` with a non-empty `Tools` list, sync uses that list verbatim instead of computing the intersection of enabled + detected tools.
+`internal/sync/syncer.go`:
+- For skills with `ToolsMode == ToolsModePinned`, skip the "which tools" computation and use `state.Tools` verbatim.
+- Self-heal: for each tool in `state.Tools`, verify the expected symlink exists via `os.Lstat` on every recorded path in `state.Paths` that belongs to that tool. If missing, re-run `Install`. Path-to-tool association is re-derived by matching path prefixes against each `tools.Tool.Name()`-specific root.
+- `applyPackage` is unchanged. Packages always stay inherit mode with empty `Tools`.
+- Cursor is excluded from both the pinned path and the self-heal path. It continues to use today's per-sync behavior (install into the current working directory's `.cursor/rules/`).
 
 ### cmd/ changes
 
-**`cmd/list_tui.go`** — extend the split-view model:
+- `cmd/list_tui.go`: add `focusTools` between `focusList` and `focusActions`. Add `pendingTools map[string]bool` and an apply-on-defocus handler. `renderToolsPane` builds rows from `tools.ResolveStatuses` + current `state.Tools` + pending overlay.
+- `cmd/tools.go`: add `newToolsLoadoutCommand`. Deletes the old `edit` subcommand if any. `runToolsEnable`/`runToolsDisable` call a new `reconcileInheritSkills` helper.
+- `cmd/tools_loadout_tui.go` (new): bulk TUI model, same `assign.Apply` path.
+- `cmd/skill.go` (new): parent `skill` command + `edit` subcommand. Shares flag parsing and mutex rules.
 
-- Add `focusTools` to the `detailFocus` enum, between `focusList` and `focusActions`
-- `updateDetail` routes tab and arrow keys through the new section
-- New `toolToggleMsg` event carries assign.Result slices back to the model
-- Right pane render gains a `renderToolsPane` helper mirroring `renderActions`
+### `internal/tools/runtime.go` changes
 
-**`cmd/tools.go`** — add `newToolsEditCommand`:
-
-```go
-func newToolsEditCommand() *cobra.Command {
-    cmd := &cobra.Command{
-        Use:   "edit <name>",
-        Short: "Bulk-edit which skills are installed on a tool",
-        Args:  cobra.ExactArgs(1),
-        RunE:  runToolsEdit,
-    }
-    return cmd
-}
-```
-
-`runToolsEdit` builds a new `toolsEditModel` (new file `cmd/tools_edit_tui.go`) and runs it via `tea.NewProgram`. The model owns a `map[string]pendingState` keyed by skill name.
-
-**`cmd/skill.go`** (new file) — parent `skill` command plus `skill tools` subcommand. Non-TUI, text-only, handles `--add`, `--remove`, `--set`, `--json`.
-
-### State and side-effect ordering
-
-For both TUIs and the CLI path, a single operation on one skill follows this sequence:
-
-1. Compute `install, uninstall := assign.Plan(current, desired)`
-2. For each tool in `uninstall`: call `tool.Uninstall(skillName)`. On error, collect and continue.
-3. For each tool in `install`: call `tool.Install(skillName, canonicalDir)`. On error, collect and continue.
-4. Merge successful results into `state.Installed[skillName].Tools`
-5. Save state atomically
-
-Partial failures do not block successful changes. The user sees aggregate success + per-tool errors in the status bar or stderr.
+`ResolveStatuses` always emits every builtin, marking undetected ones with `Detected: false`. One-line behavior change, covered by a new test case.
 
 ## Error Handling
 
-| Situation | Per-skill TUI | Bulk TUI | CLI |
-|---|---|---|---|
-| Unknown skill name | Cannot happen (picked from list) | Cannot happen | Exit 1 with "unknown skill" |
-| Tool not detected | Toggle is a no-op | Save skips that tool, reports | Exit 1 before any side effect |
-| Install symlink fails | Status bar, state unchanged | Reported in save summary, continues | Stderr, exit 1 after other ops |
-| State save fails | Status bar, partial rollback impossible — log it | Same | Same |
-| Canonical skill dir missing | Refuse toggle, status bar explains | Refuse save | Exit 1 |
+| Situation | Per-skill TUI | Loadout TUI | `skill edit` CLI | Reconcile |
+|---|---|---|---|---|
+| Unknown skill name | n/a (picked from list) | n/a | Exit 1 | n/a |
+| Invalid tool name (--add foo) | n/a | n/a | Exit 1 before any op | n/a |
+| Tool not detected | Toggle is no-op | Not listed | Exit 1 | Skipped silently |
+| Package skill | Not eligible | Not listed | Exit 1 with "packages unsupported" | Skipped silently |
+| Install symlink fails | Status bar, per-tool not added to state | Save summary, continues | Stderr, continues, exit 1 at end | Printed in summary, continues |
+| Uninstall symlink fails | Same — per-tool not removed from state | Same | Same | Same |
+| State save fails | Status bar; in-memory state already reflects filesystem — user can retry | Same | Stderr, exit 1 | Same |
+| Cursor eligible anywhere? | No | No | `--add cursor` → exit 1 | No |
 
 ## Testing
 
-- `internal/tools/assign`: table-driven tests for `Plan` (current/desired/install/uninstall cases)
-- `internal/tools/assign`: `Apply` tested with fake `Tool` implementations (success, one failure mid-batch, all fail)
-- `cmd/list_tui_test.go`: exercise the new focus state, tab cycling, and that a toggle emits the expected message
-- `cmd/tools_edit_tui_test.go` (new): toggle → save → state roundtrip using `t.Setenv("HOME", t.TempDir())`
-- `cmd/skill_test.go` (new): flag validation, mutual exclusion, JSON output shape
-- `internal/sync/syncer_test.go`: add a case where a skill already in state with `Tools=[claude]` is not re-added to cursor on the next sync
+- `internal/tools/assign`: table-driven tests for `Plan`, `Apply` (with fake tools covering success, mid-batch failure, all fail), and `Merge`.
+- `internal/tools/runtime_test.go`: `ResolveStatuses` now emits undetected builtins.
+- `internal/sync/syncer_test.go`:
+  - Pinned skill with `Tools=[claude]` not re-added to cursor after `tools enable cursor`.
+  - Inherit skill gets cursor added on `tools enable cursor` reconcile.
+  - Pinned skill with missing symlink triggers self-heal.
+  - Package skill never pinned, never surfaced to assignment flows.
+- `cmd/list_tui_test.go`: focus cycling into tools pane, toggle staging, apply on defocus, pinning side effect.
+- `cmd/tools_loadout_tui_test.go` (new): staging + save + roundtrip via `t.Setenv("HOME", t.TempDir())`.
+- `cmd/skill_test.go` (new): flag mutex, `--inherit` resets mode, `--add cursor` rejected.
+- `cmd/tools_test.go`: reconcile path, pinned skills skipped, summary output.
 
 ## Rollout
 
-Single PR. No feature flag. The existing global `tools enable/disable` keeps working unchanged. The list TUI gains a new pane, which is only visible in the split view (already keyboard-gated behind Enter). The `scribe tools edit` and `scribe skill tools` commands are additive.
+Single PR. No feature flag. Migration is a no-op: new `ToolsMode` field defaults to `inherit` for existing state entries, preserving current behavior on the first sync after upgrade.
+
+The existing global `tools enable/disable` gains the reconcile behavior. Users who previously relied on "enable never touches installed skills" will see a one-time backfill — this is the intended fix for the biggest coarse-toggle pain point, and pinned skills (which don't exist yet for any current user) are still respected.
 
 ## Open Questions
 
-None. All forks resolved during brainstorming.
+None. All counselors-round-1 ship-blockers resolved.
