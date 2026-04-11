@@ -16,9 +16,9 @@ import (
 
 // State is the contents of ~/.scribe/state.json.
 type State struct {
-	SchemaVersion int                          `json:"schema_version"`
-	LastSync      time.Time                    `json:"last_sync,omitempty"`
-	Installed     map[string]InstalledSkill    `json:"installed"`
+	SchemaVersion int                       `json:"schema_version"`
+	LastSync      time.Time                 `json:"last_sync,omitempty"`
+	Installed     map[string]InstalledSkill `json:"installed"`
 }
 
 // InstalledSkill records everything needed to detect updates and uninstall.
@@ -125,22 +125,25 @@ func Load() (*State, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &State{SchemaVersion: 2, Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 3, Installed: make(map[string]InstalledSkill)}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return &State{SchemaVersion: 2, Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 3, Installed: make(map[string]InstalledSkill)}, nil
 	}
 	return parseAndMigrate(data)
 }
 
 // parseAndMigrate handles migrations:
-// 1. Promote team.last_sync to top-level LastSync
-// 2. Rename targets → tools in each InstalledSkill
-// 3. Namespace bare keys using Registries[0] owner prefix
-// 4. Schema v2: convert to bare keys, populate Sources, set Revision
+//  1. Promote team.last_sync to top-level LastSync
+//  2. Rename targets → tools in each InstalledSkill
+//  3. Namespace bare keys using Registries[0] owner prefix
+//  4. Schema v2: convert to bare keys, populate Sources, set Revision
+//  5. Schema v3: bump the state schema while preserving existing Sources.
+//     Older LastSHA values may still be commit SHAs, but the next blob-SHA
+//     based sync can refresh them in place without forcing reinstall flows.
 func parseAndMigrate(data []byte) (*State, error) {
 	var legacy legacyState
 	if err := json.Unmarshal(data, &legacy); err != nil {
@@ -243,11 +246,18 @@ func parseAndMigrate(data []byte) (*State, error) {
 
 		s.SchemaVersion = 2
 	} else {
-		// Already v2 — pass through unchanged
+		// Already v2+ — pass through unchanged
 		for _, e := range entries {
 			skill := legacyToSkill(e.skill)
 			s.Installed[e.key] = skill
 		}
+	}
+
+	// Migration 5: Schema v3 — preserve existing entries and only bump the
+	// schema version. The next sync can refresh branch/package LastSHA values
+	// from commit SHAs to blob SHAs in place.
+	if s.SchemaVersion < 3 {
+		s.SchemaVersion = 3
 	}
 
 	return s, nil
