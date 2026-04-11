@@ -83,6 +83,15 @@ func (t CursorTool) Uninstall(skillName string) error {
 	return nil
 }
 
+func (t CursorTool) SkillPath(skillName string) (string, error) {
+	workDir, err := t.resolveWorkDir()
+	if err != nil {
+		return "", err
+	}
+	mdcName := SlugifyRegistry(skillName) + ".mdc"
+	return filepath.Join(workDir, ".cursor", "rules", mdcName), nil
+}
+
 // generateMDC builds a Cursor .mdc file from a SKILL.md.
 // Maps `description` from frontmatter, strips frontmatter from body.
 func generateMDC(skillMD []byte) []byte {

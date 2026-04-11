@@ -34,6 +34,15 @@ func (t CommandTool) Install(skillName, canonicalDir string) ([]string, error) {
 	return []string{path}, nil
 }
 
+// SkillPath returns the path this tool would link for skillName, using PathTemplate.
+// Returns an error if no PathTemplate is configured (path is unknown).
+func (t CommandTool) SkillPath(skillName string) (string, error) {
+	if strings.TrimSpace(t.PathTemplate) == "" {
+		return "", fmt.Errorf("command tool %q: no path_template configured", t.ToolName)
+	}
+	return renderPathTemplate(t.PathTemplate, t.ToolName, skillName, ""), nil
+}
+
 func (t CommandTool) Uninstall(skillName string) error {
 	cmd := renderTemplate(t.UninstallCommand, t.ToolName, skillName, "")
 	if err := runShell(cmd); err != nil {
