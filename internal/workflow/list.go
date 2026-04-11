@@ -71,6 +71,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 		ContentHash string   `json:"content_hash,omitempty"`
 		Targets     []string `json:"targets"`
 		Managed     bool     `json:"managed"`
+		Origin      string   `json:"origin,omitempty"`
 		Path        string   `json:"path,omitempty"`
 	}
 
@@ -81,7 +82,10 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 			targets = []string{}
 		}
 
-		_, managed := st.Installed[sk.Name]
+		var origin string
+		if installed, ok := st.Installed[sk.Name]; ok && installed.Origin == state.OriginLocal {
+			origin = "local"
+		}
 
 		out = append(out, localSkillJSON{
 			Name:        sk.Name,
@@ -90,7 +94,8 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 			Revision:    sk.Revision,
 			ContentHash: sk.ContentHash,
 			Targets:     targets,
-			Managed:     managed,
+			Managed:     sk.Managed,
+			Origin:      origin,
 			Path:        sk.LocalPath,
 		})
 	}
