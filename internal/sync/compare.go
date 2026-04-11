@@ -19,10 +19,33 @@ import (
 //   - latestSHA == source.LastSHA → StatusCurrent
 //   - any mismatch               → StatusOutdated
 //
-// Packages always use SHA comparison (they track a branch).
+// Packages have global identity by name (one shell install per machine), so
+// the source.Registry field is informational — any registry cataloging the
+// package points at the same install. SHAs are compared against any recorded
+// source; a legacy-migrated state with no SHA is treated as current.
 func compareEntry(entry manifest.Entry, installed *state.InstalledSkill, latestSHA, registryRepo string) Status {
 	if installed == nil {
 		return StatusMissing
+	}
+
+	if entry.IsPackage() {
+		if latestSHA == "" {
+			return StatusCurrent
+		}
+		knownSHA := false
+		for _, src := range installed.Sources {
+			if src.LastSHA == "" {
+				continue
+			}
+			knownSHA = true
+			if src.LastSHA == latestSHA {
+				return StatusCurrent
+			}
+		}
+		if !knownSHA {
+			return StatusCurrent
+		}
+		return StatusOutdated
 	}
 
 	// Find the source entry for this registry.
@@ -44,9 +67,9 @@ func compareEntry(entry manifest.Entry, installed *state.InstalledSkill, latestS
 		return StatusMissing
 	}
 
-	// Packages and branches use SHA comparison.
+	// Branch refs use SHA comparison.
 	// If latestSHA is empty (API unreachable), assume current to avoid spurious re-installs.
-	if entry.IsPackage() || src.IsBranch() {
+	if src.IsBranch() {
 		if latestSHA == missingSkillBlobSHA {
 			return StatusOutdated
 		}

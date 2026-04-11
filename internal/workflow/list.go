@@ -13,11 +13,13 @@ import (
 )
 
 // ListLoadSteps returns the minimal step list needed before launching the
-// list TUI: it loads config and state, then leaves rendering to cmd/.
+// list TUI: it loads config/state, resolves active tools for in-place updates,
+// then leaves rendering to cmd/.
 func ListLoadSteps() []Step {
 	return []Step{
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
+		{"ResolveTools", StepResolveTools},
 	}
 }
 
