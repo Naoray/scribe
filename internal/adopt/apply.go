@@ -103,15 +103,16 @@ func (a *Adopter) applyOne(cand Candidate, result *Result) error {
 		return nil
 	}
 
-	// Record in state.
+	// Record in state. Adoption always starts in inherit mode — users opt into
+	// pinning via `scribe skill edit --pin`.
 	a.State.RecordInstall(cand.Name, state.InstalledSkill{
 		Revision:      1,
 		InstalledHash: cand.Hash,
 		Sources:       nil,
 		Tools:         installedToolNames,
+		ToolsMode:     state.ToolsModeInherit,
 		Paths:         allPaths,
 		Origin:        state.OriginLocal,
-		// TODO: set ToolsMode: state.ToolsModeInherit when per-skill tool mgmt lands
 	})
 
 	if err := a.State.Save(); err != nil {
