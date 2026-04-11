@@ -112,6 +112,9 @@ func TestRunGuideJSON_FullyConnected(t *testing.T) {
 	if !contains(commands, "scribe list") {
 		t.Error("expected scribe list step")
 	}
+	if !contains(commands, "scribe adopt") {
+		t.Error("expected scribe adopt step")
+	}
 }
 
 func TestRunGuideJSON_OutputSchema(t *testing.T) {

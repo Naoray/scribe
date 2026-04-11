@@ -124,10 +124,11 @@ ArtistfyHQ/team-skills/
 | Command | What it does |
 |---|---|
 | `scribe` | Open the local skill manager |
-| `scribe list` | Show all skills on this machine |
+| `scribe list` | Show all skills on this machine (managed + unmanaged) |
 | `scribe add [query]` | Find and install skills from registries |
+| `scribe adopt [name]` | Import hand-rolled skills from `~/.claude/skills` etc. into the store |
 | `scribe remove <skill>` | Remove a skill from this machine |
-| `scribe sync` | Pull updates from connected registries |
+| `scribe sync` | Pull updates from connected registries (runs adoption first) |
 | `scribe status` | Show connected registries, installed count, and last sync |
 | `scribe tools` | List detected AI tools, enable/disable |
 | `scribe explain <skill>` | AI-powered skill explanation (or `--raw` for rendered SKILL.md) |
@@ -183,6 +184,45 @@ syncing ArtistfyHQ/team-skills...
 
 done: 1 installed, 1 updated, 2 current, 0 failed
 ```
+
+## Adoption — claim skills you already have
+
+If you've been hand-rolling skills in `~/.claude/skills/` or `~/.codex/skills/`, Scribe adopts them into the canonical store on first sync so the rest of the commands (list, remove, tools) work on them unmodified. Adoption is install-first and reversible: the original path becomes a symlink into `~/.scribe/skills/<name>/`.
+
+```bash
+scribe adopt                 # interactive: review conflicts, adopt clean candidates
+scribe adopt --yes           # force auto (adopt all clean, skip conflicts)
+scribe adopt --dry-run       # print the plan, no writes
+scribe adopt <name>          # adopt a single named candidate
+```
+
+Adopted skills are marked with `(local)` in `scribe list` and carry `origin: "local"` in `--json` output. They have no upstream and stay put until you `scribe remove` them.
+
+### Adoption modes
+
+`scribe sync` runs adoption as a prelude. Control it via `config.yaml`:
+
+```yaml
+adoption:
+  mode: auto       # auto | prompt | off
+  paths:           # optional: extra dirs beyond the builtins
+    - ~/src/my-skills
+```
+
+- `auto` (default) — adopt clean candidates silently on every sync.
+- `prompt` — `scribe sync` defers to `scribe adopt`; the dedicated command owns interactive prompts.
+- `off` — never adopt automatically; unmanaged skills still show up in `scribe list`.
+
+Manage the config without editing YAML by hand:
+
+```bash
+scribe config adoption                       # show current settings
+scribe config adoption --mode off
+scribe config adoption --add-path ~/src/my-skills
+scribe config adoption --remove-path ~/src/my-skills
+```
+
+First-run always prompts once, regardless of the persisted mode — that's the only moment a brand-new user can't know they need to check.
 
 ## Private skills
 
@@ -240,8 +280,9 @@ Scribe follows the [agentskills.io](https://agentskills.io) SKILL.md specificati
 
 **What works today:**
 - `scribe sync` — full sync loop (diff, download, install, update)
-- `scribe list` — TUI for browsing installed skills, grouped by registry
+- `scribe list` — TUI for browsing installed skills, grouped by registry, with managed/unmanaged markers
 - `scribe add` — browse and install skills from connected registries
+- `scribe adopt` — import hand-rolled skills from tool dirs into the canonical store
 - `scribe remove` — uninstall skills from the machine
 - `scribe tools` — list and toggle AI tools (Claude Code, Cursor)
 - `scribe registry connect/create/add` — manage team registries
