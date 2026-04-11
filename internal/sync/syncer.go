@@ -138,7 +138,12 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 					}
 				}
 				if len(tree) > 0 {
-					latestSHA = resolveSkillBlobSHA(tree, *entry)
+					resolvedSHA, found := resolveSkillBlobSHA(tree, *entry)
+					if found {
+						latestSHA = resolvedSHA
+					} else {
+						latestSHA = missingSkillBlobSHA
+					}
 				}
 			}
 		}

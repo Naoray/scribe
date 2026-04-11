@@ -25,39 +25,48 @@ func TestResolveSkillBlobSHA(t *testing.T) {
 		name  string
 		entry manifest.Entry
 		want  string
+		found bool
 	}{
 		{
 			name:  "resolves via explicit path",
 			entry: manifest.Entry{Name: "xray", Path: "skills/xray"},
 			want:  "xrayblob",
+			found: true,
 		},
 		{
 			name:  "falls back to name when path omitted",
 			entry: manifest.Entry{Name: "skills/deploy"},
 			want:  "deployblob",
+			found: true,
 		},
 		{
 			name:  "returns empty for missing skill",
 			entry: manifest.Entry{Name: "ghost", Path: "skills/ghost"},
 			want:  "",
+			found: false,
 		},
 		{
 			name:  "handles root-level skill paths",
 			entry: manifest.Entry{Name: "repo-skill", Path: "."},
 			want:  "rootsha",
+			found: true,
 		},
 		{
 			name:  "ignores tree entries (only blobs)",
 			entry: manifest.Entry{Name: "skills", Path: "skills"},
 			want:  "",
+			found: false,
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := resolveSkillBlobSHA(tree, c.entry)
+			got, found := resolveSkillBlobSHA(tree, c.entry)
 			if got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
+			}
+			if found != c.found {
+				t.Errorf("found = %v, want %v", found, c.found)
 			}
 		})
 	}
