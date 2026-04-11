@@ -429,18 +429,14 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		if m.search != "" {
-			m.search = ""
-			m.filtered = m.applyFilter()
-			m.cursor, m.offset = 0, 0
+			m = m.resetSearch()
 			return m, nil
 		}
 		m.quitting = true
 		return m, tea.Quit
 	case "esc", "escape":
 		if m.search != "" {
-			m.search = ""
-			m.filtered = m.applyFilter()
-			m.cursor, m.offset = 0, 0
+			m = m.resetSearch()
 		}
 		return m, nil
 	case "up", "k":
@@ -467,17 +463,9 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.statusMsg = ""
 		}
 	case "backspace":
-		if len(m.search) > 0 {
-			m.search = m.search[:len(m.search)-1]
-			m.filtered = m.applyFilter()
-			m.cursor, m.offset = 0, 0
-		}
+		m = m.backspaceSearch()
 	default:
-		if len(msg.String()) == 1 {
-			m.search += msg.String()
-			m.filtered = m.applyFilter()
-			m.cursor, m.offset = 0, 0
-		}
+		m = m.appendSearch(msg.String())
 	}
 	return m, nil
 }
@@ -527,7 +515,8 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focus == focusList {
 		// Browsing the list with the detail pane open: arrow keys move
 		// the row cursor and the right pane refreshes live. Right/enter
-		// hands focus to the action menu.
+		// hands focus to the action menu. Character keys still filter the
+		// left list without forcing the user to close the detail pane first.
 		switch key {
 		case "up", "k":
 			if m.cursor > 0 {
@@ -546,6 +535,23 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "right", "l", "enter":
 			m.focus = focusActions
 			m.actionCursor = 0
+		case "backspace":
+			m = m.backspaceSearch()
+			m.actionCursor = 0
+			m.statusMsg = ""
+			if !m.selected {
+				m.focus = focusList
+			}
+		default:
+			next := m.appendSearch(key)
+			if next.search != m.search {
+				m = next
+				m.actionCursor = 0
+				m.statusMsg = ""
+				if !m.selected {
+					m.focus = focusList
+				}
+			}
 		}
 		return m, nil
 	}
@@ -687,6 +693,42 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m listModel) resetSearch() listModel {
+	m.search = ""
+	m.filtered = m.applyFilter()
+	m.cursor, m.offset = 0, 0
+	if len(m.filtered) == 0 {
+		m.selected = false
+	}
+	return m
+}
+
+func (m listModel) backspaceSearch() listModel {
+	if len(m.search) == 0 {
+		return m
+	}
+	m.search = m.search[:len(m.search)-1]
+	m.filtered = m.applyFilter()
+	m.cursor, m.offset = 0, 0
+	if len(m.filtered) == 0 {
+		m.selected = false
+	}
+	return m
+}
+
+func (m listModel) appendSearch(key string) listModel {
+	if len(key) != 1 {
+		return m
+	}
+	m.search += key
+	m.filtered = m.applyFilter()
+	m.cursor, m.offset = 0, 0
+	if len(m.filtered) == 0 {
+		m.selected = false
+	}
+	return m
 }
 
 func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
