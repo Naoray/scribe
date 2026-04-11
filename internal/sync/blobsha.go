@@ -17,7 +17,11 @@ func resolveSkillBlobSHA(tree []provider.TreeEntry, entry manifest.Entry) string
 	if skillPath == "" {
 		skillPath = entry.Name
 	}
-	target := strings.TrimSuffix(skillPath, "/") + "/SKILL.md"
+	skillPath = strings.TrimSuffix(skillPath, "/")
+	target := "SKILL.md"
+	if skillPath != "" && skillPath != "." {
+		target = skillPath + "/SKILL.md"
+	}
 	for _, e := range tree {
 		if e.Type == "blob" && e.Path == target {
 			return e.SHA

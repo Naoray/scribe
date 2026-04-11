@@ -14,6 +14,7 @@ import (
 func TestResolveSkillBlobSHA(t *testing.T) {
 	tree := []provider.TreeEntry{
 		{Path: "README.md", Type: "blob", SHA: "readmesha"},
+		{Path: "SKILL.md", Type: "blob", SHA: "rootsha"},
 		{Path: "skills/xray/SKILL.md", Type: "blob", SHA: "xrayblob"},
 		{Path: "skills/xray/helpers.md", Type: "blob", SHA: "helperblob"},
 		{Path: "skills/deploy/SKILL.md", Type: "blob", SHA: "deployblob"},
@@ -39,6 +40,11 @@ func TestResolveSkillBlobSHA(t *testing.T) {
 			name:  "returns empty for missing skill",
 			entry: manifest.Entry{Name: "ghost", Path: "skills/ghost"},
 			want:  "",
+		},
+		{
+			name:  "handles root-level skill paths",
+			entry: manifest.Entry{Name: "repo-skill", Path: "."},
+			want:  "rootsha",
 		},
 		{
 			name:  "ignores tree entries (only blobs)",

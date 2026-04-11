@@ -256,9 +256,11 @@ func TestMigrationNamespacesKeys(t *testing.T) {
 	}
 
 	skill := s.Installed["gstack"]
-	// Sources are dropped by v3 migration (commit-SHA data from v2 is unreliable).
-	if len(skill.Sources) != 0 {
-		t.Errorf("expected sources to be dropped by v3 migration, got %v", skill.Sources)
+	if len(skill.Sources) != 1 {
+		t.Fatalf("expected sources to be preserved by v3 migration, got %v", skill.Sources)
+	}
+	if skill.Sources[0].Registry != "garrytan/gstack" || skill.Sources[0].Ref != "v0.12.9.0" {
+		t.Errorf("unexpected migrated sources: %v", skill.Sources)
 	}
 
 	// Targets should be migrated to Tools.
@@ -414,8 +416,8 @@ func TestStateNamespaceKeysNoRegistries(t *testing.T) {
 }
 
 // TestStateMigrateV2ToV3 verifies that a v2 state (bare keys, populated
-// Sources) gets upgraded to v3 with sources dropped and non-source fields
-// (Revision, InstalledHash, Tools) preserved.
+// Sources) gets upgraded to v3 with both sources and non-source fields
+// preserved.
 func TestStateMigrateV2ToV3(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -456,9 +458,11 @@ func TestStateMigrateV2ToV3(t *testing.T) {
 	if skill.InstalledHash != "abc123" {
 		t.Errorf("expected InstalledHash=abc123, got %q", skill.InstalledHash)
 	}
-	// v3 migration drops sources.
-	if len(skill.Sources) != 0 {
-		t.Errorf("expected sources dropped by v3 migration, got %v", skill.Sources)
+	if len(skill.Sources) != 1 {
+		t.Fatalf("expected sources preserved by v3 migration, got %v", skill.Sources)
+	}
+	if skill.Sources[0].Registry != "ArtistfyHQ/team-skills" || skill.Sources[0].LastSHA != "def456" {
+		t.Errorf("unexpected migrated sources: %v", skill.Sources)
 	}
 	if s.SchemaVersion != 3 {
 		t.Errorf("expected SchemaVersion=3, got %d", s.SchemaVersion)
@@ -515,10 +519,13 @@ func TestMigrationSchemaV2(t *testing.T) {
 		t.Errorf("expected bare key 'my-tool', got keys: %v", installedKeys(s))
 	}
 
-	// v3 migration drops sources — verify both skills have no sources.
+	// v3 migration preserves sources gathered during migration.
 	deploy := s.Installed["deploy"]
-	if len(deploy.Sources) != 0 {
-		t.Errorf("expected deploy sources dropped, got %v", deploy.Sources)
+	if len(deploy.Sources) != 1 {
+		t.Fatalf("expected deploy sources preserved, got %v", deploy.Sources)
+	}
+	if deploy.Sources[0].Registry != "ArtistfyHQ/team-skills" || deploy.Sources[0].Ref != "v1.0.0" {
+		t.Errorf("unexpected deploy sources: %v", deploy.Sources)
 	}
 	if deploy.Revision != 1 {
 		t.Errorf("expected Revision=1, got %d", deploy.Revision)
@@ -526,7 +533,7 @@ func TestMigrationSchemaV2(t *testing.T) {
 
 	myTool := s.Installed["my-tool"]
 	if len(myTool.Sources) != 0 {
-		t.Errorf("expected my-tool sources dropped, got %v", myTool.Sources)
+		t.Errorf("expected my-tool sources empty, got %v", myTool.Sources)
 	}
 	if myTool.Revision != 1 {
 		t.Errorf("expected Revision=1, got %d", myTool.Revision)
@@ -534,7 +541,7 @@ func TestMigrationSchemaV2(t *testing.T) {
 }
 
 // TestMigrationPreservesRevisionAndHash verifies v2→v3 migration preserves
-// non-source fields while dropping the stale Sources.
+// both source metadata and non-source fields.
 func TestMigrationPreservesRevisionAndHash(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -571,8 +578,11 @@ func TestMigrationPreservesRevisionAndHash(t *testing.T) {
 	if skill.InstalledHash != "sha256hash" {
 		t.Errorf("InstalledHash: got %q", skill.InstalledHash)
 	}
-	if len(skill.Sources) != 0 {
-		t.Errorf("Sources: expected drop on v3 migration, got %v", skill.Sources)
+	if len(skill.Sources) != 1 {
+		t.Fatalf("Sources: expected preserve on v3 migration, got %v", skill.Sources)
+	}
+	if skill.Sources[0].Registry != "garrytan/gstack" || skill.Sources[0].LastSHA != "commit123" {
+		t.Errorf("unexpected preserved sources: %v", skill.Sources)
 	}
 }
 
@@ -627,10 +637,8 @@ func TestParseSourceString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Write a state file with this source, trigger migration.
-			// v3 migration drops sources regardless — this test now only
-			// verifies that loading a v1 state with these source strings
-			// does not error, and that the skill survives migration.
+			// Write a state file with this source and verify parsed sources
+			// survive migration when the source string is valid.
 			_ = tt
 			os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
 				"installed": {
@@ -653,8 +661,17 @@ func TestParseSourceString(t *testing.T) {
 			if !ok {
 				t.Fatal("test-skill not found after migration")
 			}
-			if len(skill.Sources) != 0 {
-				t.Errorf("v3 migration should drop sources, got %v", skill.Sources)
+			if tt.wantRegistry == "" {
+				if len(skill.Sources) != 0 {
+					t.Errorf("expected no sources for %q, got %v", tt.source, skill.Sources)
+				}
+				return
+			}
+			if len(skill.Sources) != 1 {
+				t.Fatalf("expected one source for %q, got %v", tt.source, skill.Sources)
+			}
+			if skill.Sources[0].Registry != tt.wantRegistry || skill.Sources[0].Ref != tt.wantRef {
+				t.Errorf("source mismatch: got %v, want registry=%q ref=%q", skill.Sources, tt.wantRegistry, tt.wantRef)
 			}
 		})
 	}
@@ -695,8 +712,7 @@ func TestMigrationBareKeyCollisionCollapses(t *testing.T) {
 	os.MkdirAll(dir, 0o755)
 
 	// Two qualified keys collapse to the same bare name "deploy".
-	// Schema v3 drops sources during migration — we only verify the key
-	// collision collapses to a single entry (newer wins as base).
+	// Schema v3 preserves merged sources while the newer entry wins as base.
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
 		"installed": {
 			"org-a/deploy": {
@@ -737,9 +753,8 @@ func TestMigrationBareKeyCollisionCollapses(t *testing.T) {
 		t.Fatalf("expected bare key 'deploy', got keys: %v", installedKeys(s))
 	}
 
-	// v3 drops all sources — next `scribe sync` repopulates them.
-	if len(skill.Sources) != 0 {
-		t.Errorf("expected sources dropped in v3, got %d: %v", len(skill.Sources), skill.Sources)
+	if len(skill.Sources) != 2 {
+		t.Fatalf("expected merged sources preserved in v3, got %d: %v", len(skill.Sources), skill.Sources)
 	}
 
 	// Newer entry (org-a, 2026-04-01) should win as the base.
@@ -757,12 +772,10 @@ func installedKeys(s *state.State) []string {
 	return keys
 }
 
-// TestMigrationSchemaV3DropsSources verifies that loading a v2 state drops
-// all SkillSource entries (forcing a re-resolve via `scribe sync`). The v2
-// state carried commit SHAs in LastSHA and sometimes recorded the upstream
-// source repo in Registry instead of the curating registry — both are
-// unreliable under the new blob-SHA identity model, so we throw them out.
-func TestMigrationSchemaV3DropsSources(t *testing.T) {
+// TestMigrationSchemaV3PreservesSources verifies that loading a v2 state keeps
+// SkillSource entries intact so the first sync after upgrade can refresh
+// metadata in place instead of forcing reinstalls.
+func TestMigrationSchemaV3PreservesSources(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -805,8 +818,11 @@ func TestMigrationSchemaV3DropsSources(t *testing.T) {
 	if !ok {
 		t.Fatal("xray not in Installed after migration")
 	}
-	if len(xray.Sources) != 0 {
-		t.Errorf("xray sources: got %v, want empty (dropped)", xray.Sources)
+	if len(xray.Sources) != 1 {
+		t.Fatalf("xray sources: got %v, want preserved source", xray.Sources)
+	}
+	if xray.Sources[0].Registry != "Artistfy/hq" || xray.Sources[0].LastSHA != "commit-xyz" {
+		t.Errorf("xray sources: got %v", xray.Sources)
 	}
 	// Non-source fields must be preserved so the skill is still recognised.
 	if xray.Revision != 3 {
@@ -823,8 +839,11 @@ func TestMigrationSchemaV3DropsSources(t *testing.T) {
 	if !ok {
 		t.Fatal("caveman not in Installed after migration")
 	}
-	if len(caveman.Sources) != 0 {
-		t.Errorf("caveman sources: got %v, want empty", caveman.Sources)
+	if len(caveman.Sources) != 1 {
+		t.Fatalf("caveman sources: got %v, want preserved source", caveman.Sources)
+	}
+	if caveman.Sources[0].Registry != "JuliusBrussee/caveman" || caveman.Sources[0].LastSHA != "commit-pkg" {
+		t.Errorf("caveman sources: got %v", caveman.Sources)
 	}
 	// Package-specific fields preserved.
 	if caveman.Type != "package" {

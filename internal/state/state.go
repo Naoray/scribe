@@ -16,9 +16,9 @@ import (
 
 // State is the contents of ~/.scribe/state.json.
 type State struct {
-	SchemaVersion int                          `json:"schema_version"`
-	LastSync      time.Time                    `json:"last_sync,omitempty"`
-	Installed     map[string]InstalledSkill    `json:"installed"`
+	SchemaVersion int                       `json:"schema_version"`
+	LastSync      time.Time                 `json:"last_sync,omitempty"`
+	Installed     map[string]InstalledSkill `json:"installed"`
 }
 
 // InstalledSkill records everything needed to detect updates and uninstall.
@@ -137,14 +137,13 @@ func Load() (*State, error) {
 }
 
 // parseAndMigrate handles migrations:
-// 1. Promote team.last_sync to top-level LastSync
-// 2. Rename targets → tools in each InstalledSkill
-// 3. Namespace bare keys using Registries[0] owner prefix
-// 4. Schema v2: convert to bare keys, populate Sources, set Revision
-// 5. Schema v3: drop all SkillSource entries (v2 stored commit SHAs in
-//    LastSHA and sometimes the upstream source repo in Registry — both are
-//    unreliable under the blob-SHA identity model). The next `scribe sync`
-//    repopulates Sources with correct blob SHAs and curating registry.
+//  1. Promote team.last_sync to top-level LastSync
+//  2. Rename targets → tools in each InstalledSkill
+//  3. Namespace bare keys using Registries[0] owner prefix
+//  4. Schema v2: convert to bare keys, populate Sources, set Revision
+//  5. Schema v3: bump the state schema while preserving existing Sources.
+//     Older LastSHA values may still be commit SHAs, but the next blob-SHA
+//     based sync can refresh them in place without forcing reinstall flows.
 func parseAndMigrate(data []byte) (*State, error) {
 	var legacy legacyState
 	if err := json.Unmarshal(data, &legacy); err != nil {
@@ -254,14 +253,10 @@ func parseAndMigrate(data []byte) (*State, error) {
 		}
 	}
 
-	// Migration 5: Schema v3 — drop all source entries to force re-resolve.
-	// v2 LastSHA values are commit SHAs, incompatible with the new blob-SHA
-	// comparison in sync.Diff. Run `scribe sync` afterwards to repopulate.
+	// Migration 5: Schema v3 — preserve existing entries and only bump the
+	// schema version. The next sync can refresh branch/package LastSHA values
+	// from commit SHAs to blob SHAs in place.
 	if s.SchemaVersion < 3 {
-		for name, skill := range s.Installed {
-			skill.Sources = nil
-			s.Installed[name] = skill
-		}
 		s.SchemaVersion = 3
 	}
 
