@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -565,5 +566,134 @@ func TestRowHasLocalModifications_UsesDiscoveredSkillState(t *testing.T) {
 
 	if !rowHasLocalModifications(row, &state.State{Installed: map[string]state.InstalledSkill{}}) {
 		t.Fatal("expected discovered Modified=true to trigger update choice")
+	}
+}
+
+func TestFormatRow_UnmanagedMarker(t *testing.T) {
+	m := listModel{width: 120}
+
+	unmanagedRow := listRow{
+		Name:    "bare-skill",
+		Group:   "Local (unmanaged)",
+		Managed: false,
+		Local:   &discovery.Skill{Name: "bare-skill", LocalPath: "/home/user/.claude/skills/bare-skill"},
+	}
+	managedRow := listRow{
+		Name:    "managed-skill",
+		Group:   "owner/repo",
+		Managed: true,
+		Local:   &discovery.Skill{Name: "managed-skill", LocalPath: "/home/user/.scribe/skills/managed-skill"},
+	}
+
+	nameCol := 20
+
+	unmanagedFormatted := m.formatRow(unmanagedRow, false, nameCol, true)
+	if !strings.Contains(unmanagedFormatted, "[unmanaged]") {
+		t.Errorf("unmanaged row should contain [unmanaged] marker, got: %q", unmanagedFormatted)
+	}
+
+	managedFormatted := m.formatRow(managedRow, false, nameCol, true)
+	if strings.Contains(managedFormatted, "[unmanaged]") {
+		t.Errorf("managed row should not contain [unmanaged] marker, got: %q", managedFormatted)
+	}
+}
+
+func TestRenderDetailPane_UnmanagedHint(t *testing.T) {
+	m := listModel{width: 80}
+
+	unmanagedRow := listRow{
+		Name:    "bare-skill",
+		Group:   "Local (unmanaged)",
+		Managed: false,
+		Local:   &discovery.Skill{Name: "bare-skill", LocalPath: "/home/user/.claude/skills/bare-skill"},
+	}
+
+	out := m.renderDetailPane(unmanagedRow, 60)
+
+	if !strings.Contains(out, "unmanaged") {
+		t.Errorf("detail pane for unmanaged skill should contain 'unmanaged', got:\n%s", out)
+	}
+	if !strings.Contains(out, "scribe adopt bare-skill") {
+		t.Errorf("detail pane for unmanaged skill should contain 'scribe adopt bare-skill', got:\n%s", out)
+	}
+}
+
+func TestRenderDetailPane_LocalOriginTag(t *testing.T) {
+	m := listModel{width: 80}
+
+	localRow := listRow{
+		Name:    "my-custom-skill",
+		Group:   "owner/repo",
+		Managed: true,
+		Origin:  state.OriginLocal,
+		Local:   &discovery.Skill{Name: "my-custom-skill", LocalPath: "/home/user/.scribe/skills/my-custom-skill"},
+	}
+
+	out := m.renderDetailPane(localRow, 60)
+
+	if !strings.Contains(out, "(local)") {
+		t.Errorf("detail pane for local-origin skill should contain '(local)', got:\n%s", out)
+	}
+	// No adopt hint for managed rows.
+	if strings.Contains(out, "scribe adopt") {
+		t.Errorf("detail pane for managed skill should not contain adopt hint, got:\n%s", out)
+	}
+}
+
+func TestRenderDetailPane_RegistryOriginNoLocalTag(t *testing.T) {
+	m := listModel{width: 80}
+
+	registryRow := listRow{
+		Name:    "registry-skill",
+		Group:   "owner/repo",
+		Managed: true,
+		Origin:  state.OriginRegistry,
+		Local:   &discovery.Skill{Name: "registry-skill", LocalPath: "/home/user/.scribe/skills/registry-skill"},
+	}
+
+	out := m.renderDetailPane(registryRow, 60)
+
+	if strings.Contains(out, "(local)") {
+		t.Errorf("detail pane for registry-origin skill should not contain '(local)', got:\n%s", out)
+	}
+}
+
+func TestBuildLocalRows_ManagedAndOriginPopulated(t *testing.T) {
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{
+			"adopted": {Origin: state.OriginLocal},
+			"synced":  {Origin: state.OriginRegistry},
+		},
+	}
+	skills := []discovery.Skill{
+		{Name: "adopted", Managed: true},
+		{Name: "synced", Managed: true},
+		{Name: "bare", Managed: false},
+	}
+
+	rows := buildLocalRows(skills, st)
+
+	byName := map[string]listRow{}
+	for _, r := range rows {
+		byName[r.Name] = r
+	}
+
+	if !byName["adopted"].Managed {
+		t.Error("adopted: Managed should be true")
+	}
+	if byName["adopted"].Origin != state.OriginLocal {
+		t.Errorf("adopted: Origin = %q, want %q", byName["adopted"].Origin, state.OriginLocal)
+	}
+	if !byName["synced"].Managed {
+		t.Error("synced: Managed should be true")
+	}
+	if byName["synced"].Origin != state.OriginRegistry {
+		t.Errorf("synced: Origin = %q, want %q", byName["synced"].Origin, state.OriginRegistry)
+	}
+	if byName["bare"].Managed {
+		t.Error("bare: Managed should be false")
+	}
+	if byName["bare"].Origin != state.OriginRegistry {
+		t.Errorf("bare: Origin = %q, want %q (zero value)", byName["bare"].Origin, state.OriginRegistry)
 	}
 }
