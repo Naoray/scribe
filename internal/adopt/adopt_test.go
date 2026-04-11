@@ -662,3 +662,118 @@ func TestApply_RealDirectoryAdoption(t *testing.T) {
 		t.Errorf("second run: expected no candidates/conflicts, got candidates=%d conflicts=%d", len(candidates2), len(conflicts2))
 	}
 }
+
+// TestApply_SkillWithSymlinkToSiblingDir exercises the real-world gstack layout
+// where a top-level entry like `connect-chrome` is a symlink pointing at a
+// sibling directory inside the same skill. Before the fix, WalkDir saw the
+// symlink as a non-directory entry and os.ReadFile followed it to the target
+// directory, producing "is a directory" and failing adoption of the whole skill.
+func TestApply_SkillWithSymlinkToSiblingDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	claudeSkillsDir := filepath.Join(home, ".claude", "skills")
+	skillDir := filepath.Join(claudeSkillsDir, "pkg")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# pkg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Real sibling directory with its own content.
+	realDir := filepath.Join(skillDir, "real-tool")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "tool.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alias symlink pointing at the sibling — exact shape of gstack/connect-chrome.
+	alias := filepath.Join(skillDir, "alias")
+	if err := os.Symlink("real-tool", alias); err != nil {
+		t.Fatal(err)
+	}
+
+	st := emptyState()
+	adopter := &adopt.Adopter{
+		State: st,
+		Tools: []tools.Tool{tools.ClaudeTool{}},
+		Emit:  func(any) {},
+	}
+
+	candidates, _, err := adopt.FindCandidates(st, adoptionCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+
+	result := adopter.Apply(candidates)
+	if len(result.Failed) != 0 {
+		t.Fatalf("expected no failures, got: %v", result.Failed)
+	}
+	if len(result.Adopted) != 1 || result.Adopted[0] != "pkg" {
+		t.Fatalf("adopted = %v, want [pkg]", result.Adopted)
+	}
+
+	// Canonical store should contain the sibling dir's content (visited on its
+	// own walk path) but NOT duplicate it under the alias name.
+	storeSkillDir := filepath.Join(home, ".scribe", "skills", "pkg")
+	if _, err := os.Stat(filepath.Join(storeSkillDir, "real-tool", "tool.sh")); err != nil {
+		t.Errorf("real-tool/tool.sh missing from canonical store: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(storeSkillDir, "alias")); err == nil {
+		t.Errorf("symlink alias should not be materialized in canonical store")
+	}
+}
+
+// TestApply_SkillWithSymlinkToFile verifies symlinks whose target is a file
+// are dereferenced and written to the canonical store under the link's name.
+func TestApply_SkillWithSymlinkToFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	claudeSkillsDir := filepath.Join(home, ".claude", "skills")
+	skillDir := filepath.Join(claudeSkillsDir, "pkg")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# pkg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	realFile := filepath.Join(skillDir, "real.md")
+	if err := os.WriteFile(realFile, []byte("real content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.md", filepath.Join(skillDir, "alias.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	st := emptyState()
+	adopter := &adopt.Adopter{
+		State: st,
+		Tools: []tools.Tool{tools.ClaudeTool{}},
+		Emit:  func(any) {},
+	}
+
+	candidates, _, err := adopt.FindCandidates(st, adoptionCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := adopter.Apply(candidates)
+	if len(result.Failed) != 0 {
+		t.Fatalf("expected no failures, got: %v", result.Failed)
+	}
+
+	storeSkillDir := filepath.Join(home, ".scribe", "skills", "pkg")
+	content, err := os.ReadFile(filepath.Join(storeSkillDir, "alias.md"))
+	if err != nil {
+		t.Fatalf("alias.md missing from canonical store: %v", err)
+	}
+	if string(content) != "real content" {
+		t.Errorf("alias.md content = %q, want %q", content, "real content")
+	}
+}
