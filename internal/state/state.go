@@ -449,6 +449,11 @@ func normalizeBranchSourceSHAs(s *State) {
 
 func seedManagedPaths(s *State) {
 	for name, skill := range s.Installed {
+		if skill.Type == "package" {
+			// Packages own their own install lifecycle and their Paths
+			// (if any) are command-output, not tool projections.
+			continue
+		}
 		if len(skill.ManagedPaths) == 0 && len(skill.Paths) > 0 {
 			skill.ManagedPaths = append([]string(nil), skill.Paths...)
 			s.Installed[name] = skill

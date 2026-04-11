@@ -82,7 +82,9 @@ func newSkillRepairCommand() *cobra.Command {
 	cmd.Flags().String("tool", "", "Tool projection to repair")
 	cmd.Flags().String("from", "managed", "Conflict winner: managed or tool")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	cmd.MarkFlagRequired("tool")
+	if err := cmd.MarkFlagRequired("tool"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 
@@ -334,7 +336,7 @@ func runSkillRepair(cmd *cobra.Command, args []string) error {
 	canonicalDir := filepath.Join(mustStoreDir(), name)
 
 	if source == "tool" {
-		if err := reconcile.CopyProjectionToCanonical(path, toolName, canonicalDir); err != nil {
+		if err := reconcile.CopyProjectionToCanonical(tool, path, canonicalDir); err != nil {
 			return err
 		}
 		skillMD, err := os.ReadFile(filepath.Join(canonicalDir, "SKILL.md"))
@@ -371,7 +373,7 @@ func runSkillRepair(cmd *cobra.Command, args []string) error {
 	}
 	sort.Strings(managedPaths)
 
-	filteredConflicts := installed.Conflicts[:0]
+	filteredConflicts := make([]state.ProjectionConflict, 0, len(installed.Conflicts))
 	for _, conflict := range installed.Conflicts {
 		if conflict.Tool == toolName && conflict.Path == path {
 			continue

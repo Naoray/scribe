@@ -29,9 +29,9 @@ func SyncSteps() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"Adopt", StepAdopt},
-		{"ReconcileSystem", StepReconcileSystem},
+		{"ReconcilePre", StepReconcileSystem},
 		{"SyncSkills", StepSyncSkills},
-		{"ReconcileSystem", StepReconcileSystem},
+		{"ReconcilePost", StepReconcileSystem},
 	}
 }
 
@@ -41,7 +41,7 @@ func SyncTail() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepSyncSkills},
-		{"ReconcileSystem", StepReconcileSystem},
+		{"ReconcilePost", StepReconcileSystem},
 	}
 }
 

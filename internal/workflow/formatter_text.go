@@ -77,7 +77,7 @@ func (f *textFormatter) OnReconcileConflict(name string, conflict state.Projecti
 		tool = "tool"
 	}
 	fmt.Fprintf(f.errOut, "conflict: %s in %s differs from managed copy\n", name, tool)
-	fmt.Fprintf(f.errOut, "run `scribe skill repair %s --tool %s` to resolve\n", name, tool)
+	fmt.Fprintf(f.errOut, "run `scribe skill repair %s --tool %s --from managed|tool` to resolve\n", name, tool)
 }
 
 func (f *textFormatter) OnReconcileComplete(msg sync.ReconcileCompleteMsg) {
