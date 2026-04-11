@@ -126,6 +126,12 @@ func findCandidates(st *state.State, cfg config.AdoptionConfig) ([]Candidate, []
 				continue
 			}
 
+			// Skip package sub-skills: skills whose SKILL.md symlinks into a
+			// sibling directory are part of a package and not independently adoptable.
+			if isPackageSubSkill(entryPath, root) {
+				continue
+			}
+
 			// skillDir must lie within an adoption path (prevent escaping via symlink).
 			if !withinAdoptionPath(skillDir, adoptPaths) {
 				continue
@@ -173,6 +179,37 @@ func findCandidates(st *state.State, cfg config.AdoptionConfig) ([]Candidate, []
 	}
 
 	return candidates, conflicts, nil
+}
+
+// isPackageSubSkill reports whether the skill at entryPath is a sub-skill of a
+// package. A sub-skill has its SKILL.md as a symlink pointing into a sibling
+// directory within the same scanBase (e.g. browse/SKILL.md → ../gstack/browse/SKILL.md).
+// Such skills are not independently adoptable — they move as a unit with their package.
+func isPackageSubSkill(entryPath, scanBase string) bool {
+	skillMD := filepath.Join(entryPath, "SKILL.md")
+	target, err := os.Readlink(skillMD)
+	if err != nil {
+		return false // not a symlink
+	}
+
+	// Resolve to absolute path.
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(entryPath, target)
+	}
+	target = filepath.Clean(target)
+
+	// Check if the target is inside a sibling dir in the same scanBase.
+	// Pattern: <scanBase>/<package>/<subdir>/SKILL.md
+	rel, err := filepath.Rel(scanBase, target)
+	if err != nil {
+		return false
+	}
+	parts := strings.SplitN(rel, string(filepath.Separator), 2)
+	if len(parts) < 2 {
+		return false // target is directly in scanBase, not a sub-skill
+	}
+	pkg := parts[0]
+	return pkg != filepath.Base(entryPath) // points into a different sibling dir
 }
 
 // resolveSkillDir resolves an entry path to its real skill directory.

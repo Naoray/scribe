@@ -239,6 +239,62 @@ func TestFindCandidates_ExtraConfigPath(t *testing.T) {
 	}
 }
 
+func TestFindCandidates_SkipsPackageSubSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	claudeSkills := filepath.Join(home, ".claude", "skills")
+
+	// Create parent package skill: gstack/browse/SKILL.md (real file).
+	pkgSkillDir := filepath.Join(claudeSkills, "gstack", "browse")
+	if err := os.MkdirAll(pkgSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgSkillDir, "SKILL.md"), []byte("# gstack/browse"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create sub-skill entry: browse/SKILL.md → ../gstack/browse/SKILL.md (symlink).
+	subSkillDir := filepath.Join(claudeSkills, "browse")
+	if err := os.MkdirAll(subSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink target is relative to the sub-skill dir.
+	symlinkPath := filepath.Join(subSkillDir, "SKILL.md")
+	symlinkTarget := filepath.Join("..", "gstack", "browse", "SKILL.md")
+	if err := os.Symlink(symlinkTarget, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Also add a normal standalone skill to confirm it still appears.
+	writeSkill(t, claudeSkills, "standalone", "# standalone\ncontent")
+
+	st := emptyState()
+	candidates, conflicts, err := adopt.FindCandidates(st, adoptionCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("expected 0 conflicts, got %d", len(conflicts))
+	}
+
+	for _, c := range candidates {
+		if c.Name == "browse" {
+			t.Errorf("browse is a package sub-skill and must not appear in candidates")
+		}
+	}
+
+	found := false
+	for _, c := range candidates {
+		if c.Name == "standalone" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("standalone skill should still appear as a candidate")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // TestApply — happy path
 // ---------------------------------------------------------------------------
