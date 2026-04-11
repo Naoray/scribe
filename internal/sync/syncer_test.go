@@ -62,12 +62,20 @@ func TestApply_PackageMissing_Approved(t *testing.T) {
 		t.Errorf("wrong command: %q", executor.commands[0])
 	}
 
-	installed, ok := st.Installed["test-repo/superpowers"]
+	// Bare name in state (flat storage model).
+	installed, ok := st.Installed["superpowers"]
 	if !ok {
 		t.Fatal("superpowers not in state after install")
 	}
 	if installed.Type != "package" {
 		t.Errorf("type: got %q, want %q", installed.Type, "package")
+	}
+	// Verify source tracking.
+	if len(installed.Sources) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(installed.Sources))
+	}
+	if installed.Sources[0].Registry != "test/repo" {
+		t.Errorf("source registry: got %q, want %q", installed.Sources[0].Registry, "test/repo")
 	}
 }
 
@@ -161,7 +169,7 @@ func TestApply_PackageInstall_Error(t *testing.T) {
 		t.Error("expected PackageErrorMsg event")
 	}
 
-	if _, ok := st.Installed["test-repo/broken-pkg"]; ok {
+	if _, ok := st.Installed["broken-pkg"]; ok {
 		t.Error("broken package should not be in state")
 	}
 }
@@ -183,14 +191,17 @@ func TestApply_PackageOutdated_WithUpdateCmd(t *testing.T) {
 	hash := sync.CommandHash(installCmd, updateCmd, nil, nil)
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"test-repo/superpowers": {
-			Type:       "package",
-			Source:     "github:obra/superpowers@main",
+		"superpowers": {
+			Type: "package",
+			Sources: []state.SkillSource{{
+				Registry: "test/repo",
+				Ref:      "main",
+				LastSHA:  "oldsha",
+			}},
 			InstallCmd: installCmd,
 			UpdateCmd:  updateCmd,
 			CmdHash:    hash,
 			Approval:   "approved",
-			CommitSHA:  "oldsha",
 		},
 	}}
 
@@ -234,11 +245,14 @@ func TestApply_PackageOutdated_NoUpdateCmd(t *testing.T) {
 	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"test-repo/minimal-pkg": {
-			Type:      "package",
-			Source:    "github:example/minimal@main",
-			Approval:  "approved",
-			CommitSHA: "oldsha",
+		"minimal-pkg": {
+			Type: "package",
+			Sources: []state.SkillSource{{
+				Registry: "test/repo",
+				Ref:      "main",
+				LastSHA:  "oldsha",
+			}},
+			Approval: "approved",
 		},
 	}}
 

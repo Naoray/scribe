@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,14 +16,25 @@ func SlugifyRegistry(repo string) string {
 	return strings.ReplaceAll(repo, "/", "-")
 }
 
-// WriteToStore writes all skill files to ~/.scribe/skills/<registrySlug>/<name>/.
+// reservedNames are skill names that conflict with internal paths or OS artifacts.
+var reservedNames = map[string]bool{
+	"versions":  true,
+	".git":      true,
+	".DS_Store": true,
+}
+
+// WriteToStore writes all skill files to ~/.scribe/skills/<skillName>/.
 // Returns the canonical directory path.
 // Called once per skill before any target links are created.
-func WriteToStore(registrySlug, skillName string, files []SkillFile) (string, error) {
-	// Validate inputs don't escape the store directory.
-	if strings.Contains(registrySlug, "..") || filepath.IsAbs(registrySlug) {
-		return "", fmt.Errorf("invalid registry slug %q: contains path traversal", registrySlug)
+// After writing, if SKILL.md is among the files, a .scribe-base.md copy is
+// created alongside it to serve as the merge base for 3-way merge on updates.
+func WriteToStore(skillName string, files []SkillFile) (string, error) {
+	// Block reserved names.
+	if reservedNames[skillName] {
+		return "", fmt.Errorf("invalid skill name %q: reserved name", skillName)
 	}
+
+	// Validate skillName doesn't escape the store directory.
 	if strings.Contains(skillName, "..") || filepath.IsAbs(skillName) {
 		return "", fmt.Errorf("invalid skill name %q: contains path traversal", skillName)
 	}
@@ -31,15 +44,29 @@ func WriteToStore(registrySlug, skillName string, files []SkillFile) (string, er
 		return "", err
 	}
 
-	skillDir := filepath.Join(base, registrySlug, skillName)
+	skillDir := filepath.Join(base, skillName)
 
-	// Clean slate on update — remove existing before writing.
-	if err := os.RemoveAll(skillDir); err != nil {
-		return "", fmt.Errorf("clear store for %s/%s: %w", registrySlug, skillName, err)
+	// Clean slate on update, but preserve version snapshots.
+	// SnapshotVersion writes to versions/ before WriteToStore runs during sync,
+	// so a blanket RemoveAll would destroy the snapshot the syncer just created.
+	preserved := map[string]bool{"versions": true}
+	entries, err := os.ReadDir(skillDir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("read store for %s: %w", skillName, err)
+	}
+	for _, entry := range entries {
+		if preserved[entry.Name()] {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(skillDir, entry.Name())); err != nil {
+			return "", fmt.Errorf("clear %s: %w", entry.Name(), err)
+		}
 	}
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		return "", fmt.Errorf("create store dir: %w", err)
 	}
+
+	var skillMDContent []byte
 
 	for _, f := range files {
 		// Validate file path doesn't escape the skill directory.
@@ -52,6 +79,17 @@ func WriteToStore(registrySlug, skillName string, files []SkillFile) (string, er
 		}
 		if err := os.WriteFile(dest, f.Content, 0o644); err != nil {
 			return "", fmt.Errorf("write %s: %w", f.Path, err)
+		}
+		if f.Path == "SKILL.md" {
+			skillMDContent = f.Content
+		}
+	}
+
+	// Write .scribe-base.md as a copy of SKILL.md for 3-way merge.
+	if skillMDContent != nil {
+		basePath := filepath.Join(skillDir, ".scribe-base.md")
+		if err := os.WriteFile(basePath, skillMDContent, 0o644); err != nil {
+			return "", fmt.Errorf("write .scribe-base.md: %w", err)
 		}
 	}
 

@@ -40,6 +40,7 @@ type Config struct {
 	Registries []RegistryConfig `yaml:"registries,omitempty"`
 	Token      string           `yaml:"token,omitempty"`
 	Tools      []ToolConfig     `yaml:"tools,omitempty"`
+	Editor     string           `yaml:"editor,omitempty"`
 }
 
 // TeamRepos returns the list of enabled registry repos.

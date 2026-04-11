@@ -17,9 +17,9 @@ func TestTextFormatter_SingleRegistry(t *testing.T) {
 	fmtr := workflow.NewFormatterWithWriters(false, false, &out, &errOut)
 
 	fmtr.OnRegistryStart("acme/skills")
-	fmtr.OnSkillInstalled("linter", "v1.0.0", false)
+	fmtr.OnSkillInstalled("linter", false)
 	fmtr.OnSkillSkipped("formatter", sync.SkillStatus{
-		Installed: &state.InstalledSkill{Version: "v2.0.0"},
+		Installed: &state.InstalledSkill{Revision: 1},
 	})
 	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1, Skipped: 1})
 	fmtr.Flush()
@@ -43,11 +43,11 @@ func TestTextFormatter_MultiRegistry(t *testing.T) {
 	fmtr := workflow.NewFormatterWithWriters(false, true, &out, &errOut)
 
 	fmtr.OnRegistryStart("acme/skills")
-	fmtr.OnSkillInstalled("linter", "v1.0.0", false)
+	fmtr.OnSkillInstalled("linter", false)
 	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1})
 
 	fmtr.OnRegistryStart("acme/tools")
-	fmtr.OnSkillInstalled("debugger", "v2.0.0", true)
+	fmtr.OnSkillInstalled("debugger", true)
 	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Updated: 1})
 
 	fmtr.Flush()
@@ -71,10 +71,10 @@ func TestJSONFormatter(t *testing.T) {
 	fmtr := workflow.NewFormatterWithWriters(true, false, &out, &bytes.Buffer{})
 
 	fmtr.OnRegistryStart("acme/skills")
-	fmtr.OnSkillInstalled("linter", "v1.0.0", false)
+	fmtr.OnSkillInstalled("linter", false)
 	fmtr.OnSkillSkipped("formatter", sync.SkillStatus{
 		Status:    sync.StatusCurrent,
-		Installed: &state.InstalledSkill{Version: "v2.0.0"},
+		Installed: &state.InstalledSkill{Revision: 2},
 	})
 	fmtr.OnSkillError("broken", fmt.Errorf("download failed"))
 	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1, Skipped: 1, Failed: 1})

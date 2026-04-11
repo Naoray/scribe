@@ -271,9 +271,9 @@ func autoSync(ctx context.Context, targetRepo string, st *state.State, client *g
 			case sync.SkillInstalledMsg:
 				verb := "installed"
 				if m.Updated {
-					verb = "updated to"
+					verb = "updated"
 				}
-				fmt.Printf("  %-20s %s %s\n", m.Name, verb, m.Version)
+				fmt.Printf("  %-20s %s\n", m.Name, verb)
 			case sync.SkillErrorMsg:
 				fmt.Fprintf(os.Stderr, "  %-20s error: %v\n", m.Name, m.Err)
 			}

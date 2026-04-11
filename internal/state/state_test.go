@@ -21,6 +21,9 @@ func TestLoadMissing(t *testing.T) {
 	if len(s.Installed) != 0 {
 		t.Errorf("expected empty Installed, got %d entries", len(s.Installed))
 	}
+	if s.SchemaVersion != 2 {
+		t.Errorf("expected SchemaVersion=2, got %d", s.SchemaVersion)
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -28,11 +31,15 @@ func TestSaveAndLoad(t *testing.T) {
 
 	s, _ := state.Load()
 	s.RecordSync()
-	s.RecordInstall("garrytan/gstack", state.InstalledSkill{
-		Version: "v0.12.9.0",
-		Source:  "github:garrytan/gstack@v0.12.9.0",
-		Tools:   []string{"claude"},
-		Paths:   []string{"/Users/krishan/.claude/skills/gstack/"},
+	s.RecordInstall("gstack", state.InstalledSkill{
+		Revision:      1,
+		InstalledHash: "abc123def456",
+		Sources: []state.SkillSource{{
+			Registry: "garrytan/gstack",
+			Ref:      "v0.12.9.0",
+		}},
+		Tools: []string{"claude"},
+		Paths: []string{"/Users/krishan/.claude/skills/gstack/"},
 	})
 
 	if err := s.Save(); err != nil {
@@ -47,13 +54,22 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.LastSync.IsZero() {
 		t.Error("expected LastSync to be set")
 	}
+	if loaded.SchemaVersion != 2 {
+		t.Errorf("expected SchemaVersion=2, got %d", loaded.SchemaVersion)
+	}
 
-	skill, ok := loaded.Installed["garrytan/gstack"]
+	skill, ok := loaded.Installed["gstack"]
 	if !ok {
 		t.Fatal("gstack not found in Installed")
 	}
-	if skill.Version != "v0.12.9.0" {
-		t.Errorf("version: got %q", skill.Version)
+	if skill.Revision != 1 {
+		t.Errorf("revision: got %d", skill.Revision)
+	}
+	if skill.InstalledHash != "abc123def456" {
+		t.Errorf("installed_hash: got %q", skill.InstalledHash)
+	}
+	if len(skill.Sources) != 1 || skill.Sources[0].Registry != "garrytan/gstack" {
+		t.Errorf("sources: got %v", skill.Sources)
 	}
 	if skill.InstalledAt.IsZero() {
 		t.Error("expected InstalledAt to be set")
@@ -77,17 +93,34 @@ func TestAtomicWrite(t *testing.T) {
 }
 
 func TestDisplayVersion(t *testing.T) {
-	tag := state.InstalledSkill{Version: "v1.0.0"}
-	if tag.DisplayVersion() != "v1.0.0" {
-		t.Errorf("tag: got %q", tag.DisplayVersion())
+	tests := []struct {
+		name     string
+		skill    state.InstalledSkill
+		expected string
+	}{
+		{
+			name:     "revision 1",
+			skill:    state.InstalledSkill{Revision: 1},
+			expected: "rev 1",
+		},
+		{
+			name:     "revision 5",
+			skill:    state.InstalledSkill{Revision: 5},
+			expected: "rev 5",
+		},
+		{
+			name:     "revision 0",
+			skill:    state.InstalledSkill{Revision: 0},
+			expected: "rev 0",
+		},
 	}
-
-	branch := state.InstalledSkill{
-		Version:   "main",
-		CommitSHA: "a3f2c1b9e4d5f678",
-	}
-	if branch.DisplayVersion() != "main@a3f2c1b" {
-		t.Errorf("branch: got %q", branch.DisplayVersion())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.skill.DisplayVersion()
+			if got != tt.expected {
+				t.Errorf("DisplayVersion(): got %q, want %q", got, tt.expected)
+			}
+		})
 	}
 }
 
@@ -95,10 +128,13 @@ func TestToolsRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	s, _ := state.Load()
-	s.RecordInstall("org/deploy", state.InstalledSkill{
-		Version: "v1.0.0",
-		Source:  "github:org/deploy@v1.0.0",
-		Tools:   []string{"claude"},
+	s.RecordInstall("deploy", state.InstalledSkill{
+		Revision: 1,
+		Sources: []state.SkillSource{{
+			Registry: "org/deploy",
+			Ref:      "v1.0.0",
+		}},
+		Tools: []string{"claude"},
 	})
 
 	if err := s.Save(); err != nil {
@@ -106,7 +142,7 @@ func TestToolsRoundTrip(t *testing.T) {
 	}
 
 	loaded, _ := state.Load()
-	skill := loaded.Installed["org/deploy"]
+	skill := loaded.Installed["deploy"]
 	if len(skill.Tools) != 1 || skill.Tools[0] != "claude" {
 		t.Errorf("Tools: got %v", skill.Tools)
 	}
@@ -120,10 +156,14 @@ func TestPackageFieldsRoundTrip(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	st.RecordInstall("garrytan/gstack", state.InstalledSkill{
-		Version:    "main",
-		CommitSHA:  "abc123",
-		Source:     "github:garrytan/gstack@main",
+	st.RecordInstall("gstack", state.InstalledSkill{
+		Revision:      3,
+		InstalledHash: "deadbeefcafe",
+		Sources: []state.SkillSource{{
+			Registry: "garrytan/gstack",
+			Ref:      "main",
+			LastSHA:  "abc123",
+		}},
 		Tools:      []string{"claude"},
 		Paths:      []string{"/home/user/.claude/skills/gstack"},
 		Type:       "package",
@@ -142,7 +182,7 @@ func TestPackageFieldsRoundTrip(t *testing.T) {
 		t.Fatalf("Load after save: %v", err)
 	}
 
-	got := st2.Installed["garrytan/gstack"]
+	got := st2.Installed["gstack"]
 	if got.Type != "package" {
 		t.Errorf("Type: got %q, want package", got.Type)
 	}
@@ -158,19 +198,25 @@ func TestPackageFieldsRoundTrip(t *testing.T) {
 	if got.Approval != "approved" {
 		t.Errorf("Approval: got %q", got.Approval)
 	}
+	if got.Revision != 3 {
+		t.Errorf("Revision: got %d, want 3", got.Revision)
+	}
+	if got.InstalledHash != "deadbeefcafe" {
+		t.Errorf("InstalledHash: got %q", got.InstalledHash)
+	}
 }
 
 func TestRemove(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	s, _ := state.Load()
-	s.RecordInstall("garrytan/gstack", state.InstalledSkill{
-		Version:     "v0.12.9.0",
+	s.RecordInstall("gstack", state.InstalledSkill{
+		Revision:    1,
 		InstalledAt: time.Now(),
 	})
-	s.Remove("garrytan/gstack")
+	s.Remove("gstack")
 
-	if _, ok := s.Installed["garrytan/gstack"]; ok {
+	if _, ok := s.Installed["gstack"]; ok {
 		t.Error("expected gstack to be removed")
 	}
 }
@@ -181,7 +227,7 @@ func TestMigrationNamespacesKeys(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Write a legacy state.json with bare keys and Registries field.
+	// Write a legacy state.json with bare keys and Registries field (pre-v2).
 	dir := filepath.Join(home, ".scribe")
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
@@ -203,18 +249,37 @@ func TestMigrationNamespacesKeys(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Bare key "gstack" should be namespaced to "ArtistfyHQ-team-skills/gstack" using slugified Registries[0].
-	if _, ok := s.Installed["ArtistfyHQ-team-skills/gstack"]; !ok {
-		t.Errorf("expected namespaced key ArtistfyHQ-team-skills/gstack, got keys: %v", installedKeys(s))
+	// Migration 4 should convert qualified keys to bare names.
+	// "gstack" → namespaced to "ArtistfyHQ-team-skills/gstack" by migration 3 → bare "gstack" by migration 4.
+	if _, ok := s.Installed["gstack"]; !ok {
+		t.Errorf("expected bare key 'gstack', got keys: %v", installedKeys(s))
 	}
-	if _, ok := s.Installed["gstack"]; ok {
-		t.Error("bare key 'gstack' should have been removed after namespacing")
+
+	// Sources should be populated from the Source field.
+	skill := s.Installed["gstack"]
+	if len(skill.Sources) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(skill.Sources))
+	}
+	if skill.Sources[0].Registry != "garrytan/gstack" {
+		t.Errorf("expected registry garrytan/gstack, got %q", skill.Sources[0].Registry)
+	}
+	if skill.Sources[0].Ref != "v0.12.9.0" {
+		t.Errorf("expected ref v0.12.9.0, got %q", skill.Sources[0].Ref)
 	}
 
 	// Targets should be migrated to Tools.
-	skill := s.Installed["ArtistfyHQ-team-skills/gstack"]
 	if len(skill.Tools) != 1 || skill.Tools[0] != "claude" {
 		t.Errorf("expected Tools=[claude], got %v", skill.Tools)
+	}
+
+	// Revision should be set to 1.
+	if skill.Revision != 1 {
+		t.Errorf("expected Revision=1, got %d", skill.Revision)
+	}
+
+	// SchemaVersion should be 2.
+	if s.SchemaVersion != 2 {
+		t.Errorf("expected SchemaVersion=2, got %d", s.SchemaVersion)
 	}
 }
 
@@ -243,8 +308,8 @@ func TestStateMigrateTargetsToTools(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Bare key "deploy" with no registries -> "local/deploy"
-	skill := s.Installed["local/deploy"]
+	// Bare key "deploy" → "local/deploy" (migration 3) → "deploy" (migration 4 strips prefix)
+	skill := s.Installed["deploy"]
 	if len(skill.Tools) != 2 {
 		t.Fatalf("expected 2 tools after migration, got %d", len(skill.Tools))
 	}
@@ -311,17 +376,17 @@ func TestStateNamespaceKeys(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Bare keys should be namespaced using slugified Registries[0].
-	if _, ok := s.Installed["ArtistfyHQ-team-skills/deploy"]; !ok {
-		t.Errorf("expected namespaced key ArtistfyHQ-team-skills/deploy, got keys: %v", installedKeys(s))
+	// Migration 4 strips namespace prefixes to bare keys.
+	if _, ok := s.Installed["deploy"]; !ok {
+		t.Errorf("expected bare key 'deploy', got keys: %v", installedKeys(s))
 	}
-	if _, ok := s.Installed["ArtistfyHQ-team-skills/recap"]; !ok {
-		t.Errorf("expected namespaced key ArtistfyHQ-team-skills/recap, got keys: %v", installedKeys(s))
+	if _, ok := s.Installed["recap"]; !ok {
+		t.Errorf("expected bare key 'recap', got keys: %v", installedKeys(s))
 	}
 
-	// Bare keys should be gone.
-	if _, ok := s.Installed["deploy"]; ok {
-		t.Error("bare key 'deploy' should have been removed after namespacing")
+	// Old namespaced keys should be gone.
+	if _, ok := s.Installed["ArtistfyHQ-team-skills/deploy"]; ok {
+		t.Error("namespaced key should have been converted to bare key")
 	}
 }
 
@@ -349,9 +414,9 @@ func TestStateNamespaceKeysNoRegistries(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// No registries -- should namespace as "local/<name>".
-	if _, ok := s.Installed["local/my-local-skill"]; !ok {
-		t.Errorf("expected namespaced key local/my-local-skill, got keys: %v", installedKeys(s))
+	// Migration 4 strips "local/" prefix to bare key.
+	if _, ok := s.Installed["my-local-skill"]; !ok {
+		t.Errorf("expected bare key 'my-local-skill', got keys: %v", installedKeys(s))
 	}
 }
 
@@ -361,13 +426,15 @@ func TestStateMigrateIdempotent(t *testing.T) {
 
 	dir := filepath.Join(home, ".scribe")
 	os.MkdirAll(dir, 0o755)
-	// Already-migrated state: tools field, namespaced keys, top-level last_sync.
+	// Already-migrated v2 state: bare keys, schema_version=2, new fields.
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"schema_version": 2,
 		"last_sync": "2026-03-15T10:00:00Z",
 		"installed": {
-			"ArtistfyHQ-team-skills/deploy": {
-				"version": "v1.0.0",
-				"source": "github:ArtistfyHQ/team-skills@v1.0.0",
+			"deploy": {
+				"revision": 3,
+				"installed_hash": "abc123",
+				"sources": [{"registry": "ArtistfyHQ/team-skills", "ref": "v1.0.0", "last_sha": "def456", "last_synced": "2026-03-15T10:00:00Z"}],
 				"installed_at": "2026-03-10T12:00:00Z",
 				"tools": ["claude"],
 				"paths": []
@@ -380,12 +447,231 @@ func TestStateMigrateIdempotent(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Should not double-namespace.
-	if _, ok := s.Installed["ArtistfyHQ-team-skills/deploy"]; !ok {
-		t.Errorf("expected key to remain ArtistfyHQ-team-skills/deploy, got keys: %v", installedKeys(s))
+	// Should pass through unchanged.
+	if _, ok := s.Installed["deploy"]; !ok {
+		t.Errorf("expected key to remain 'deploy', got keys: %v", installedKeys(s))
 	}
 	if len(s.Installed) != 1 {
 		t.Errorf("expected 1 installed skill, got %d", len(s.Installed))
+	}
+
+	skill := s.Installed["deploy"]
+	if skill.Revision != 3 {
+		t.Errorf("expected Revision=3, got %d", skill.Revision)
+	}
+	if skill.InstalledHash != "abc123" {
+		t.Errorf("expected InstalledHash=abc123, got %q", skill.InstalledHash)
+	}
+	if len(skill.Sources) != 1 || skill.Sources[0].Registry != "ArtistfyHQ/team-skills" {
+		t.Errorf("expected sources to pass through, got %v", skill.Sources)
+	}
+	if s.SchemaVersion != 2 {
+		t.Errorf("expected SchemaVersion=2, got %d", s.SchemaVersion)
+	}
+}
+
+func TestMigrationSchemaV2(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	// Full v1 state with qualified keys, old fields.
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"last_sync": "2026-03-15T10:00:00Z",
+		"installed": {
+			"ArtistfyHQ-team-skills/deploy": {
+				"version": "v1.0.0",
+				"commit_sha": "abc123def456789",
+				"source": "github:ArtistfyHQ/team-skills@v1.0.0",
+				"installed_at": "2026-03-10T12:00:00Z",
+				"tools": ["claude"],
+				"paths": ["/test/path"]
+			},
+			"local/my-tool": {
+				"version": "v2.0.0",
+				"source": "",
+				"installed_at": "2026-03-10T12:00:00Z",
+				"tools": ["cursor"],
+				"paths": []
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if s.SchemaVersion != 2 {
+		t.Errorf("expected SchemaVersion=2, got %d", s.SchemaVersion)
+	}
+
+	// Qualified key should become bare.
+	if _, ok := s.Installed["deploy"]; !ok {
+		t.Errorf("expected bare key 'deploy', got keys: %v", installedKeys(s))
+	}
+	if _, ok := s.Installed["ArtistfyHQ-team-skills/deploy"]; ok {
+		t.Error("qualified key should have been converted to bare")
+	}
+
+	// "local/my-tool" should become "my-tool"
+	if _, ok := s.Installed["my-tool"]; !ok {
+		t.Errorf("expected bare key 'my-tool', got keys: %v", installedKeys(s))
+	}
+
+	// Check Sources populated from Source string.
+	deploy := s.Installed["deploy"]
+	if len(deploy.Sources) != 1 {
+		t.Fatalf("expected 1 source for deploy, got %d", len(deploy.Sources))
+	}
+	if deploy.Sources[0].Registry != "ArtistfyHQ/team-skills" {
+		t.Errorf("registry: got %q", deploy.Sources[0].Registry)
+	}
+	if deploy.Sources[0].Ref != "v1.0.0" {
+		t.Errorf("ref: got %q", deploy.Sources[0].Ref)
+	}
+	if deploy.Revision != 1 {
+		t.Errorf("expected Revision=1, got %d", deploy.Revision)
+	}
+
+	// Local skill should have no sources (empty source string).
+	myTool := s.Installed["my-tool"]
+	if len(myTool.Sources) != 0 {
+		t.Errorf("expected no sources for my-tool, got %v", myTool.Sources)
+	}
+	if myTool.Revision != 1 {
+		t.Errorf("expected Revision=1, got %d", myTool.Revision)
+	}
+}
+
+func TestMigrationIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"schema_version": 2,
+		"last_sync": "2026-04-01T00:00:00Z",
+		"installed": {
+			"gstack": {
+				"revision": 5,
+				"installed_hash": "sha256hash",
+				"sources": [{"registry": "garrytan/gstack", "ref": "main", "last_sha": "commit123", "last_synced": "2026-04-01T00:00:00Z"}],
+				"installed_at": "2026-03-01T00:00:00Z",
+				"tools": ["claude"],
+				"paths": ["/test"]
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if s.SchemaVersion != 2 {
+		t.Errorf("SchemaVersion: got %d, want 2", s.SchemaVersion)
+	}
+	skill := s.Installed["gstack"]
+	if skill.Revision != 5 {
+		t.Errorf("Revision: got %d, want 5", skill.Revision)
+	}
+	if skill.InstalledHash != "sha256hash" {
+		t.Errorf("InstalledHash: got %q", skill.InstalledHash)
+	}
+	if len(skill.Sources) != 1 || skill.Sources[0].LastSHA != "commit123" {
+		t.Errorf("Sources not preserved: %v", skill.Sources)
+	}
+}
+
+func TestParseSourceString(t *testing.T) {
+	// parseSourceString is unexported, so test via migration behavior.
+	// We test the actual function indirectly through the migration.
+	// For direct testing, we'd need to export it or use a test helper.
+	// Instead, verify via a migration that parses the source string.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+
+	tests := []struct {
+		name         string
+		source       string
+		wantRegistry string
+		wantRef      string
+	}{
+		{
+			name:         "standard github source",
+			source:       "github:owner/repo@main",
+			wantRegistry: "owner/repo",
+			wantRef:      "main",
+		},
+		{
+			name:         "tag ref",
+			source:       "github:ArtistfyHQ/team-skills@v1.2.0",
+			wantRegistry: "ArtistfyHQ/team-skills",
+			wantRef:      "v1.2.0",
+		},
+		{
+			name:         "empty source",
+			source:       "",
+			wantRegistry: "",
+			wantRef:      "",
+		},
+		{
+			name:         "no github prefix",
+			source:       "owner/repo@main",
+			wantRegistry: "",
+			wantRef:      "",
+		},
+		{
+			name:         "no ref",
+			source:       "github:owner/repo",
+			wantRegistry: "",
+			wantRef:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Write a state file with this source, trigger migration.
+			os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+				"installed": {
+					"test-skill": {
+						"version": "v1.0.0",
+						"source": "`+tt.source+`",
+						"installed_at": "2026-01-01T00:00:00Z",
+						"tools": ["claude"],
+						"paths": []
+					}
+				}
+			}`), 0o644)
+
+			s, err := state.Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+
+			skill := s.Installed["test-skill"]
+			if tt.wantRegistry == "" {
+				if len(skill.Sources) != 0 {
+					t.Errorf("expected no sources, got %v", skill.Sources)
+				}
+			} else {
+				if len(skill.Sources) != 1 {
+					t.Fatalf("expected 1 source, got %d", len(skill.Sources))
+				}
+				if skill.Sources[0].Registry != tt.wantRegistry {
+					t.Errorf("registry: got %q, want %q", skill.Sources[0].Registry, tt.wantRegistry)
+				}
+				if skill.Sources[0].Ref != tt.wantRef {
+					t.Errorf("ref: got %q, want %q", skill.Sources[0].Ref, tt.wantRef)
+				}
+			}
+		})
 	}
 }
 
@@ -393,11 +679,14 @@ func TestStateToolsRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	s, _ := state.Load()
-	s.RecordInstall("ArtistfyHQ/deploy", state.InstalledSkill{
-		Version: "v1.0.0",
-		Source:  "github:ArtistfyHQ/team-skills@v1.0.0",
-		Tools:   []string{"claude", "cursor"},
-		Paths:   []string{"/test"},
+	s.RecordInstall("deploy", state.InstalledSkill{
+		Revision: 1,
+		Sources: []state.SkillSource{{
+			Registry: "ArtistfyHQ/team-skills",
+			Ref:      "v1.0.0",
+		}},
+		Tools: []string{"claude", "cursor"},
+		Paths: []string{"/test"},
 	})
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -407,9 +696,71 @@ func TestStateToolsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	skill := loaded.Installed["ArtistfyHQ/deploy"]
+	skill := loaded.Installed["deploy"]
 	if len(skill.Tools) != 2 || skill.Tools[0] != "claude" {
 		t.Errorf("Tools round-trip: got %v", skill.Tools)
+	}
+}
+
+func TestMigrationBareKeyCollisionMergesSources(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+
+	// Two qualified keys that collapse to the same bare name "deploy".
+	// org-a's entry is newer, so it should be the base with both sources merged.
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"installed": {
+			"org-a/deploy": {
+				"version": "v2.0.0",
+				"source": "github:org-a/skills@v2.0.0",
+				"installed_at": "2026-04-01T00:00:00Z",
+				"tools": ["claude"],
+				"paths": ["/test/a"],
+				"registries": ["org-a/skills"]
+			},
+			"org-b/deploy": {
+				"version": "v1.0.0",
+				"source": "github:org-b/tools@v1.0.0",
+				"installed_at": "2026-03-01T00:00:00Z",
+				"tools": ["cursor"],
+				"paths": ["/test/b"],
+				"registries": ["org-b/tools"]
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Should have exactly one "deploy" key, not two.
+	if len(s.Installed) != 1 {
+		t.Fatalf("expected 1 installed skill, got %d: %v", len(s.Installed), installedKeys(s))
+	}
+
+	skill, ok := s.Installed["deploy"]
+	if !ok {
+		t.Fatalf("expected bare key 'deploy', got keys: %v", installedKeys(s))
+	}
+
+	// Both sources should be present.
+	if len(skill.Sources) != 2 {
+		t.Fatalf("expected 2 sources (merged), got %d: %v", len(skill.Sources), skill.Sources)
+	}
+
+	registries := map[string]bool{}
+	for _, src := range skill.Sources {
+		registries[src.Registry] = true
+	}
+	if !registries["org-a/skills"] {
+		t.Error("expected org-a/skills in merged sources")
+	}
+	if !registries["org-b/tools"] {
+		t.Error("expected org-b/tools in merged sources")
 	}
 }
 

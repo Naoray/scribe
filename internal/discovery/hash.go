@@ -12,6 +12,29 @@ import (
 // contentHash computes a deterministic fingerprint of a skill directory's contents.
 // Returns the first 8 hex chars of SHA256(sorted relative paths + file contents).
 //
+// skillFileHash computes SHA-256 of just the SKILL.md file, returning first 8 hex chars.
+// Used for modification detection against the installed_hash stored in state.
+func skillFileHash(skillDir string) (string, error) {
+	path := filepath.Join(skillDir, "SKILL.md")
+
+	// Resolve symlinks before reading.
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", resolved, err)
+	}
+
+	// Normalize CRLF → LF for cross-platform determinism.
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+
+	h := sha256.Sum256(data)
+	return fmt.Sprintf("%x", h[:])[:8], nil
+}
+
 // Design choice: symlinks are resolved before reading, so two skills pointing to
 // the same source directory produce the same hash. This is intentional — they
 // represent the same content.

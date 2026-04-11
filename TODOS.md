@@ -141,3 +141,19 @@ Skills grouped by registry in list output. `--registry` filter flag available.
 - Wire the `SkillAddingMsg` / `SkillAddedMsg` events through the same formatter as the skill-add path so the success line renders. Check `wireAddEmit` / `finishAdd` in `cmd/registry_add.go` — the package-ref branch may be skipping the emit or the final `finishAdd` call.
 
 **Context:** Observed 2026-04-07 while testing `scribe registry add obra/superpowers --registry artistfy/hq`.
+
+---
+
+## Sharable snippets — portable behavior directives
+
+**What:** New content type alongside skills. Snippets are excerpts from `~/.claude/CLAUDE.md` (or equivalent) that steer agent behavior — things like commit discipline, output style, review standards, caveman mode.
+
+**Why:** Skills add *capability* (do X). Snippets add *behavior* (do X *this way*). Users craft useful agent behavior rules in their global CLAUDE.md but have no way to share them. Snippets make these first-class Scribe artifacts — installable, versionable, sharable via registries.
+
+**Behavior:**
+- Snippets live in `~/.scribe/snippets/` (or similar)
+- `scribe add` distinguishes skill vs snippet
+- Snippets get **injected into** config files (CLAUDE.md, .cursorrules, etc.) rather than symlinked as standalone files
+- Ties into "sync rules across LLMs" — same snippet, different target files per tool
+
+**Context:** Idea captured 2026-04-10.

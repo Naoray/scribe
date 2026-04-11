@@ -77,7 +77,7 @@ func TestDiscoverLocalSkills(t *testing.T) {
 
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"deploy": {Source: "github:owner/repo@v1.0.0", Version: "v1.0.0"},
+			"deploy": {Revision: 1, Sources: []state.SkillSource{{Registry: "owner/repo", Ref: "v1.0.0"}}},
 		},
 	}
 
@@ -116,11 +116,12 @@ func TestDiscoverLocalSkills(t *testing.T) {
 	if !ok {
 		t.Fatal("missing candidate: deploy")
 	}
-	if deploy.Source != "github:owner/repo@v1.0.0" {
-		t.Errorf("deploy source: got %q", deploy.Source)
+	// Local discovery no longer populates Source — local candidates always need upload.
+	if deploy.Source != "" {
+		t.Errorf("deploy source: got %q, want empty", deploy.Source)
 	}
-	if deploy.NeedsUpload() {
-		t.Error("deploy should not need upload")
+	if !deploy.NeedsUpload() {
+		t.Error("deploy should need upload (local candidate)")
 	}
 }
 
@@ -150,7 +151,7 @@ func TestDiscoverLocalDeduplicates(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Same skill name in both ~/.claude/skills/ and ~/.scribe/skills/ — local (claude) wins.
+	// Same skill name in both ~/.claude/skills/ and ~/.scribe/skills/ — scribe (scanned first) wins.
 	for _, dir := range []string{
 		filepath.Join(home, ".claude", "skills", "deploy"),
 		filepath.Join(home, ".scribe", "skills", "deploy"),
@@ -173,9 +174,9 @@ func TestDiscoverLocalDeduplicates(t *testing.T) {
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 (deduplicated), got %d", len(candidates))
 	}
-	// Should be the claude path (scanned first, wins).
-	if !strings.Contains(candidates[0].LocalPath, ".claude") {
-		t.Errorf("expected claude path, got %q", candidates[0].LocalPath)
+	// Should be the scribe path (scanned first, wins dedup).
+	if !strings.Contains(candidates[0].LocalPath, ".scribe") {
+		t.Errorf("expected scribe path, got %q", candidates[0].LocalPath)
 	}
 }
 

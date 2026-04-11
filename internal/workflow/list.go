@@ -65,9 +65,8 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 		Name        string   `json:"name"`
 		Description string   `json:"description,omitempty"`
 		Package     string   `json:"package,omitempty"`
-		Version     string   `json:"version"`
+		Revision    int      `json:"revision,omitempty"`
 		ContentHash string   `json:"content_hash,omitempty"`
-		Source      string   `json:"source"`
 		Targets     []string `json:"targets"`
 		Managed     bool     `json:"managed"`
 		Path        string   `json:"path,omitempty"`
@@ -86,9 +85,8 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 			Name:        sk.Name,
 			Description: sk.Description,
 			Package:     sk.Package,
-			Version:     sk.Version,
+			Revision:    sk.Revision,
 			ContentHash: sk.ContentHash,
-			Source:      sk.Source,
 			Targets:     targets,
 			Managed:     managed,
 			Path:        sk.LocalPath,

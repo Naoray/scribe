@@ -1,7 +1,7 @@
 # Storage Model Redesign & List TUI Overhaul
 
 **Date:** 2026-04-10
-**Status:** Draft (revised after counselor review + research)
+**Status:** Draft (revised after second counselor review)
 **Builds on:** 2026-04-06-mvp-design.md
 
 ## Summary
@@ -45,13 +45,13 @@ Scribe manages skills for the developer's machine. Registries are distribution c
   versions/
     v1.md                     # rollback snapshot
     v2.md
-~/.claude/skills/cleanup      # flat symlink — Claude discovers this
+~/.claude/skills/cleanup      # flat symlink → SKILL.md only — Claude discovers this
 ```
 
 ### Rules
 
 - One canonical copy per skill name in `~/.scribe/skills/<name>/`
-- Symlinks to tool directories use bare names: `~/.claude/skills/<name>` → `~/.scribe/skills/<name>/`
+- Symlinks point to the **file**, not the directory: `~/.claude/skills/<name>` → `~/.scribe/skills/<name>/SKILL.md`. This prevents AI agents from seeing internal bookkeeping files (`.scribe-base.md`, `versions/`)
 - State tracks which registries provide each skill (multi-source)
 - No registry-slug directories on disk
 - Reserved names blocked as skill names: `versions`, `.git`, `.DS_Store`
@@ -232,7 +232,13 @@ version_retention: 10    # default, 0 = unlimited
 
 ### Restore
 
-`scribe restore cleanup rev-2` — copies `versions/rev-2.md` back to `SKILL.md`. Sets `installed_hash` to new content hash (treated as "locally modified" on next sync). Shows: "Restored rev 2. This skill will be preserved during future syncs unless you run `scribe sync --force`."
+`scribe restore cleanup rev-2` — copies `versions/rev-2.md` back to `SKILL.md`. This is a **forward operation**: if current revision is 4, the restore creates `rev-5` (not a counter revert to 2). The restored content becomes the new working copy at `rev 5`.
+
+- Snapshots current `SKILL.md` to `versions/rev-4.md`
+- Copies `versions/rev-2.md` to `SKILL.md`
+- Bumps `revision` to 5
+- Sets `installed_hash` to new content hash (treated as "locally modified" on next sync)
+- Shows: "Restored rev 2 as rev 5. This skill will be preserved during future syncs unless you run `scribe sync --force`."
 
 ---
 
@@ -320,7 +326,16 @@ After writing, also write `.scribe-base.md` as a copy of `SKILL.md` (establishes
 
 ### `ClaudeTool.Install`
 
-No code change needed — `skillName` is already bare in the new model. The syncer passes bare `sk.Name` instead of `qualifiedName`.
+Symlink now points to `SKILL.md` file, not the skill directory. Change from:
+```go
+os.Symlink(canonicalDir, linkPath)  // links to directory
+```
+to:
+```go
+os.Symlink(filepath.Join(canonicalDir, "SKILL.md"), linkPath)  // links to file only
+```
+
+This prevents AI agents from seeing `.scribe-base.md` and `versions/` through the symlink. The syncer passes bare `sk.Name` instead of `qualifiedName`.
 
 ### Syncer changes
 
@@ -455,7 +470,7 @@ New command: `scribe config set editor cursor` — writes the editor preference 
 
 Since skills are now flat in `~/.scribe/skills/`, the scan simplifies:
 - `~/.scribe/skills/<name>/` — every directory with SKILL.md is a skill (no registry-slug nesting)
-- `~/.claude/skills/<name>/` — symlinks pointing back to scribe store (deduplicate by resolved path via `filepath.EvalSymlinks`)
+- `~/.claude/skills/<name>` — file symlinks pointing to `~/.scribe/skills/<name>/SKILL.md` (deduplicate by resolved path via `filepath.EvalSymlinks`)
 - Skip reserved names: `versions`, `.git`, `.DS_Store`
 
 ### Detecting local modifications
