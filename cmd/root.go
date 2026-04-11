@@ -131,6 +131,7 @@ func init() {
 		newAddCommand(),
 		newRemoveCommand(),
 		newSyncCommand(),
+		newAdoptCommand(),
 		newStatusCommand(),
 		newResolveCommand(),
 		newRestoreCommand(),
