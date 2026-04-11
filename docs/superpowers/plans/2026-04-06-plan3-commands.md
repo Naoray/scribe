@@ -46,7 +46,7 @@
 
 This task assumes Plan 1 has created `config.ToolConfig` with fields `Name string`, `Enabled bool` and that `config.Config` has a `Tools []ToolConfig` field. It also assumes `tools.AllTools()` returns all known tools and `tools.Tool` has a `Detect() bool` method.
 
-- [ ] **Step 1: Write the failing test for tools list output**
+- [x] **Step 1: Write the failing test for tools list output**
 
 ```go
 // cmd/tools_test.go
@@ -99,7 +99,7 @@ func TestFormatToolsListJSON(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ -run TestFormatTools -v
@@ -107,7 +107,7 @@ cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ -run TestFormatTo
 
 Expected: FAIL -- `formatToolsList` and `formatToolsListJSON` not defined.
 
-- [ ] **Step 3: Implement the tools command**
+- [x] **Step 3: Implement the tools command**
 
 ```go
 // cmd/tools.go
@@ -249,7 +249,7 @@ func formatToolsListJSON(w io.Writer, tools []config.ToolConfig) error {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ -run TestFormatTools -v
@@ -257,13 +257,13 @@ cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ -run TestFormatTo
 
 Expected: PASS.
 
-- [ ] **Step 5: Verify the full build compiles**
+- [x] **Step 5: Verify the full build compiles**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./...
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cmd/tools.go cmd/tools_test.go
@@ -282,7 +282,7 @@ Step 1 of plan3-commands"
 
 This task assumes Plan 1 has added `Tool.Uninstall(skillName string) error` to the tool interface and that `InstalledSkill.Tools` (renamed from `Targets`) lists which tools have the skill installed.
 
-- [ ] **Step 1: Write the failing test for remove logic**
+- [x] **Step 1: Write the failing test for remove logic**
 
 ```go
 // cmd/remove_test.go
@@ -346,7 +346,7 @@ func TestResolveRemoveTarget(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ -run TestResolveRemoveTarget -v
@@ -354,7 +354,7 @@ cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ -run TestResolveR
 
 Expected: FAIL -- `resolveRemoveTarget` not defined.
 
-- [ ] **Step 3: Implement the remove command**
+- [x] **Step 3: Implement the remove command**
 
 ```go
 // cmd/remove.go
@@ -609,7 +609,7 @@ func extractSkillName(key string) string {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ -run TestResolveRemoveTarget -v
@@ -617,13 +617,13 @@ cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ -run TestResolveR
 
 Expected: PASS.
 
-- [ ] **Step 5: Verify the full build compiles**
+- [x] **Step 5: Verify the full build compiles**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./...
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cmd/remove.go cmd/remove_test.go
@@ -642,7 +642,7 @@ Step 2 of plan3-commands"
 
 The list command currently defaults to showing remote registry diff. This task flips it to machine-first: `scribe list` shows everything on disk grouped by registry, and `--remote` flag restores the old behavior.
 
-- [ ] **Step 1: Update the list command flags**
+- [x] **Step 1: Update the list command flags**
 
 Replace the flag setup and `runList` function in `cmd/list.go`:
 
@@ -722,7 +722,7 @@ func runList(cmd *cobra.Command, args []string) error {
 }
 ```
 
-- [ ] **Step 2: Add RemoteFlag to the workflow Bag**
+- [x] **Step 2: Add RemoteFlag to the workflow Bag**
 
 In `internal/workflow/bag.go`, add the `RemoteFlag` field alongside the existing `LocalFlag`:
 
@@ -731,7 +731,7 @@ In `internal/workflow/bag.go`, add the `RemoteFlag` field alongside the existing
 RemoteFlag bool   // --remote: show available skills from registries
 ```
 
-- [ ] **Step 3: Update StepBranchLocalOrRemote to flip the default**
+- [x] **Step 3: Update StepBranchLocalOrRemote to flip the default**
 
 In `internal/workflow/list.go`, update `StepBranchLocalOrRemote` so that the default (no flags) shows local, and `--remote` shows the registry diff:
 
@@ -766,7 +766,7 @@ func StepBranchLocalOrRemote(ctx context.Context, b *Bag) error {
 }
 ```
 
-- [ ] **Step 4: Run the full test suite to check nothing is broken**
+- [x] **Step 4: Run the full test suite to check nothing is broken**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ ./internal/workflow/ -v -count=1
@@ -774,13 +774,13 @@ cd /Users/krishankonig/Workspace/bets/scribe && go test ./cmd/ ./internal/workfl
 
 Expected: PASS.
 
-- [ ] **Step 5: Verify the build compiles**
+- [x] **Step 5: Verify the build compiles**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./...
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cmd/list.go internal/workflow/bag.go internal/workflow/list.go
@@ -798,7 +798,7 @@ Step 3 of plan3-commands"
 
 The current TUI groups by package name. This task changes grouping to registry slug, adds author and tools columns to the skill list, and updates the detail panel to show registry, author, version, status, tools, and paths.
 
-- [ ] **Step 1: Update the group building logic in newListModel**
+- [x] **Step 1: Update the group building logic in newListModel**
 
 Replace the `newListModel` function in `cmd/list_tui.go` to group by registry instead of package:
 
@@ -862,7 +862,7 @@ func skillRegistryGroup(sk discovery.Skill, st *state.State) string {
 }
 ```
 
-- [ ] **Step 2: Update formatSkillLine to show author and tools**
+- [x] **Step 2: Update formatSkillLine to show author and tools**
 
 Replace `formatSkillLine` in `cmd/list_tui.go`:
 
@@ -915,7 +915,7 @@ func (m listModel) formatSkillLine(sk discovery.Skill, isCursor bool, maxWidth i
 }
 ```
 
-- [ ] **Step 3: Update renderDetail to show registry, author, tools**
+- [x] **Step 3: Update renderDetail to show registry, author, tools**
 
 Replace `renderDetail` in `cmd/list_tui.go`:
 
@@ -987,7 +987,7 @@ func (m listModel) renderDetail(sk discovery.Skill, width int) string {
 }
 ```
 
-- [ ] **Step 4: Update filterSkills to group by registry instead of package**
+- [x] **Step 4: Update filterSkills to group by registry instead of package**
 
 Replace `filterSkills` in `cmd/list_tui.go`:
 
@@ -1021,7 +1021,7 @@ func (m listModel) filterSkills() []discovery.Skill {
 }
 ```
 
-- [ ] **Step 5: Verify the build compiles and existing tests pass**
+- [x] **Step 5: Verify the build compiles and existing tests pass**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./... && go test ./cmd/ -v -count=1
@@ -1029,7 +1029,7 @@ cd /Users/krishankonig/Workspace/bets/scribe && go build ./... && go test ./cmd/
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cmd/list_tui.go
@@ -1049,7 +1049,7 @@ Step 4 of plan3-commands"
 
 This task extracts the "share skill to registry" flow from the current `cmd/add.go` into `scribe registry add`. The code is largely moved, not rewritten.
 
-- [ ] **Step 1: Create registry_add.go with the publisher flow**
+- [x] **Step 1: Create registry_add.go with the publisher flow**
 
 Move `runAdd`, `runAddByName`, `runAddInteractive`, `sortCandidates`, `resolveTargetRegistry`, `filterAlreadyInTarget`, `wireAddEmit`, `finishAdd`, `autoSync`, and `fetchRegistryManifest` from `cmd/add.go` into `cmd/registry_add.go`. Update the command definition:
 
@@ -1128,13 +1128,13 @@ The following functions move verbatim (with renamed entry points):
 - `autoSync`
 - `fetchRegistryManifest`
 
-- [ ] **Step 2: Create registry_add_tui.go**
+- [x] **Step 2: Create registry_add_tui.go**
 
 Move the entire content of `cmd/add_tui.go` into `cmd/registry_add_tui.go`. Rename the model type from `addModel` to `registryAddModel` and the constructor from `newAddModel` to `newRegistryAddModel`. Update references in `runRegistryAddInteractive` accordingly.
 
 The `registryAddModel` type, `registryAddItem`, and all methods (`Init`, `Update`, `View`, `filteredItems`, `selectedCount`, `selectedCandidates`, `ensureCursorVisible`, `maxContentLines`, `skillGroup`) are moved verbatim with the type rename.
 
-- [ ] **Step 3: Register registry add subcommand**
+- [x] **Step 3: Register registry add subcommand**
 
 In `cmd/registry.go`, add the subcommand registration in `init()`:
 
@@ -1146,13 +1146,13 @@ func init() {
 }
 ```
 
-- [ ] **Step 4: Verify the build compiles**
+- [x] **Step 4: Verify the build compiles**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./...
 ```
 
-- [ ] **Step 5: Run existing tests to check nothing broke**
+- [x] **Step 5: Run existing tests to check nothing broke**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go test ./... -count=1
@@ -1160,7 +1160,7 @@ cd /Users/krishankonig/Workspace/bets/scribe && go test ./... -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cmd/registry_add.go cmd/registry_add_tui.go cmd/registry.go
@@ -1179,7 +1179,7 @@ Step 5 of plan3-commands"
 
 The consumer `scribe add` becomes the "install to machine" command. It searches connected registries and optionally skills.sh, then installs selected skills.
 
-- [ ] **Step 1: Rewrite cmd/add.go for consumer install**
+- [x] **Step 1: Rewrite cmd/add.go for consumer install**
 
 ```go
 // cmd/add.go
@@ -1613,7 +1613,7 @@ func runConsumerAddInteractive(cmd *cobra.Command, results []addSearchResult, cf
 }
 ```
 
-- [ ] **Step 2: Simplify add_tui.go**
+- [x] **Step 2: Simplify add_tui.go**
 
 The current `add_tui.go` was for the publisher flow and has been moved to `registry_add_tui.go` in Task 5. Replace the file with a minimal placeholder that the consumer add can grow into:
 
@@ -1626,13 +1626,13 @@ package cmd
 // A full Bubble Tea TUI can be added as a follow-up.
 ```
 
-- [ ] **Step 3: Verify the build compiles**
+- [x] **Step 3: Verify the build compiles**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./...
 ```
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go test ./... -count=1
@@ -1640,7 +1640,7 @@ cd /Users/krishankonig/Workspace/bets/scribe && go test ./... -count=1
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/add.go cmd/add_tui.go
@@ -1658,7 +1658,7 @@ Step 6 of plan3-commands"
 - Modify: `cmd/registry.go`
 - Delete: `cmd/connect.go`
 
-- [ ] **Step 1: Create registry_connect.go**
+- [x] **Step 1: Create registry_connect.go**
 
 Copy `cmd/connect.go` into `cmd/registry_connect.go` with the command renamed:
 
@@ -1729,7 +1729,7 @@ func resolveRepo(args []string) (string, error) {
 }
 ```
 
-- [ ] **Step 2: Register connect subcommand in registry.go**
+- [x] **Step 2: Register connect subcommand in registry.go**
 
 In `cmd/registry.go`, add to `init()`:
 
@@ -1737,13 +1737,13 @@ In `cmd/registry.go`, add to `init()`:
 registryCmd.AddCommand(registryConnectCmd)
 ```
 
-- [ ] **Step 3: Delete cmd/connect.go**
+- [x] **Step 3: Delete cmd/connect.go**
 
 ```bash
 rm /Users/krishankonig/Workspace/bets/scribe/cmd/connect.go
 ```
 
-- [ ] **Step 4: Update guide.go references**
+- [x] **Step 4: Update guide.go references**
 
 In `cmd/guide.go`, the `runGuideInteractive` function calls `resolveRepo(nil)`. This function has been moved to `cmd/registry_connect.go` so it remains in the same package -- no import changes needed. Verify the guide's connect flow still references the correct function.
 
@@ -1763,13 +1763,13 @@ steps = append(steps, guideStep{
 
 And update `displayGuideSummary` if it references `scribe connect`.
 
-- [ ] **Step 5: Verify build compiles and tests pass**
+- [x] **Step 5: Verify build compiles and tests pass**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./... && go test ./... -count=1
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cmd/registry_connect.go cmd/registry.go cmd/guide.go
@@ -1788,7 +1788,7 @@ Step 7 of plan3-commands"
 - Modify: `cmd/registry.go`
 - Delete: `cmd/migrate.go`
 
-- [ ] **Step 1: Create registry_migrate.go**
+- [x] **Step 1: Create registry_migrate.go**
 
 Copy the entire content of `cmd/migrate.go` into `cmd/registry_migrate.go` with the command variable renamed:
 
@@ -1898,7 +1898,7 @@ func runRegistryMigrate(cmd *cobra.Command, args []string) error {
 }
 ```
 
-- [ ] **Step 2: Register migrate subcommand in registry.go**
+- [x] **Step 2: Register migrate subcommand in registry.go**
 
 In `cmd/registry.go`, add to `init()`:
 
@@ -1906,19 +1906,19 @@ In `cmd/registry.go`, add to `init()`:
 registryCmd.AddCommand(registryMigrateCmd)
 ```
 
-- [ ] **Step 3: Delete cmd/migrate.go**
+- [x] **Step 3: Delete cmd/migrate.go**
 
 ```bash
 rm /Users/krishankonig/Workspace/bets/scribe/cmd/migrate.go
 ```
 
-- [ ] **Step 4: Verify build compiles and tests pass**
+- [x] **Step 4: Verify build compiles and tests pass**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./... && go test ./... -count=1
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/registry_migrate.go cmd/registry.go
@@ -1936,7 +1936,7 @@ Step 8 of plan3-commands"
 - Modify: `cmd/root.go`
 - Modify: `cmd/registry.go`
 
-- [ ] **Step 1: Update root.go with the new command tree**
+- [x] **Step 1: Update root.go with the new command tree**
 
 ```go
 // cmd/root.go
@@ -1980,7 +1980,7 @@ func init() {
 }
 ```
 
-- [ ] **Step 2: Update registry.go with all subcommands**
+- [x] **Step 2: Update registry.go with all subcommands**
 
 Ensure `cmd/registry.go` has all subcommands registered in `init()`:
 
@@ -1994,13 +1994,13 @@ func init() {
 }
 ```
 
-- [ ] **Step 3: Verify build compiles, run all tests**
+- [x] **Step 3: Verify build compiles, run all tests**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go build ./... && go test ./... -count=1
 ```
 
-- [ ] **Step 4: Verify command tree looks correct**
+- [x] **Step 4: Verify command tree looks correct**
 
 ```bash
 cd /Users/krishankonig/Workspace/bets/scribe && go run ./cmd/scribe --help
@@ -2013,7 +2013,7 @@ Expected output should show:
 - `registry`: `connect`, `create`, `add`, `list`, `migrate`
 - `tools`: `enable`, `disable`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/root.go cmd/registry.go
@@ -2029,13 +2029,13 @@ Step 9 of plan3-commands"
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Read the current README**
+- [x] **Step 1: Read the current README**
 
 ```bash
 cat /Users/krishankonig/Workspace/bets/scribe/README.md
 ```
 
-- [ ] **Step 2: Update the command sections**
+- [x] **Step 2: Update the command sections**
 
 Find the usage examples section and update with the new command taxonomy. Replace references to `scribe connect` with `scribe registry connect`. Add `remove`, `tools` commands. Update the Quick Start flow:
 
@@ -2083,11 +2083,11 @@ scribe list
 | `scribe --version` | Show version |
 ```
 
-- [ ] **Step 3: Verify the README renders correctly**
+- [x] **Step 3: Verify the README renders correctly**
 
 Skim the updated README for broken links, formatting issues, or stale references.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md

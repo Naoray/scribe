@@ -14,7 +14,7 @@ type Formatter interface {
 	OnRegistryStart(repo string)
 	OnSkillResolved(name string, status sync.SkillStatus)
 	OnSkillDownloading(name string)
-	OnSkillInstalled(name string, version string, updated bool)
+	OnSkillInstalled(name string, updated bool)
 	OnSkillSkipped(name string, status sync.SkillStatus)
 	OnSkillError(name string, err error)
 	OnSyncComplete(summary sync.SyncCompleteMsg)

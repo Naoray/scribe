@@ -44,7 +44,7 @@ func (f *jsonFormatter) OnSkillDownloading(_ string) {
 	// JSON mode doesn't emit progress.
 }
 
-func (f *jsonFormatter) OnSkillInstalled(name string, version string, updated bool) {
+func (f *jsonFormatter) OnSkillInstalled(name string, updated bool) {
 	if f.current == nil {
 		return
 	}
@@ -53,9 +53,8 @@ func (f *jsonFormatter) OnSkillInstalled(name string, version string, updated bo
 		action = "updated"
 	}
 	f.current.Skills = append(f.current.Skills, skillResult{
-		Name:    name,
-		Action:  action,
-		Version: version,
+		Name:   name,
+		Action: action,
 	})
 }
 

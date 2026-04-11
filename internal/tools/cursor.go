@@ -56,8 +56,8 @@ func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
 
 	rulesDir := filepath.Join(workDir, ".cursor", "rules")
 
-	// For namespaced names like "ArtistfyHQ-team-skills/deploy",
-	// flatten to a single .mdc filename to avoid subdirectories in .cursor/rules.
+	// Slugify for safety — bare names pass through unchanged,
+	// but this protects against any residual slashes.
 	mdcName := SlugifyRegistry(skillName) + ".mdc"
 
 	link := filepath.Join(rulesDir, mdcName)

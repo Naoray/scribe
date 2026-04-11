@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -14,7 +15,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/discovery"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 	"github.com/Naoray/scribe/internal/workflow"
@@ -70,9 +73,11 @@ type listRow struct {
 	HasStatus bool // true in registry mode, false in local-only mode
 	Version   string
 	Author    string
-	Source    string
 	Targets   []string
 	Local     *discovery.Skill // populated when the skill exists on disk
+	Entry     *manifest.Entry  // from SkillStatus.Entry, nil for local-only
+	LatestSHA string           // for triggering update
+	Excerpt   string           // first ~8 lines of SKILL.md body
 }
 
 // ── Action items ───────────────────────────────────────────────────────────
@@ -87,12 +92,19 @@ type actionItem struct {
 
 func actionsForRow(row listRow) []actionItem {
 	hasLocal := row.Local != nil && row.Local.LocalPath != ""
+	canUpdate := row.HasStatus && row.Status == sync.StatusOutdated && row.Entry != nil
+	updateReason := "up to date"
+	if !row.HasStatus {
+		updateReason = "no registry"
+	} else if row.Entry == nil {
+		updateReason = "source unknown"
+	}
 	return []actionItem{
-		{label: "update", key: "update", disabled: true, reason: "source unknown", style: ltDimStyle},
+		{label: "update", key: "update", disabled: !canUpdate, reason: updateReason, style: lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))},
 		{label: "remove", key: "remove", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#e06060"))},
 		{label: "add to category", key: "category", disabled: true, reason: "coming soon", style: ltDimStyle},
 		{label: "copy path", key: "copy", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
-		{label: "open in $EDITOR", key: "edit", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
+		{label: "open in editor", key: "edit", disabled: !hasLocal, reason: "not on disk", style: lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))},
 	}
 }
 
@@ -103,6 +115,12 @@ type rowsLoadedMsg struct{ rows []listRow }
 type loadErrMsg struct{ err error }
 type clipboardTickMsg struct{ id int }
 type editorDoneMsg struct{ err error }
+type updateDoneMsg struct {
+	name       string
+	err        error
+	merged     bool
+	conflicted bool
+}
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -211,22 +229,9 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 		if derr != nil {
 			return nil, fmt.Errorf("%s: %w", repo, derr)
 		}
-		slug := tools.SlugifyRegistry(repo)
 		for _, ss := range statuses {
-			// A local skill may be discovered under either its slug-qualified
-			// name (e.g. "Artistfy-hq/ascii" if it lives at
-			// ~/.scribe/skills/Artistfy-hq/ascii) or its bare name
-			// (e.g. "ascii" if installed at ~/.claude/skills/ascii). Prefer
-			// the slug-qualified form so a same-named top-level skill from a
-			// different source can't be mis-attributed to this registry row.
-			// Only mark the matched key so unrelated same-named skills aren't
-			// suppressed from the untracked-pass below.
-			qualifiedKey := slug + "/" + ss.Name
-			local := localByName[qualifiedKey]
+			local := localByName[ss.Name]
 			if local != nil {
-				matchedLocal[qualifiedKey] = true
-			} else if bare := localByName[ss.Name]; bare != nil {
-				local = bare
 				matchedLocal[ss.Name] = true
 			}
 			row := listRow{
@@ -237,10 +242,14 @@ func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
 				Version:   ss.DisplayVersion(),
 				Author:    ss.Maintainer,
 				Local:     local,
+				Entry:     ss.Entry,
+				LatestSHA: ss.LatestSHA,
 			}
 			if ss.Installed != nil {
 				row.Targets = ss.Installed.Tools
-				row.Source = ss.Installed.Source
+			}
+			if local != nil && local.LocalPath != "" {
+				row.Excerpt = readExcerpt(local.LocalPath, 8)
 			}
 			rows = append(rows, row)
 		}
@@ -287,14 +296,16 @@ func buildLocalRows(skills []discovery.Skill) []listRow {
 	for i := range skills {
 		sk := &skills[i]
 		g := registryGroupFromName(sk.Name)
-		groups[g] = append(groups[g], listRow{
+		row := listRow{
 			Name:    sk.Name,
 			Group:   g,
-			Version: sk.Version,
-			Source:  sk.Source,
 			Targets: sk.Targets,
 			Local:   sk,
-		})
+		}
+		if sk.LocalPath != "" {
+			row.Excerpt = readExcerpt(sk.LocalPath, 8)
+		}
+		groups[g] = append(groups[g], row)
 	}
 
 	// Sort: unmanagedGroup last, then alphabetical group names; rows
@@ -359,6 +370,43 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Editor exited with error"
 		}
 		return m, nil
+	case updateDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
+			return m, nil
+		}
+		// Find the row and update its status.
+		for i := range m.filtered {
+			if m.filtered[i].Name == msg.name && m.filtered[i].Group == m.filtered[m.cursor].Group {
+				if msg.conflicted {
+					m.filtered[i].Status = sync.StatusConflicted
+					m.statusMsg = "Merge conflict — resolve in editor"
+				} else if msg.merged {
+					m.filtered[i].Status = sync.StatusCurrent
+					m.statusMsg = "Updated! (merged with local changes)"
+				} else {
+					m.filtered[i].Status = sync.StatusCurrent
+					m.statusMsg = "Updated!"
+				}
+				break
+			}
+		}
+		// Also update in m.rows.
+		for i := range m.rows {
+			if m.rows[i].Name == msg.name {
+				if msg.conflicted {
+					m.rows[i].Status = sync.StatusConflicted
+				} else {
+					m.rows[i].Status = sync.StatusCurrent
+				}
+				break
+			}
+		}
+		m.pendingTickID++
+		tickID := m.pendingTickID
+		return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+			return clipboardTickMsg{id: tickID}
+		})
 	case tea.KeyPressMsg:
 		if m.stage == stageLoading {
 			if msg.String() == "ctrl+c" || msg.String() == "q" {
@@ -537,6 +585,58 @@ func (m listModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 	row := m.filtered[m.cursor]
+	switch key {
+	case "update":
+		if row.Entry == nil {
+			return m, nil
+		}
+		m.statusMsg = "Updating..."
+		repo := row.Group
+		ss := sync.SkillStatus{
+			Name:      row.Name,
+			Status:    row.Status,
+			Entry:     row.Entry,
+			LatestSHA: row.LatestSHA,
+		}
+		if row.Local != nil {
+			if inst, ok := m.bag.State.Installed[row.Name]; ok {
+				ss.Installed = &inst
+			}
+		}
+
+		// Capture whether the local file had unsynced edits BEFORE the sync runs.
+		// Post-sync, SKILL.md has been rewritten (or 3-way merged), so
+		// IsLocallyModified can no longer tell us what we need to know.
+		wasModified := false
+		if ss.Installed != nil {
+			if storeDir, sdErr := tools.StoreDir(); sdErr == nil {
+				skillDir := filepath.Join(storeDir, row.Name)
+				wasModified = sync.IsLocallyModified(skillDir, ss.Installed.InstalledHash)
+			}
+		}
+
+		ctx := m.ctx
+		bag := m.bag
+		return m, func() tea.Msg {
+			syncer := &sync.Syncer{
+				Client:   sync.WrapGitHubClient(bag.Client),
+				Provider: bag.Provider,
+				Tools:    bag.Tools,
+			}
+			err := syncer.RunWithDiff(ctx, repo, []sync.SkillStatus{ss}, bag.State)
+			if err != nil {
+				return updateDoneMsg{name: row.Name, err: err}
+			}
+			// Check if the skill ended up conflicted.
+			localSkills, _ := discovery.OnDisk(bag.State)
+			for _, sk := range localSkills {
+				if sk.Name == row.Name && sk.Conflicted {
+					return updateDoneMsg{name: row.Name, conflicted: true}
+				}
+			}
+			return updateDoneMsg{name: row.Name, merged: wasModified}
+		}
+	}
 	if row.Local == nil {
 		return m, nil
 	}
@@ -690,9 +790,7 @@ func (m listModel) View() tea.View {
 		}
 	}
 
-	v := tea.NewView(s)
-	v.AltScreen = true
-	return v
+	return tea.NewView(s)
 }
 
 func (m listModel) viewLoading() string {
@@ -716,7 +814,9 @@ func (m listModel) viewListFull() string {
 	b.WriteString(m.renderHeader())
 
 	if m.search != "" {
-		b.WriteString(fmt.Sprintf("> %s\n", m.search))
+		b.WriteString("/ " + m.search + "\n")
+	} else {
+		b.WriteString(ltDimStyle.Render("/ search...") + "\n")
 	}
 
 	contentHeight := m.contentHeight()
@@ -724,7 +824,7 @@ func (m listModel) viewListFull() string {
 
 	b.WriteString("\n")
 	b.WriteString(m.renderSummary() + "\n")
-	b.WriteString(ltDimStyle.Render("↑↓ navigate · enter detail · type to search · q quit") + "\n")
+	b.WriteString(ltDimStyle.Render("↑↓ navigate · /search · enter detail · q quit") + "\n")
 	return b.String()
 }
 
@@ -735,7 +835,9 @@ func (m listModel) viewSplit() string {
 
 	b.WriteString(m.renderHeader())
 	if m.search != "" {
-		b.WriteString(fmt.Sprintf("> %s\n", m.search))
+		b.WriteString("/ " + m.search + "\n")
+	} else {
+		b.WriteString(ltDimStyle.Render("/ search...") + "\n")
 	}
 
 	contentHeight := m.contentHeight()
@@ -951,7 +1053,7 @@ func (m listModel) renderSummary() string {
 	if !hasStatus {
 		return ltDimStyle.Render(fmt.Sprintf("%d skills total", len(m.rows)))
 	}
-	order := []sync.Status{sync.StatusCurrent, sync.StatusOutdated, sync.StatusMissing, sync.StatusExtra}
+	order := []sync.Status{sync.StatusCurrent, sync.StatusModified, sync.StatusOutdated, sync.StatusConflicted, sync.StatusMissing, sync.StatusExtra}
 	var parts []string
 	for _, s := range order {
 		if part := renderStatusCount(s, counts[s]); part != "" {
@@ -987,9 +1089,6 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	}
 	if row.Group != "" {
 		pairs = append(pairs, kv{"Registry", row.Group})
-	}
-	if row.Source != "" {
-		pairs = append(pairs, kv{"Source", row.Source})
 	}
 	if len(row.Targets) > 0 {
 		pairs = append(pairs, kv{"Tools", strings.Join(row.Targets, ", ")})
@@ -1037,12 +1136,23 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 			b.WriteString(prefix + label + "\n")
 		}
 	}
+
+	if row.Excerpt != "" {
+		b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
+		excerptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Width(width - 2)
+		b.WriteString(excerptStyle.Render(row.Excerpt) + "\n")
+	}
 	return b.String()
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 func resolveEditor() string {
+	// 1. Check config
+	if cfg, err := config.Load(); err == nil && cfg.Editor != "" {
+		return cfg.Editor
+	}
+	// 2. Environment
 	if e := os.Getenv("VISUAL"); e != "" {
 		return e
 	}
@@ -1056,13 +1166,8 @@ func (m listModel) contentHeight() int {
 	if m.height == 0 {
 		return 20
 	}
-	headerHeight := 2 // title + divider
-	searchHeight := 0
-	if m.search != "" {
-		searchHeight = 1
-	}
-	footerHeight := 3 // blank + summary/help + help
-	h := m.height - headerHeight - searchHeight - footerHeight
+	// header(2: title + divider) + search(1) + footer(3: blank + summary + help) = 6 chrome lines
+	h := m.height - 6
 	if h < 5 {
 		h = 5
 	}
@@ -1071,14 +1176,28 @@ func (m listModel) contentHeight() int {
 
 func (m listModel) ensureCursorVisible() listModel {
 	visible := m.contentHeight()
-	if visible < 5 {
-		visible = 5
+	// Count group headers between offset and cursor that consume visible lines.
+	headersBetween := 0
+	prevGroup := ""
+	if m.offset > 0 && m.offset < len(m.filtered) {
+		prevGroup = m.filtered[m.offset-1].Group
 	}
+	for i := m.offset; i <= m.cursor && i < len(m.filtered); i++ {
+		if m.filtered[i].Group != prevGroup {
+			headersBetween++
+			prevGroup = m.filtered[i].Group
+		}
+	}
+	effectiveVisible := visible - headersBetween
+	if effectiveVisible < 3 {
+		effectiveVisible = 3
+	}
+
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}
-	if m.cursor >= m.offset+visible {
-		m.offset = m.cursor - visible + 1
+	if m.cursor >= m.offset+effectiveVisible {
+		m.offset = m.cursor - effectiveVisible + 1
 	}
 	return m
 }
@@ -1099,4 +1218,50 @@ func (m listModel) paneWidths() (int, int) {
 		right = 20
 	}
 	return left, right
+}
+
+// readExcerpt reads SKILL.md from skillDir, strips YAML frontmatter, and
+// returns the first maxLines non-empty body lines as a single string.
+func readExcerpt(skillDir string, maxLines int) string {
+	f, err := os.Open(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	inFrontmatter := false
+	pastFrontmatter := false
+	var lines []string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		if !pastFrontmatter {
+			if trimmed == "---" {
+				if !inFrontmatter {
+					inFrontmatter = true
+					continue
+				}
+				// Closing ---
+				pastFrontmatter = true
+				continue
+			}
+			if inFrontmatter {
+				continue
+			}
+			// No frontmatter at all — treat everything as body.
+			pastFrontmatter = true
+		}
+
+		if trimmed == "" {
+			continue
+		}
+		lines = append(lines, line)
+		if len(lines) >= maxLines {
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
 }

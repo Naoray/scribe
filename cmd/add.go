@@ -31,7 +31,6 @@ type installResult struct {
 	Name     string `json:"name"`
 	Registry string `json:"registry"`
 	Status   string `json:"status"`
-	Version  string `json:"version,omitempty"`
 	Error    string `json:"error,omitempty"`
 }
 
@@ -230,7 +229,6 @@ func runAddDirectInstall(
 		if useJSON {
 			return emitInstallJSON([]installResult{{
 				Name: target.Name, Registry: registryRepo, Status: "already-installed",
-				Version: target.DisplayVersion(),
 			}})
 		}
 		fmt.Printf("%s is already installed (current).\n", skillName)
@@ -365,14 +363,14 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 					status = "updated"
 				}
 				*results = append(*results, installResult{
-					Name: m.Name, Registry: registryRepo, Status: status, Version: m.Version,
+					Name: m.Name, Registry: registryRepo, Status: status,
 				})
 			} else {
 				verb := "installed"
 				if m.Updated {
-					verb = "updated to"
+					verb = "updated"
 				}
-				fmt.Printf("  ✓ %-24s %s %s\n", m.Name, verb, m.Version)
+				fmt.Printf("  ✓ %-24s %s\n", m.Name, verb)
 			}
 		case sync.SkillErrorMsg:
 			if useJSON {

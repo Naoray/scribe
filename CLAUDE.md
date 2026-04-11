@@ -11,10 +11,10 @@ Team skill sync CLI for AI coding agents. Go + Cobra + Charm (Bubble Tea).
 ## Architecture
 
 ```
-cmd/                    # Cobra commands (connect, sync, list, add, create, explain, guide, registry, migrate)
+cmd/                    # Cobra commands (add, list, remove, sync, tools, guide, create, explain, registry)
 internal/
   add/                  # Add workflow — local/remote discovery, GitHub push
-  config/               # config.toml loading (~/.scribe/config.toml)
+  config/               # config.yaml loading (~/.scribe/config.yaml), legacy config.toml migration
   discovery/            # On-disk skill discovery, YAML frontmatter parsing, content hashing
   firstrun/             # First-run experience and onboarding
   github/               # GitHub API client (go-github + oauth2)
@@ -45,7 +45,7 @@ internal/
 - TUI models live in `cmd/` (e.g. `add_tui.go`) as pure presentation consuming those events
 - Non-TTY auto-detected: when stdout is not a terminal, fall back to plain line output
 - `--json` flag available on `sync`, `list`, and `add` for CI/agent use
-- GitHub auth chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/config.toml` → unauthenticated
+- GitHub auth chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/config.yaml` → unauthenticated
 
 ## Build
 
@@ -60,5 +60,5 @@ go run ./cmd/scribe --help
 ~/.scribe/
   state.json      # installed packages + team connection
   skills/         # canonical skill store (symlinked by targets)
-  config.toml     # user preferences
+  config.yaml     # user preferences (tool settings, registries)
 ```

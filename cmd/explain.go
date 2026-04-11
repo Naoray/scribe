@@ -181,16 +181,14 @@ func explainJSON(w io.Writer, skill discovery.Skill, content string) error {
 	out := struct {
 		Name        string   `json:"name"`
 		Description string   `json:"description,omitempty"`
-		Version     string   `json:"version,omitempty"`
-		Source      string   `json:"source,omitempty"`
+		Revision    int      `json:"revision,omitempty"`
 		Targets     []string `json:"targets,omitempty"`
 		Path        string   `json:"path,omitempty"`
 		Content     string   `json:"content"`
 	}{
 		Name:        skill.Name,
 		Description: skill.Description,
-		Version:     skill.Version,
-		Source:      skill.Source,
+		Revision:    skill.Revision,
 		Targets:     skill.Targets,
 		Path:        skill.LocalPath,
 		Content:     content,
@@ -208,11 +206,8 @@ func printSkillHeader(w io.Writer, skill discovery.Skill) {
 	}
 	type kv struct{ key, value string }
 	var meta []kv
-	if skill.Version != "" {
-		meta = append(meta, kv{"Version", skill.Version})
-	}
-	if skill.Source != "" {
-		meta = append(meta, kv{"Source", skill.Source})
+	if skill.Revision > 0 {
+		meta = append(meta, kv{"Revision", fmt.Sprintf("rev %d", skill.Revision)})
 	}
 	if len(skill.Targets) > 0 {
 		meta = append(meta, kv{"Agents", strings.Join(skill.Targets, ", ")})

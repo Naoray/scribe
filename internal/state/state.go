@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,18 +16,19 @@ import (
 
 // State is the contents of ~/.scribe/state.json.
 type State struct {
-	LastSync  time.Time                `json:"last_sync,omitempty"`
-	Installed map[string]InstalledSkill `json:"installed"`
+	SchemaVersion int                          `json:"schema_version"`
+	LastSync      time.Time                    `json:"last_sync,omitempty"`
+	Installed     map[string]InstalledSkill    `json:"installed"`
 }
 
 // InstalledSkill records everything needed to detect updates and uninstall.
 type InstalledSkill struct {
-	Version     string    `json:"version"`
-	CommitSHA   string    `json:"commit_sha,omitempty"`
-	Source      string    `json:"source"`
-	InstalledAt time.Time `json:"installed_at"`
-	Tools       []string  `json:"tools"`
-	Paths       []string  `json:"paths"`
+	Revision      int           `json:"revision"`
+	InstalledHash string        `json:"installed_hash"`
+	Sources       []SkillSource `json:"sources,omitempty"`
+	InstalledAt   time.Time     `json:"installed_at"`
+	Tools         []string      `json:"tools"`
+	Paths         []string      `json:"paths"`
 
 	// Package-specific fields (omitted for regular skills).
 	Type       string    `json:"type,omitempty"`
@@ -37,11 +39,20 @@ type InstalledSkill struct {
 	ApprovedAt time.Time `json:"approved_at,omitempty"`
 }
 
+// SkillSource records a registry that provides this skill.
+type SkillSource struct {
+	Registry   string    `json:"registry"`
+	Ref        string    `json:"ref"`
+	LastSHA    string    `json:"last_sha"`
+	LastSynced time.Time `json:"last_synced"`
+}
+
 // Legacy structs for migration from older state formats.
 type legacyState struct {
-	Team      *legacyTeamState           `json:"team,omitempty"`
-	LastSync  *time.Time                 `json:"last_sync,omitempty"`
-	Installed map[string]json.RawMessage `json:"installed"`
+	SchemaVersion int                        `json:"schema_version,omitempty"`
+	Team          *legacyTeamState           `json:"team,omitempty"`
+	LastSync      *time.Time                 `json:"last_sync,omitempty"`
+	Installed     map[string]json.RawMessage `json:"installed"`
 }
 
 type legacyTeamState struct {
@@ -63,23 +74,34 @@ type legacyInstalledSkill struct {
 	CmdHash     string    `json:"cmd_hash,omitempty"`
 	Approval    string    `json:"approval,omitempty"`
 	ApprovedAt  time.Time `json:"approved_at,omitempty"`
-}
 
-// shortSHA returns the first 7 chars of CommitSHA, or "" if not set.
-func (s InstalledSkill) shortSHA() string {
-	if len(s.CommitSHA) >= 7 {
-		return s.CommitSHA[:7]
-	}
-	return s.CommitSHA
+	// New v2 fields that may already exist in state (if re-loaded after partial migration)
+	Revision      int           `json:"revision,omitempty"`
+	InstalledHash string        `json:"installed_hash,omitempty"`
+	Sources       []SkillSource `json:"sources,omitempty"`
 }
 
 // DisplayVersion returns the version string shown in `scribe list`.
-// For branch refs: "main@a3f2c1b". For tags: "v1.0.0".
+// Returns "rev N" based on the revision counter.
 func (s InstalledSkill) DisplayVersion() string {
-	if s.CommitSHA != "" {
-		return s.Version + "@" + s.shortSHA()
+	return fmt.Sprintf("rev %d", s.Revision)
+}
+
+// parseSourceString extracts registry and ref from legacy source strings.
+// Format: "github:owner/repo@ref" → registry="owner/repo", ref="ref"
+// Returns empty strings if format doesn't match.
+func parseSourceString(source string) (registry, ref string) {
+	// Strip "github:" prefix
+	after, ok := strings.CutPrefix(source, "github:")
+	if !ok {
+		return "", ""
 	}
-	return s.Version
+	// Split on "@" to get registry and ref
+	parts := strings.SplitN(after, "@", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
 }
 
 // Load reads state from disk. Returns an empty state if the file doesn't exist yet.
@@ -103,18 +125,22 @@ func Load() (*State, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &State{Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 2, Installed: make(map[string]InstalledSkill)}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return &State{SchemaVersion: 2, Installed: make(map[string]InstalledSkill)}, nil
+	}
 	return parseAndMigrate(data)
 }
 
-// parseAndMigrate handles 3 migrations:
+// parseAndMigrate handles migrations:
 // 1. Promote team.last_sync to top-level LastSync
 // 2. Rename targets → tools in each InstalledSkill
 // 3. Namespace bare keys using Registries[0] owner prefix
+// 4. Schema v2: convert to bare keys, populate Sources, set Revision
 func parseAndMigrate(data []byte) (*State, error) {
 	var legacy legacyState
 	if err := json.Unmarshal(data, &legacy); err != nil {
@@ -122,7 +148,8 @@ func parseAndMigrate(data []byte) (*State, error) {
 	}
 
 	s := &State{
-		Installed: make(map[string]InstalledSkill, len(legacy.Installed)),
+		SchemaVersion: legacy.SchemaVersion,
+		Installed:     make(map[string]InstalledSkill, len(legacy.Installed)),
 	}
 
 	// Migration 1: Promote team.last_sync to top-level.
@@ -133,6 +160,12 @@ func parseAndMigrate(data []byte) (*State, error) {
 	}
 
 	// Migration 2+3: Parse each installed skill, rename targets->tools, namespace keys.
+	type parsedEntry struct {
+		key   string
+		skill legacyInstalledSkill
+	}
+	entries := make([]parsedEntry, 0, len(legacy.Installed))
+
 	for name, raw := range legacy.Installed {
 		var ls legacyInstalledSkill
 		if err := json.Unmarshal(raw, &ls); err != nil {
@@ -143,24 +176,78 @@ func parseAndMigrate(data []byte) (*State, error) {
 		if len(tools) == 0 && len(ls.Targets) > 0 {
 			tools = ls.Targets
 		}
+		ls.Tools = tools
 
-		skill := InstalledSkill{
-			Version:     ls.Version,
-			CommitSHA:   ls.CommitSHA,
-			Source:      ls.Source,
-			InstalledAt: ls.InstalledAt,
-			Tools:       tools,
-			Paths:       ls.Paths,
-			Type:        ls.Type,
-			InstallCmd:  ls.InstallCmd,
-			UpdateCmd:   ls.UpdateCmd,
-			CmdHash:     ls.CmdHash,
-			Approval:    ls.Approval,
-			ApprovedAt:  ls.ApprovedAt,
+		// Migration 3 (for pre-v2 states): namespace bare keys
+		key := name
+		if s.SchemaVersion < 2 {
+			key = namespaceKey(name, ls.Registries)
 		}
 
-		nsKey := namespaceKey(name, ls.Registries)
-		s.Installed[nsKey] = skill
+		entries = append(entries, parsedEntry{key: key, skill: ls})
+	}
+
+	// Migration 4: Schema v2 — convert namespaced keys to bare names, populate Sources.
+	if s.SchemaVersion < 2 {
+		for _, e := range entries {
+			key := e.key
+			ls := e.skill
+
+			// Extract bare name from key
+			bareName := key
+			if idx := strings.LastIndex(key, "/"); idx >= 0 {
+				bareName = key[idx+1:]
+			}
+
+			// Build Sources from legacy Source field
+			var sources []SkillSource
+			if ls.Source != "" {
+				registry, ref := parseSourceString(ls.Source)
+				if registry != "" {
+					sources = []SkillSource{{
+						Registry: registry,
+						Ref:      ref,
+					}}
+				}
+			}
+
+			// Carry forward v2 fields if they already exist (partial migration)
+			revision := ls.Revision
+			if revision == 0 {
+				revision = 1
+			}
+			// InstalledHash left empty — computed during directory migration when files are moved.
+			installedHash := ls.InstalledHash
+			if len(ls.Sources) > 0 {
+				sources = ls.Sources
+			}
+
+			skill := legacyToSkill(ls)
+			skill.Revision = revision
+			skill.InstalledHash = installedHash
+			skill.Sources = sources
+
+			// If bareName already exists (two qualified keys collapsed),
+			// merge Sources from both entries and keep the newer one as base.
+			if existing, ok := s.Installed[bareName]; ok {
+				if existing.InstalledAt.After(skill.InstalledAt) {
+					existing.Sources = appendUniqueSources(existing.Sources, skill.Sources)
+					skill = existing
+				} else {
+					skill.Sources = appendUniqueSources(skill.Sources, existing.Sources)
+				}
+			}
+
+			s.Installed[bareName] = skill
+		}
+
+		s.SchemaVersion = 2
+	} else {
+		// Already v2 — pass through unchanged
+		for _, e := range entries {
+			skill := legacyToSkill(e.skill)
+			s.Installed[e.key] = skill
+		}
 	}
 
 	return s, nil
@@ -234,7 +321,41 @@ func (s *State) Remove(name string) {
 	delete(s.Installed, name)
 }
 
+// legacyToSkill converts a legacyInstalledSkill to an InstalledSkill,
+// carrying over all fields that map directly.
+func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
+	return InstalledSkill{
+		Revision:      ls.Revision,
+		InstalledHash: ls.InstalledHash,
+		Sources:       ls.Sources,
+		InstalledAt:   ls.InstalledAt,
+		Tools:         ls.Tools,
+		Paths:         ls.Paths,
+		Type:          ls.Type,
+		InstallCmd:    ls.InstallCmd,
+		UpdateCmd:     ls.UpdateCmd,
+		CmdHash:       ls.CmdHash,
+		Approval:      ls.Approval,
+		ApprovedAt:    ls.ApprovedAt,
+	}
+}
+
+// appendUniqueSources appends sources from extra into base, skipping
+// any that share the same Registry as an existing entry.
+func appendUniqueSources(base, extra []SkillSource) []SkillSource {
+	seen := make(map[string]bool, len(base))
+	for _, s := range base {
+		seen[s.Registry] = true
+	}
+	for _, s := range extra {
+		if !seen[s.Registry] {
+			base = append(base, s)
+			seen[s.Registry] = true
+		}
+	}
+	return base
+}
+
 func statePath() (string, error) {
 	return paths.StatePath()
 }
-
