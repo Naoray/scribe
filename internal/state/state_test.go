@@ -973,9 +973,10 @@ func TestOriginLocalRoundTrip(t *testing.T) {
 	}
 }
 
-// TestOriginPreservedInLegacyMigration verifies that a legacy state file with
-// "origin": "local" loads with OriginLocal set after migration.
-func TestOriginPreservedInLegacyMigration(t *testing.T) {
+// TestOriginPreservedOnSchemaV4Load verifies that a schema_version 4 state
+// file with "origin": "local" loads with OriginLocal set (v2+ passthrough, no
+// migration involved).
+func TestOriginPreservedOnSchemaV4Load(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -1003,6 +1004,55 @@ func TestOriginPreservedInLegacyMigration(t *testing.T) {
 	skill, ok := s.Installed["my-adopted-skill"]
 	if !ok {
 		t.Fatal("my-adopted-skill not found")
+	}
+	if skill.Origin != state.OriginLocal {
+		t.Errorf("Origin: got %q, want OriginLocal", skill.Origin)
+	}
+}
+
+// TestOriginPreservedInPreV2Migration verifies that a pre-v2 legacy state file
+// (no schema_version, bare keys, source:"github:owner/repo@ref" style) that
+// carries "origin": "local" on an entry produces an InstalledSkill with
+// Origin == OriginLocal after migration.
+func TestOriginPreservedInPreV2Migration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	// No schema_version field — triggers pre-v2 migration path (legacyToSkill).
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"team": {},
+		"installed": {
+			"local-tool": {
+				"version": "v1.0.0",
+				"source": "github:owner/team-skills@v1.0.0",
+				"installed_at": "2026-01-01T00:00:00Z",
+				"targets": ["claude"],
+				"paths": ["/tmp/local-tool"],
+				"origin": "local"
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Pre-v2 migration namespaces keys (e.g. "owner-team-skills/local-tool").
+	// Find the entry regardless of key transformation by scanning Installed.
+	var skill state.InstalledSkill
+	found := false
+	for _, v := range s.Installed {
+		if len(v.Paths) > 0 && v.Paths[0] == "/tmp/local-tool" {
+			skill = v
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("local-tool entry not found after migration")
 	}
 	if skill.Origin != state.OriginLocal {
 		t.Errorf("Origin: got %q, want OriginLocal", skill.Origin)
