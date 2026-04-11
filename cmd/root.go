@@ -27,7 +27,7 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true, // errors printed once below; prevents double-print when RunE re-enters Execute
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip meta commands.
-		if cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "migrate" {
+		if cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "migrate" || cmd.Name() == "upgrade" {
 			return nil
 		}
 
@@ -141,5 +141,6 @@ func init() {
 	rootCmd.AddCommand(
 		newCreateCommand(),
 		newExplainCommand(),
+		newUpgradeCommand(),
 	)
 }
