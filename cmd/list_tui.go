@@ -760,18 +760,17 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Uninstall from all tools that had this skill installed.
+	// Uninstall from every tool that originally installed the skill, even if
+	// that tool is now disabled. Resolving from installed.Tools instead of
+	// ResolveActive prevents orphaning Gemini/custom-tool installs whenever
+	// the user disables a tool after installing a skill.
 	if installed, ok := m.bag.State.Installed[sk.Name]; ok {
-		resolvedTools, err := tools.ResolveActive(m.bag.Config)
-		if err == nil {
-			for _, tool := range resolvedTools {
-				for _, t := range installed.Tools {
-					if t == tool.Name() {
-						_ = tool.Uninstall(sk.Name)
-						break
-					}
-				}
+		for _, name := range installed.Tools {
+			tool, err := tools.ResolveByName(m.bag.Config, name)
+			if err != nil {
+				continue
 			}
+			_ = tool.Uninstall(sk.Name)
 		}
 	}
 

@@ -476,3 +476,63 @@ func writeExecutable(t *testing.T, path, content string) {
 		t.Fatalf("write executable %s: %v", path, err)
 	}
 }
+
+func TestResolveByNameReturnsDisabledBuiltin(t *testing.T) {
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{Name: "gemini", Type: tools.ToolTypeBuiltin, Enabled: false},
+		},
+	}
+
+	tool, err := tools.ResolveByName(cfg, "gemini")
+	if err != nil {
+		t.Fatalf("ResolveByName: %v", err)
+	}
+	if tool.Name() != "gemini" {
+		t.Errorf("got %q, want gemini", tool.Name())
+	}
+}
+
+func TestResolveByNameReturnsDisabledCustom(t *testing.T) {
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{Name: "aider", Type: tools.ToolTypeCustom, Enabled: false, Install: "echo i", Uninstall: "echo u"},
+		},
+	}
+
+	tool, err := tools.ResolveByName(cfg, "aider")
+	if err != nil {
+		t.Fatalf("ResolveByName: %v", err)
+	}
+	if tool.Name() != "aider" {
+		t.Errorf("got %q, want aider", tool.Name())
+	}
+}
+
+func TestResolveByNameReturnsBuiltinWhenConfigNil(t *testing.T) {
+	tool, err := tools.ResolveByName(nil, "claude")
+	if err != nil {
+		t.Fatalf("ResolveByName: %v", err)
+	}
+	if tool.Name() != "claude" {
+		t.Errorf("got %q, want claude", tool.Name())
+	}
+}
+
+func TestResolveByNameUnknown(t *testing.T) {
+	if _, err := tools.ResolveByName(nil, "nope"); err == nil {
+		t.Fatal("expected error for unknown tool")
+	}
+}
+
+func TestGeminiUninstallFailsWhenBinaryMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	err := tools.GeminiTool{}.Uninstall("deploy")
+	if err == nil {
+		t.Fatal("expected error when gemini binary is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "gemini CLI not found") {
+		t.Errorf("error message should mention missing CLI, got: %v", err)
+	}
+}

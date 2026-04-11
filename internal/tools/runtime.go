@@ -35,6 +35,20 @@ func BuiltinByName(name string) (Tool, bool) {
 	return tool, ok
 }
 
+// ResolveByName returns a Tool for the given name regardless of whether it is
+// currently enabled. Used by uninstall paths so that a tool which originally
+// installed a skill can still clean up after it is disabled.
+func ResolveByName(cfg *config.Config, name string) (Tool, error) {
+	toolCfg := findToolConfig(cfg, name)
+	if builtin, ok := BuiltinByName(name); ok && (toolCfg == nil || toolCfg.Type != ToolTypeCustom) {
+		return builtin, nil
+	}
+	if toolCfg == nil {
+		return nil, fmt.Errorf("unknown tool %q", name)
+	}
+	return customToolFromConfig(*toolCfg)
+}
+
 func ResolveActive(cfg *config.Config) ([]Tool, error) {
 	statuses, err := ResolveStatuses(cfg)
 	if err != nil {

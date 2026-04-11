@@ -113,21 +113,18 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Uninstall from all tools.
+	// Uninstall from every tool that originally installed the skill, even if
+	// that tool is now disabled or missing from config. Otherwise disabling a
+	// tool after install would orphan its side of the skill on disk.
 	var errs []string
-	resolvedTools, err := tools.ResolveActive(cfg)
-	if err != nil {
-		return fmt.Errorf("resolve tools: %w", err)
-	}
-	for _, tool := range resolvedTools {
-		// Only uninstall from tools that had the skill installed.
-		for _, t := range installed.Tools {
-			if t == tool.Name() {
-				if err := tool.Uninstall(key); err != nil {
-					errs = append(errs, fmt.Sprintf("%s: %v", tool.Name(), err))
-				}
-				break
-			}
+	for _, name := range installed.Tools {
+		tool, err := tools.ResolveByName(cfg, name)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
+			continue
+		}
+		if err := tool.Uninstall(key); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
 		}
 	}
 
