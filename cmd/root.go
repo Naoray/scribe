@@ -62,7 +62,22 @@ var rootCmd = &cobra.Command{
 			fmt.Println()
 		}
 
-		return cfg.Save()
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+
+		// One-shot adoption prompt: ask user to adopt any existing unmanaged skills.
+		// Only runs in interactive TTY. Ignores persisted cfg.Adoption.Mode — firstrun
+		// always prompts so the user isn't silently skipped or silently auto-adopted.
+		if isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()) {
+			st, stErr := factory.State()
+			if stErr == nil {
+				toolSet, _ := tools.ResolveActive(cfg)
+				_ = firstrun.PromptAdoption(cfg, st, toolSet, os.Stdin, os.Stdout)
+			}
+		}
+
+		return nil
 	},
 }
 
