@@ -320,6 +320,116 @@ func TestOnDiskCodexSymlink(t *testing.T) {
 	}
 }
 
+func TestOnDiskManagedField(t *testing.T) {
+	t.Run("canonical store entry state has it", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		skillDir := filepath.Join(home, ".scribe", "skills", "foo")
+		os.MkdirAll(skillDir, 0o755)
+		os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Foo\n"), 0o644)
+
+		st := &state.State{Installed: map[string]state.InstalledSkill{
+			"foo": {Tools: []string{"claude"}, Revision: 1},
+		}}
+		skills, err := OnDisk(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(skills) != 1 {
+			t.Fatalf("expected 1 skill, got %d", len(skills))
+		}
+		if !skills[0].Managed {
+			t.Error("expected Managed=true for canonical store entry tracked in state")
+		}
+	})
+
+	t.Run("tool-facing symlink into store state has it", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		storeDir := filepath.Join(home, ".scribe", "skills", "bar")
+		os.MkdirAll(storeDir, 0o755)
+		os.WriteFile(filepath.Join(storeDir, "SKILL.md"), []byte("# Bar\n"), 0o644)
+
+		claudeSkills := filepath.Join(home, ".claude", "skills")
+		os.MkdirAll(claudeSkills, 0o755)
+		os.Symlink(storeDir, filepath.Join(claudeSkills, "bar"))
+
+		st := &state.State{Installed: map[string]state.InstalledSkill{
+			"bar": {Tools: []string{"claude"}, Revision: 1},
+		}}
+		skills, err := OnDisk(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Deduplicated: scribe store scan finds it first, claude symlink is skipped.
+		var found *Skill
+		for i := range skills {
+			if skills[i].Name == "bar" {
+				found = &skills[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatal("bar not found in results")
+		}
+		if !found.Managed {
+			t.Error("expected Managed=true for symlink into store tracked in state")
+		}
+	})
+
+	t.Run("unmanaged tool-facing entry not in state", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		claudeSkills := filepath.Join(home, ".claude", "skills", "baz")
+		os.MkdirAll(claudeSkills, 0o755)
+		os.WriteFile(filepath.Join(claudeSkills, "SKILL.md"), []byte("# Baz\n"), 0o644)
+
+		st := &state.State{Installed: map[string]state.InstalledSkill{}}
+		skills, err := OnDisk(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(skills) != 1 {
+			t.Fatalf("expected 1 skill, got %d", len(skills))
+		}
+		if skills[0].Managed {
+			t.Error("expected Managed=false for plain tool-dir entry not in state")
+		}
+	})
+
+	t.Run("state orphan no LocalPath", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		st := &state.State{Installed: map[string]state.InstalledSkill{
+			"ghost": {Tools: []string{"claude"}, Revision: 3},
+		}}
+		skills, err := OnDisk(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found *Skill
+		for i := range skills {
+			if skills[i].Name == "ghost" {
+				found = &skills[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatal("ghost orphan not found in results")
+		}
+		if found.LocalPath != "" {
+			t.Errorf("expected empty LocalPath for orphan, got %q", found.LocalPath)
+		}
+		if !found.Managed {
+			t.Error("expected Managed=true for state-orphan entry")
+		}
+	})
+}
+
 func TestHasConflictMarkers(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -54,6 +54,7 @@ type Skill struct {
 	Modified    bool     // SKILL.md hash differs from installed_hash in state
 	Conflicted  bool     // SKILL.md contains unresolved merge conflict markers
 	Revision    int      // from state
+	Managed     bool     // tracked in state AND LocalPath is inside ~/.scribe/skills/
 }
 
 // OnDisk scans ~/.scribe/skills/ plus tool-facing install locations that are
@@ -93,7 +94,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 		}
 
 		seen[name] = true
-		sk := buildSkill(name, skillDir, scribeSkills, "", st)
+		sk := buildSkill(name, skillDir, scribeSkills, "", st, scribeSkills)
 		skills = append(skills, sk)
 	}
 
@@ -104,7 +105,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 		{dir: filepath.Join(home, ".claude", "skills"), target: "claude"},
 		{dir: filepath.Join(home, ".codex", "skills"), target: "codex"},
 	} {
-		found, scanErr := scanToolSkills(scan.dir, scan.target, seen, st)
+		found, scanErr := scanToolSkills(scan.dir, scan.target, seen, st, scribeSkills)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -120,6 +121,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 			Name:     name,
 			Targets:  installed.Tools,
 			Revision: installed.Revision,
+			Managed:  true, // state-tracked → managed regardless of disk presence
 		})
 	}
 
@@ -141,7 +143,7 @@ func OnDisk(st *state.State) ([]Skill, error) {
 	return skills, nil
 }
 
-func scanToolSkills(dir, target string, seen map[string]bool, st *state.State) ([]Skill, error) {
+func scanToolSkills(dir, target string, seen map[string]bool, st *state.State, scribeSkills string) ([]Skill, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -182,13 +184,14 @@ func scanToolSkills(dir, target string, seen map[string]bool, st *state.State) (
 		}
 
 		seen[skillName] = true
-		skills = append(skills, buildSkill(skillName, skillDir, filepath.Dir(skillDir), target, st))
+		skills = append(skills, buildSkill(skillName, skillDir, filepath.Dir(skillDir), target, st, scribeSkills))
 	}
 	return skills, nil
 }
 
 // buildSkill creates a Skill from a directory, enriching with state info.
-func buildSkill(name, skillDir, scanBase, target string, st *state.State) Skill {
+// scribeSkills is the canonical store dir (~/.scribe/skills/) used for the Managed check.
+func buildSkill(name, skillDir, scanBase, target string, st *state.State, scribeSkills string) Skill {
 	meta := readSkillMetadata(skillDir)
 	hash, _ := contentHash(skillDir)
 	fileHash, _ := skillFileHash(skillDir)
@@ -216,6 +219,10 @@ func buildSkill(name, skillDir, scanBase, target string, st *state.State) Skill 
 		if installed.InstalledHash != "" && fileHash != "" && fileHash != installed.InstalledHash {
 			sk.Modified = true
 		}
+		// Managed: tracked in state AND LocalPath is inside the canonical store.
+		storePrefix := scribeSkills + string(filepath.Separator)
+		sk.Managed = skillDir == scribeSkills ||
+			strings.HasPrefix(skillDir+string(filepath.Separator), storePrefix)
 	} else if target != "" {
 		sk.Targets = []string{target}
 	}
