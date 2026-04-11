@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestClaudeSkillPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tool := ClaudeTool{}
+	got, err := tool.SkillPath("commit")
+	if err != nil {
+		t.Fatalf("SkillPath: %v", err)
+	}
+	want := filepath.Join(home, ".claude", "skills", "commit")
+	if got != want {
+		t.Errorf("SkillPath = %q, want %q", got, want)
+	}
+}
+
 func TestClaudeInstallSymlinksToFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

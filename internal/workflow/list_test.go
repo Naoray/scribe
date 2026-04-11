@@ -47,71 +47,146 @@ func TestPrintLocalJSON(t *testing.T) {
 		ContentHash string   `json:"content_hash,omitempty"`
 		Targets     []string `json:"targets"`
 		Managed     bool     `json:"managed"`
+		Origin      string   `json:"origin,omitempty"`
 		Path        string   `json:"path,omitempty"`
 	}
 
-	st := &state.State{
-		Installed: map[string]state.InstalledSkill{
-			"managed-skill": {Revision: 3},
-		},
-	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	storeDir := home + "/.scribe/skills"
 
-	skills := []discovery.Skill{
-		{
-			Name:        "managed-skill",
-			Description: "A managed skill",
-			Revision:    3,
-			ContentHash: "abc123",
-			Targets:     []string{"claude"},
-			LocalPath:   "/home/user/.claude/skills/managed-skill",
-		},
-		{
-			Name:        "unmanaged-skill",
-			Description: "An unmanaged skill",
-			ContentHash: "def456",
-			Targets:     nil, // should become [] in JSON
-			LocalPath:   "/home/user/.claude/skills/unmanaged-skill",
-		},
-	}
+	t.Run("unmanaged tool-facing skill", func(t *testing.T) {
+		// Path outside ~/.scribe/skills/ → Managed=false in discovery.Skill.
+		st := &state.State{Installed: map[string]state.InstalledSkill{}}
+		skills := []discovery.Skill{
+			{
+				Name:        "tool-skill",
+				Description: "A tool-facing skill",
+				ContentHash: "abc123",
+				Targets:     []string{"claude"},
+				LocalPath:   home + "/.claude/skills/tool-skill",
+				Managed:     false,
+			},
+		}
 
-	var buf bytes.Buffer
-	if err := printLocalJSON(&buf, skills, st); err != nil {
-		t.Fatalf("printLocalJSON error: %v", err)
-	}
+		var buf bytes.Buffer
+		if err := printLocalJSON(&buf, skills, st); err != nil {
+			t.Fatalf("printLocalJSON error: %v", err)
+		}
+		var got []outputSkill
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 skill, got %d", len(got))
+		}
+		if got[0].Managed {
+			t.Error("tool-skill: expected managed=false")
+		}
+		if got[0].Origin != "" {
+			t.Errorf("tool-skill: expected no origin, got %q", got[0].Origin)
+		}
+	})
 
-	var got []outputSkill
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
-	}
+	t.Run("adopted local-origin skill", func(t *testing.T) {
+		// State has Origin=OriginLocal + path inside store → managed=true, origin="local".
+		st := &state.State{
+			Installed: map[string]state.InstalledSkill{
+				"adopted-skill": {Revision: 1, Origin: state.OriginLocal},
+			},
+		}
+		skills := []discovery.Skill{
+			{
+				Name:        "adopted-skill",
+				Description: "An adopted skill",
+				ContentHash: "def456",
+				Targets:     []string{"claude"},
+				LocalPath:   storeDir + "/adopted-skill",
+				Managed:     true,
+			},
+		}
 
-	if len(got) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(got))
-	}
+		var buf bytes.Buffer
+		if err := printLocalJSON(&buf, skills, st); err != nil {
+			t.Fatalf("printLocalJSON error: %v", err)
+		}
+		var got []outputSkill
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 skill, got %d", len(got))
+		}
+		if !got[0].Managed {
+			t.Error("adopted-skill: expected managed=true")
+		}
+		if got[0].Origin != "local" {
+			t.Errorf("adopted-skill: expected origin=%q, got %q", "local", got[0].Origin)
+		}
+	})
 
-	// Managed skill
-	if !got[0].Managed {
-		t.Error("managed-skill: expected managed=true")
-	}
-	if got[0].ContentHash != "abc123" {
-		t.Errorf("managed-skill: content_hash = %q, want %q", got[0].ContentHash, "abc123")
-	}
-	if got[0].Revision != 3 {
-		t.Errorf("managed-skill: revision = %d, want 3", got[0].Revision)
-	}
+	t.Run("registry-sourced skill", func(t *testing.T) {
+		// State has empty Origin (OriginRegistry) → managed=true, no origin in JSON.
+		st := &state.State{
+			Installed: map[string]state.InstalledSkill{
+				"registry-skill": {Revision: 3, Origin: state.OriginRegistry},
+			},
+		}
+		skills := []discovery.Skill{
+			{
+				Name:        "registry-skill",
+				Description: "A registry skill",
+				Revision:    3,
+				ContentHash: "ghi789",
+				Targets:     []string{"claude"},
+				LocalPath:   storeDir + "/registry-skill",
+				Managed:     true,
+			},
+		}
 
-	// Unmanaged skill
-	if got[1].Managed {
-		t.Error("unmanaged-skill: expected managed=false")
-	}
-	if got[1].ContentHash != "def456" {
-		t.Errorf("unmanaged-skill: content_hash = %q, want %q", got[1].ContentHash, "def456")
-	}
+		var buf bytes.Buffer
+		if err := printLocalJSON(&buf, skills, st); err != nil {
+			t.Fatalf("printLocalJSON error: %v", err)
+		}
+		var got []outputSkill
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 skill, got %d", len(got))
+		}
+		if !got[0].Managed {
+			t.Error("registry-skill: expected managed=true")
+		}
+		if got[0].Origin != "" {
+			t.Errorf("registry-skill: expected no origin (omitempty), got %q", got[0].Origin)
+		}
+		if got[0].ContentHash != "ghi789" {
+			t.Errorf("registry-skill: content_hash = %q, want %q", got[0].ContentHash, "ghi789")
+		}
+		if got[0].Revision != 3 {
+			t.Errorf("registry-skill: revision = %d, want 3", got[0].Revision)
+		}
+	})
 
-	// Targets should be [] not null for nil input
-	if got[1].Targets == nil {
-		t.Error("unmanaged-skill: targets should be [] not null")
-	}
-	if len(got[1].Targets) != 0 {
-		t.Errorf("unmanaged-skill: targets = %v, want empty array", got[1].Targets)
-	}
+	t.Run("nil targets become empty array", func(t *testing.T) {
+		st := &state.State{Installed: map[string]state.InstalledSkill{}}
+		skills := []discovery.Skill{
+			{Name: "bare", ContentHash: "x", Targets: nil, Managed: false},
+		}
+		var buf bytes.Buffer
+		if err := printLocalJSON(&buf, skills, st); err != nil {
+			t.Fatalf("printLocalJSON error: %v", err)
+		}
+		var got []outputSkill
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
+		}
+		if got[0].Targets == nil {
+			t.Error("targets should be [] not null")
+		}
+		if len(got[0].Targets) != 0 {
+			t.Errorf("targets = %v, want empty array", got[0].Targets)
+		}
+	})
 }

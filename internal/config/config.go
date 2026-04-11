@@ -40,12 +40,19 @@ type ToolConfig struct {
 	Path      string `yaml:"path,omitempty"`      // optional installed-path template for custom tools
 }
 
+// AdoptionConfig holds settings for local skill adoption scanning.
+type AdoptionConfig struct {
+	Mode  string   `yaml:"mode,omitempty"`  // "auto" | "prompt" | "off"
+	Paths []string `yaml:"paths,omitempty"` // optional extra dirs; builtins always included
+}
+
 // Config holds user preferences from ~/.scribe/config.yaml.
 type Config struct {
 	Registries []RegistryConfig `yaml:"registries,omitempty"`
 	Token      string           `yaml:"token,omitempty"`
 	Tools      []ToolConfig     `yaml:"tools,omitempty"`
 	Editor     string           `yaml:"editor,omitempty"`
+	Adoption   AdoptionConfig   `yaml:"adoption,omitempty"`
 }
 
 // TeamRepos returns the list of enabled registry repos.
@@ -92,6 +99,84 @@ func (c *Config) EnabledRegistries() []RegistryConfig {
 	return enabled
 }
 
+// AdoptionMode returns the validated adoption mode, defaulting to "auto".
+func (c *Config) AdoptionMode() string {
+	switch c.Adoption.Mode {
+	case "auto", "prompt", "off":
+		return c.Adoption.Mode
+	default:
+		return "auto"
+	}
+}
+
+// AdoptionPaths returns the full list of directories to scan for adoptable skills.
+// Builtins (~/.claude/skills and ~/.codex/skills) are always first, followed by
+// any user-configured paths. Tilde and relative paths are resolved against the
+// user's home directory. Paths outside the home directory are rejected.
+func (c *Config) AdoptionPaths() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("get home dir: %w", err)
+	}
+
+	// Resolve symlinks on home dir so comparisons work on macOS where
+	// os.UserHomeDir() returns /Users/alice but /tmp and /var are symlinked
+	// under /private/. EvalSymlinks requires the path to exist; home always does.
+	resolvedHome := home
+	if rh, err := filepath.EvalSymlinks(home); err == nil {
+		resolvedHome = rh
+	}
+
+	builtins := []string{
+		filepath.Join(resolvedHome, ".claude", "skills"),
+		filepath.Join(resolvedHome, ".codex", "skills"),
+	}
+
+	result := make([]string, 0, len(builtins)+len(c.Adoption.Paths))
+	result = append(result, builtins...)
+
+	for _, p := range c.Adoption.Paths {
+		var resolved string
+		if strings.HasPrefix(p, "~/") {
+			resolved = filepath.Join(home, p[2:])
+		} else if filepath.IsAbs(p) {
+			resolved = p
+		} else {
+			resolved = filepath.Join(home, p)
+		}
+		resolved = filepath.Clean(resolved)
+
+		// Attempt to resolve symlinks so that e.g. /private/Users/alice/skills
+		// compares correctly against resolvedHome=/private/Users/alice.
+		// Adoption paths may not exist yet — that is fine; we handle ErrNotExist
+		// by rebasing any home-relative path onto resolvedHome so the boundary
+		// check stays consistent even when the path doesn't exist on disk yet.
+		if rp, err := filepath.EvalSymlinks(resolved); err == nil {
+			resolved = rp
+		} else if errors.Is(err, fs.ErrNotExist) {
+			// Path doesn't exist yet. If it starts with home, rebase onto
+			// resolvedHome so the Rel comparison works correctly (avoids
+			// mismatches when home itself is a symlink, e.g. macOS /var →
+			// /private/var).
+			if rel, relErr := filepath.Rel(home, resolved); relErr == nil && !strings.HasPrefix(rel, "..") {
+				resolved = filepath.Join(resolvedHome, rel)
+			}
+		}
+		// For other EvalSymlinks errors (permission denied, etc.) keep cleaned path.
+
+		// Use filepath.Rel rather than strings.HasPrefix so that
+		// /Users/alice-other is not mistakenly accepted as inside /Users/alice.
+		rel, err := filepath.Rel(resolvedHome, resolved)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil, fmt.Errorf("adoption.paths entry %q is outside home", p)
+		}
+
+		result = append(result, resolved)
+	}
+
+	return result, nil
+}
+
 // IsTeam returns whether this is a team registry.
 func (rc RegistryConfig) IsTeam() bool {
 	return rc.Type == RegistryTypeTeam
@@ -118,6 +203,9 @@ func Load() (*Config, error) {
 		var cfg Config
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return nil, fmt.Errorf("parse config.yaml: %w", err)
+		}
+		if _, err := cfg.AdoptionPaths(); err != nil {
+			return nil, err
 		}
 		return &cfg, nil
 	}

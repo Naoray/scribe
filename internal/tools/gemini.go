@@ -28,6 +28,12 @@ func (t GeminiTool) Install(skillName, canonicalDir string) ([]string, error) {
 	return []string{fmt.Sprintf("gemini:user:%s", skillName)}, nil
 }
 
+// SkillPath is not applicable for GeminiTool — Gemini manages skill paths
+// internally via its CLI and does not expose a predictable filesystem location.
+func (t GeminiTool) SkillPath(skillName string) (string, error) {
+	return "", fmt.Errorf("gemini: skill path not available (managed by gemini CLI)")
+}
+
 func (t GeminiTool) Uninstall(skillName string) error {
 	// Fail loudly when the gemini CLI is missing from PATH. Silently returning
 	// nil would leave Gemini's side of the install in place while Scribe drops

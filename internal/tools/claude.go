@@ -60,6 +60,14 @@ func (t ClaudeTool) Uninstall(skillName string) error {
 	return nil
 }
 
+func (t ClaudeTool) SkillPath(skillName string) (string, error) {
+	skillsDir, err := claudeSkillsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(skillsDir, skillName), nil
+}
+
 func claudeSkillsDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -22,6 +22,17 @@ type State struct {
 	Installed     map[string]InstalledSkill `json:"installed"`
 }
 
+// Origin describes how a skill was acquired.
+type Origin string
+
+const (
+	// OriginRegistry is the zero value: skill came from a registry.
+	// Existing state files without an "origin" field deserialize as OriginRegistry.
+	OriginRegistry Origin = ""
+	// OriginLocal means the skill was adopted or hand-written locally.
+	OriginLocal Origin = "local"
+)
+
 // InstalledSkill records everything needed to detect updates and uninstall.
 type InstalledSkill struct {
 	Revision      int           `json:"revision"`
@@ -30,6 +41,7 @@ type InstalledSkill struct {
 	InstalledAt   time.Time     `json:"installed_at"`
 	Tools         []string      `json:"tools"`
 	Paths         []string      `json:"paths"`
+	Origin        Origin        `json:"origin,omitempty"`
 
 	// Package-specific fields (omitted for regular skills).
 	Type       string    `json:"type,omitempty"`
@@ -80,6 +92,7 @@ type legacyInstalledSkill struct {
 	Revision      int           `json:"revision,omitempty"`
 	InstalledHash string        `json:"installed_hash,omitempty"`
 	Sources       []SkillSource `json:"sources,omitempty"`
+	Origin        Origin        `json:"origin,omitempty"`
 }
 
 // DisplayVersion returns the version string shown in `scribe list`.
@@ -346,6 +359,7 @@ func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
 		InstalledAt:   ls.InstalledAt,
 		Tools:         ls.Tools,
 		Paths:         ls.Paths,
+		Origin:        ls.Origin,
 		Type:          ls.Type,
 		InstallCmd:    ls.InstallCmd,
 		UpdateCmd:     ls.UpdateCmd,

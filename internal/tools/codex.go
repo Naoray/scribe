@@ -54,6 +54,14 @@ func (t CodexTool) Uninstall(skillName string) error {
 	return nil
 }
 
+func (t CodexTool) SkillPath(skillName string) (string, error) {
+	skillsDir, err := codexSkillsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(skillsDir, skillName), nil
+}
+
 func codexSkillsDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

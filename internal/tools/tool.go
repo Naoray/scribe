@@ -22,6 +22,10 @@ type Tool interface {
 	Uninstall(skillName string) error
 	// Detect reports whether this tool is installed on the machine.
 	Detect() bool
+	// SkillPath returns the absolute path where this tool expects the skill
+	// symlink (or link file) to live. Used by adoption to remove the old
+	// real directory before Install replaces it with a symlink.
+	SkillPath(skillName string) (string, error)
 }
 
 // DefaultTools returns the standard set of supported AI tools.

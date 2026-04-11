@@ -99,6 +99,11 @@ func runGuideJSON(w io.Writer) error {
 		Description: "Verify installed skills",
 	})
 
+	steps = append(steps, guideStep{
+		Command:     "scribe adopt",
+		Description: "Import hand-rolled skills from ~/.claude/skills into the store",
+	})
+
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(map[string]any{
@@ -177,9 +182,11 @@ func displayGuideSummary(repo, chosenFlow string) {
 	case "join":
 		content += "  • scribe sync       Keep skills up to date\n"
 		content += "  • scribe list       See installed skills and status\n"
+		content += "  • scribe adopt      Import hand-rolled skills into the store\n"
 	case "create":
 		content += "  • scribe add        Add skills to your registry\n"
 		content += "  • scribe list       See installed skills and status\n"
+		content += "  • scribe adopt      Import hand-rolled skills into the store\n"
 	}
 
 	content += "  • scribe guide      Run this guide again anytime\n"

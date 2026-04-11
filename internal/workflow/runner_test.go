@@ -87,23 +87,24 @@ func TestSyncSteps_Composition(t *testing.T) {
 	}
 }
 
-func TestSyncTail_IsSubsetOfSyncSteps(t *testing.T) {
-	full := workflow.SyncSteps()
+func TestSyncTail_Composition(t *testing.T) {
 	tail := workflow.SyncTail()
 
 	if len(tail) == 0 {
 		t.Fatal("SyncTail() returned empty list")
 	}
 
-	// The tail should match the last N steps of full sync.
-	offset := len(full) - len(tail)
-	if offset < 0 {
-		t.Fatal("SyncTail is longer than SyncSteps")
+	// SyncTail is the shared sync suffix reused by connect and create-registry.
+	// It must end with SyncSkills and must NOT contain Adopt (adoption is a
+	// sync-only prelude; connect flows should not trigger adoption).
+	last := tail[len(tail)-1]
+	if last.Name != "SyncSkills" {
+		t.Errorf("expected SyncTail to end with SyncSkills, got %s", last.Name)
 	}
 
-	for i, step := range tail {
-		if full[offset+i].Name != step.Name {
-			t.Errorf("tail[%d] name %q != full[%d] name %q", i, step.Name, offset+i, full[offset+i].Name)
+	for _, s := range tail {
+		if s.Name == "Adopt" {
+			t.Error("Adopt must not appear in SyncTail")
 		}
 	}
 }

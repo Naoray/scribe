@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"fmt"
 	"os"
@@ -908,4 +909,152 @@ func gitBlobSHAForTest(data []byte) string {
 	payload := append([]byte(fmt.Sprintf("blob %d\x00", len(data))), data...)
 	sum := sha1.Sum(payload)
 	return fmt.Sprintf("%x", sum)
+}
+
+// TestOriginZeroValueIsRegistry verifies that a fresh InstalledSkill has
+// OriginRegistry as its zero value and that it round-trips without emitting
+// "origin" in the JSON output.
+func TestOriginZeroValueIsRegistry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	skill := state.InstalledSkill{Revision: 1}
+	if skill.Origin != state.OriginRegistry {
+		t.Errorf("zero value Origin: got %q, want OriginRegistry (%q)", skill.Origin, state.OriginRegistry)
+	}
+
+	s, _ := state.Load()
+	s.RecordInstall("test-skill", skill)
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Verify "origin" is absent from JSON (omitempty on zero value).
+	home := os.Getenv("HOME")
+	data, err := os.ReadFile(filepath.Join(home, ".scribe", "state.json"))
+	if err != nil {
+		t.Fatalf("read state.json: %v", err)
+	}
+	if bytes.Contains(data, []byte(`"origin"`)) {
+		t.Errorf("expected no 'origin' key in JSON for zero value, got:\n%s", data)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	got := loaded.Installed["test-skill"]
+	if got.Origin != state.OriginRegistry {
+		t.Errorf("round-trip Origin: got %q, want OriginRegistry", got.Origin)
+	}
+}
+
+// TestOriginLocalRoundTrip verifies that OriginLocal survives Save/Load.
+func TestOriginLocalRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	s, _ := state.Load()
+	s.RecordInstall("adopted-skill", state.InstalledSkill{
+		Revision: 1,
+		Tools:    []string{"claude"},
+		Paths:    []string{"/tmp/adopted-skill"},
+		Origin:   state.OriginLocal,
+	})
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	got := loaded.Installed["adopted-skill"]
+	if got.Origin != state.OriginLocal {
+		t.Errorf("round-trip Origin: got %q, want OriginLocal", got.Origin)
+	}
+}
+
+// TestOriginPreservedOnSchemaV4Load verifies that a schema_version 4 state
+// file with "origin": "local" loads with OriginLocal set (v2+ passthrough, no
+// migration involved).
+func TestOriginPreservedOnSchemaV4Load(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"schema_version": 4,
+		"installed": {
+			"my-adopted-skill": {
+				"revision": 2,
+				"installed_hash": "abc",
+				"installed_at": "2026-01-01T00:00:00Z",
+				"tools": ["claude"],
+				"paths": ["/tmp/my-adopted-skill"],
+				"origin": "local"
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	skill, ok := s.Installed["my-adopted-skill"]
+	if !ok {
+		t.Fatal("my-adopted-skill not found")
+	}
+	if skill.Origin != state.OriginLocal {
+		t.Errorf("Origin: got %q, want OriginLocal", skill.Origin)
+	}
+}
+
+// TestOriginPreservedInPreV2Migration verifies that a pre-v2 legacy state file
+// (no schema_version, bare keys, source:"github:owner/repo@ref" style) that
+// carries "origin": "local" on an entry produces an InstalledSkill with
+// Origin == OriginLocal after migration.
+func TestOriginPreservedInPreV2Migration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	// No schema_version field — triggers pre-v2 migration path (legacyToSkill).
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"team": {},
+		"installed": {
+			"local-tool": {
+				"version": "v1.0.0",
+				"source": "github:owner/team-skills@v1.0.0",
+				"installed_at": "2026-01-01T00:00:00Z",
+				"targets": ["claude"],
+				"paths": ["/tmp/local-tool"],
+				"origin": "local"
+			}
+		}
+	}`), 0o644)
+
+	s, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Pre-v2 migration namespaces keys (e.g. "owner-team-skills/local-tool").
+	// Find the entry regardless of key transformation by scanning Installed.
+	var skill state.InstalledSkill
+	found := false
+	for _, v := range s.Installed {
+		if len(v.Paths) > 0 && v.Paths[0] == "/tmp/local-tool" {
+			skill = v
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("local-tool entry not found after migration")
+	}
+	if skill.Origin != state.OriginLocal {
+		t.Errorf("Origin: got %q, want OriginLocal", skill.Origin)
+	}
 }
