@@ -137,10 +137,14 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Remove any remaining symlinks from installed.Paths.
-	for _, p := range installed.Paths {
+	// Remove only the projections Scribe still believes it manages.
+	managedPaths := installed.ManagedPaths
+	if len(managedPaths) == 0 {
+		managedPaths = installed.Paths
+	}
+	for _, p := range managedPaths {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Sprintf("symlink %s: %v", p, err))
+			errs = append(errs, fmt.Sprintf("managed path %s: %v", p, err))
 		}
 	}
 

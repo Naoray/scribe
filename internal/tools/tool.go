@@ -26,6 +26,11 @@ type Tool interface {
 	// symlink (or link file) to live. Used by adoption to remove the old
 	// real directory before Install replaces it with a symlink.
 	SkillPath(skillName string) (string, error)
+	// CanonicalTarget returns the path inside canonicalDir that this tool's
+	// on-disk projection mirrors (e.g. claude → canonicalDir/SKILL.md; codex
+	// → canonicalDir itself). When ok is false, the tool manages its skills
+	// opaquely (e.g. via a CLI) and reconcile skips drift inspection.
+	CanonicalTarget(canonicalDir string) (path string, ok bool)
 }
 
 // DefaultTools returns the standard set of supported AI tools.

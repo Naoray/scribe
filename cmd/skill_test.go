@@ -65,6 +65,7 @@ func seedSkillEnv(t *testing.T) {
 				Tools:         []string{"claude", "cursor"},
 				ToolsMode:     state.ToolsModeInherit,
 				Paths:         paths,
+				ManagedPaths:  append([]string(nil), paths...),
 				InstalledAt:   time.Now().UTC(),
 			},
 		},
@@ -174,5 +175,96 @@ func TestSkillEdit_RejectsMissingSkill(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for missing skill")
+	}
+}
+
+func TestSkillRepair_ManagedWins(t *testing.T) {
+	seedSkillEnv(t)
+
+	home := os.Getenv("HOME")
+	canonical := filepath.Join(home, ".scribe", "skills", "commit")
+	codexPath := filepath.Join(home, ".codex", "skills", "commit")
+	if err := os.MkdirAll(codexPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexPath, "SKILL.md"), []byte("# commit\nlocal drift\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill := st.Installed["commit"]
+	skill.Tools = []string{"claude", "cursor", "codex"}
+	skill.ToolsMode = state.ToolsModePinned
+	skill.Conflicts = []state.ProjectionConflict{{Tool: "codex", Path: codexPath, FoundHash: "deadbeef", SeenAt: time.Now().UTC()}}
+	st.Installed["commit"] = skill
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newSkillRepairCommand()
+	cmd.SetArgs([]string{"commit", "--tool", "codex", "--from", "managed", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	resolved, err := filepath.EvalSymlinks(codexPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	canonical, _ = filepath.EvalSymlinks(canonical)
+	if resolved != canonical {
+		t.Fatalf("codex path resolves to %q, want %q", resolved, canonical)
+	}
+
+	st, err = state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Installed["commit"].Conflicts) != 0 {
+		t.Fatalf("Conflicts = %v, want cleared", st.Installed["commit"].Conflicts)
+	}
+}
+
+func TestSkillRepair_ToolWins(t *testing.T) {
+	seedSkillEnv(t)
+
+	home := os.Getenv("HOME")
+	codexPath := filepath.Join(home, ".codex", "skills", "commit")
+	if err := os.MkdirAll(codexPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	toolContent := []byte("# commit\npromoted\n")
+	if err := os.WriteFile(filepath.Join(codexPath, "SKILL.md"), toolContent, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill := st.Installed["commit"]
+	skill.Tools = []string{"claude", "cursor", "codex"}
+	skill.ToolsMode = state.ToolsModePinned
+	skill.Conflicts = []state.ProjectionConflict{{Tool: "codex", Path: codexPath, FoundHash: "deadbeef", SeenAt: time.Now().UTC()}}
+	st.Installed["commit"] = skill
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newSkillRepairCommand()
+	cmd.SetArgs([]string{"commit", "--tool", "codex", "--from", "tool", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".scribe", "skills", "commit", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != string(toolContent) {
+		t.Fatalf("canonical SKILL.md = %q, want %q", string(data), string(toolContent))
 	}
 }

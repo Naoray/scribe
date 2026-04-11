@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 )
 
@@ -18,6 +19,8 @@ type Formatter interface {
 	OnSkillSkipped(name string, status sync.SkillStatus)
 	OnSkillError(name string, err error)
 	OnSyncComplete(summary sync.SyncCompleteMsg)
+	OnReconcileConflict(name string, conflict state.ProjectionConflict)
+	OnReconcileComplete(summary sync.ReconcileCompleteMsg)
 	OnLegacyFormat(repo string)
 
 	// Connect lifecycle

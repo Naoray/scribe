@@ -81,6 +81,7 @@ func (m *mockTool) Uninstall(skillName string) error { return m.uninstallErr }
 func (m *mockTool) SkillPath(skillName string) (string, error) {
 	return filepath.Join(m.name, skillName), nil
 }
+func (m *mockTool) CanonicalTarget(_ string) (string, bool) { return "", false }
 
 // ---------------------------------------------------------------------------
 // TestFindCandidates

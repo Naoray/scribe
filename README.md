@@ -11,7 +11,7 @@ scribe sync
 
 AI coding agents like Claude Code and Cursor work better with "skills" — markdown instruction files that teach the agent how to do specific tasks (code reviews, deployments, Laravel patterns, etc.). If you've built a good set of skills, sharing them with teammates currently means Slack links and manual file copying. Nobody knows if they're on the latest version. The person who just joined has no idea what they're missing.
 
-Scribe fixes this. You put your team's skills in a GitHub repo with a `scribe.yaml` manifest (or legacy `scribe.toml`), teammates run `scribe registry connect`, and `scribe sync` keeps everyone up to date automatically. Works with Claude Code and Cursor from the same manifest.
+Scribe fixes this. You put your team's skills in a GitHub repo with a `scribe.yaml` manifest (or legacy `scribe.toml`), teammates run `scribe registry connect`, and `scribe sync` keeps the whole machine healthy: canonical store, adopted local skills, and tool-facing installs. Works with Claude Code, Codex, and Cursor from the same manifest.
 
 ## Install
 
@@ -128,7 +128,8 @@ ArtistfyHQ/team-skills/
 | `scribe add [query]` | Find and install skills from registries |
 | `scribe adopt [name]` | Import hand-rolled skills from `~/.claude/skills` etc. into the store |
 | `scribe remove <skill>` | Remove a skill from this machine |
-| `scribe sync` | Pull updates from connected registries (runs adoption first) |
+| `scribe sync` | Reconcile local skill state, tool installs, and connected registries |
+| `scribe skill repair <skill> --tool <tool>` | Resolve preserved managed drift when a tool-local copy differs from the canonical store |
 | `scribe status` | Show connected registries, installed count, and last sync |
 | `scribe tools` | List detected AI tools, enable/disable |
 | `scribe explain <skill>` | AI-powered skill explanation (or `--raw` for rendered SKILL.md) |
@@ -181,8 +182,16 @@ syncing ArtistfyHQ/team-skills...
   laravel-init         updated to v1.1.0
   deploy               ok (main@a3f2c1b)
   frontend-prs         installed main@c9f1d2e
+repaired 1 tool installs
 
 done: 1 installed, 1 updated, 2 current, 0 failed
+```
+
+If sync finds divergent content in a managed tool path, it preserves that content and prints a repair hint instead of overwriting it:
+
+```bash
+conflict: recap in codex differs from managed copy
+run `scribe skill repair recap --tool codex` to resolve
 ```
 
 ## Adoption — claim skills you already have

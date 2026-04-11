@@ -11,7 +11,9 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -19,9 +21,9 @@ func newSkillCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skill",
 		Short: "Inspect or modify individual installed skills",
-		Long:  `Per-skill management. Currently provides "edit" for choosing which AI tools a skill installs into.`,
+		Long:  `Per-skill management for choosing tools and repairing managed drift.`,
 	}
-	cmd.AddCommand(newSkillEditCommand())
+	cmd.AddCommand(newSkillEditCommand(), newSkillRepairCommand())
 	return cmd
 }
 
@@ -62,6 +64,28 @@ type skillEditResult struct {
 	Tools     []string `json:"tools"`
 	Added     []string `json:"added,omitempty"`
 	Removed   []string `json:"removed,omitempty"`
+}
+
+type skillRepairResult struct {
+	Name   string `json:"name"`
+	Tool   string `json:"tool"`
+	Source string `json:"source"`
+}
+
+func newSkillRepairCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "repair <name>",
+		Short: "Resolve managed drift for a skill projection",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSkillRepair,
+	}
+	cmd.Flags().String("tool", "", "Tool projection to repair")
+	cmd.Flags().String("from", "managed", "Conflict winner: managed or tool")
+	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	if err := cmd.MarkFlagRequired("tool"); err != nil {
+		panic(err)
+	}
+	return cmd
 }
 
 func runSkillEdit(cmd *cobra.Command, args []string) error {
@@ -186,8 +210,12 @@ func runSkillEdit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Uninstall dropped tools first (best-effort — log and continue).
-	var newPathSet = make(map[string]bool, len(installed.Paths))
-	for _, p := range installed.Paths {
+	existingManagedPaths := installed.ManagedPaths
+	if len(existingManagedPaths) == 0 {
+		existingManagedPaths = installed.Paths
+	}
+	var newPathSet = make(map[string]bool, len(existingManagedPaths))
+	for _, p := range existingManagedPaths {
 		newPathSet[p] = true
 	}
 	for _, name := range removed {
@@ -232,6 +260,7 @@ func runSkillEdit(cmd *cobra.Command, args []string) error {
 	installed.Tools = desired
 	installed.ToolsMode = desiredMode
 	installed.Paths = newPaths
+	installed.ManagedPaths = append([]string(nil), newPaths...)
 	st.Installed[args[0]] = installed
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("save state: %w", err)
@@ -268,6 +297,103 @@ func renderSkillEditText(r skillEditResult) {
 	if len(r.Removed) > 0 {
 		fmt.Printf("  -     %s\n", strings.Join(r.Removed, ", "))
 	}
+}
+
+func runSkillRepair(cmd *cobra.Command, args []string) error {
+	toolName, _ := cmd.Flags().GetString("tool")
+	source, _ := cmd.Flags().GetString("from")
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
+
+	if source != "managed" && source != "tool" {
+		return fmt.Errorf("skill repair: --from must be one of managed, tool")
+	}
+
+	factory := newCommandFactory()
+	cfg, err := factory.Config()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	st, err := factory.State()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+
+	name := args[0]
+	installed, ok := st.Installed[name]
+	if !ok {
+		return fmt.Errorf("skill %q is not installed", name)
+	}
+
+	tool, err := tools.ResolveByName(cfg, toolName)
+	if err != nil {
+		return err
+	}
+	path, err := tool.SkillPath(name)
+	if err != nil {
+		return err
+	}
+	canonicalDir := filepath.Join(mustStoreDir(), name)
+
+	if source == "tool" {
+		if err := reconcile.CopyProjectionToCanonical(tool, path, canonicalDir); err != nil {
+			return err
+		}
+		skillMD, err := os.ReadFile(filepath.Join(canonicalDir, "SKILL.md"))
+		if err == nil {
+			installed.InstalledHash = sync.ComputeFileHash(skillMD)
+		}
+	}
+
+	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	links, err := tool.Install(name, canonicalDir)
+	if err != nil {
+		return err
+	}
+
+	newManaged := make(map[string]bool)
+	existingManagedPaths := installed.ManagedPaths
+	if len(existingManagedPaths) == 0 {
+		existingManagedPaths = installed.Paths
+	}
+	for _, p := range existingManagedPaths {
+		if p != path {
+			newManaged[p] = true
+		}
+	}
+	for _, p := range links {
+		newManaged[p] = true
+	}
+
+	managedPaths := make([]string, 0, len(newManaged))
+	for p := range newManaged {
+		managedPaths = append(managedPaths, p)
+	}
+	sort.Strings(managedPaths)
+
+	filteredConflicts := make([]state.ProjectionConflict, 0, len(installed.Conflicts))
+	for _, conflict := range installed.Conflicts {
+		if conflict.Tool == toolName && conflict.Path == path {
+			continue
+		}
+		filteredConflicts = append(filteredConflicts, conflict)
+	}
+	installed.ManagedPaths = managedPaths
+	installed.Paths = append([]string(nil), managedPaths...)
+	installed.Conflicts = filteredConflicts
+	st.Installed[name] = installed
+	if err := st.Save(); err != nil {
+		return err
+	}
+
+	result := skillRepairResult{Name: name, Tool: toolName, Source: source}
+	if useJSON {
+		return json.NewEncoder(os.Stdout).Encode(result)
+	}
+	fmt.Printf("Repaired %s for %s using %s as the source of truth\n", name, toolName, source)
+	return nil
 }
 
 // splitCSV flattens slices like ["a,b", "c"] into ["a", "b", "c"] so users

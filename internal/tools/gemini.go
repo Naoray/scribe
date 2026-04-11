@@ -34,6 +34,12 @@ func (t GeminiTool) SkillPath(skillName string) (string, error) {
 	return "", fmt.Errorf("gemini: skill path not available (managed by gemini CLI)")
 }
 
+// CanonicalTarget returns ok=false because Gemini owns its skill directory
+// through the CLI; reconcile has no filesystem projection to inspect.
+func (t GeminiTool) CanonicalTarget(_ string) (string, bool) {
+	return "", false
+}
+
 func (t GeminiTool) Uninstall(skillName string) error {
 	// Fail loudly when the gemini CLI is missing from PATH. Silently returning
 	// nil would leave Gemini's side of the install in place while Scribe drops

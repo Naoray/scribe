@@ -43,6 +43,13 @@ func (t CommandTool) SkillPath(skillName string) (string, error) {
 	return renderPathTemplate(t.PathTemplate, t.ToolName, skillName, ""), nil
 }
 
+// CanonicalTarget returns ok=false for CommandTool — the projection shape is
+// defined by user-supplied shell templates and Scribe has no way to know
+// which path inside canonicalDir the install step mirrored.
+func (t CommandTool) CanonicalTarget(_ string) (string, bool) {
+	return "", false
+}
+
 func (t CommandTool) Uninstall(skillName string) error {
 	cmd := renderTemplate(t.UninstallCommand, t.ToolName, skillName, "")
 	if err := runShell(cmd); err != nil {

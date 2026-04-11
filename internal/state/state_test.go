@@ -865,6 +865,39 @@ func TestMigrationSchemaV4NormalizesBranchBlobSHA(t *testing.T) {
 	}
 }
 
+func TestMigrationSeedsManagedPathsFromPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"schema_version": 4,
+		"installed": {
+			"recap": {
+				"revision": 1,
+				"installed_hash": "blob-1",
+				"tools": ["codex"],
+				"paths": ["/tmp/.codex/skills/recap"]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("WriteFile state.json: %v", err)
+	}
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	skill := st.Installed["recap"]
+	if len(skill.ManagedPaths) != 1 || skill.ManagedPaths[0] != "/tmp/.codex/skills/recap" {
+		t.Fatalf("ManagedPaths = %v, want paths copied from legacy Paths", skill.ManagedPaths)
+	}
+}
+
 // TestMigrationSchemaV4Idempotent verifies that a current-schema state passes
 // through unchanged.
 func TestMigrationSchemaV4Idempotent(t *testing.T) {

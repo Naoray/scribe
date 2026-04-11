@@ -42,29 +42,31 @@ type adoptCompleteCall struct {
 }
 
 // No-ops for non-adoption Formatter methods.
-func (r *adoptRecorder) OnRegistryStart(_ string)                               {}
-func (r *adoptRecorder) OnSkillResolved(_ string, _ isync.SkillStatus)          {}
-func (r *adoptRecorder) OnSkillDownloading(_ string)                             {}
-func (r *adoptRecorder) OnSkillInstalled(_ string, _ bool)                      {}
-func (r *adoptRecorder) OnSkillSkipped(_ string, _ isync.SkillStatus)            {}
-func (r *adoptRecorder) OnSkillError(_ string, _ error)                          {}
-func (r *adoptRecorder) OnSyncComplete(_ isync.SyncCompleteMsg)                  {}
-func (r *adoptRecorder) OnLegacyFormat(_ string)                                 {}
-func (r *adoptRecorder) OnConnectDuplicate(_ string)                             {}
-func (r *adoptRecorder) OnConnectSaved(_ string)                                 {}
-func (r *adoptRecorder) OnConnectSyncing()                                       {}
-func (r *adoptRecorder) OnConnectSyncWarning(_ string, _ error)                  {}
-func (r *adoptRecorder) OnPackageInstallPrompt(_, _, _ string)                   {}
-func (r *adoptRecorder) OnPackageApproved(_ string)                              {}
-func (r *adoptRecorder) OnPackageDenied(_ string)                                {}
-func (r *adoptRecorder) OnPackageSkipped(_ string, _ string)                     {}
-func (r *adoptRecorder) OnPackageInstalling(_ string)                            {}
-func (r *adoptRecorder) OnPackageInstalled(_ string)                             {}
-func (r *adoptRecorder) OnPackageUpdating(_ string)                              {}
-func (r *adoptRecorder) OnPackageUpdated(_ string)                               {}
-func (r *adoptRecorder) OnPackageError(_ string, _ error, _ string)              {}
-func (r *adoptRecorder) OnPackageHashMismatch(_, _, _, _ string)                 {}
-func (r *adoptRecorder) Flush() error                                            { return nil }
+func (r *adoptRecorder) OnRegistryStart(_ string)                                 {}
+func (r *adoptRecorder) OnSkillResolved(_ string, _ isync.SkillStatus)            {}
+func (r *adoptRecorder) OnSkillDownloading(_ string)                              {}
+func (r *adoptRecorder) OnSkillInstalled(_ string, _ bool)                        {}
+func (r *adoptRecorder) OnSkillSkipped(_ string, _ isync.SkillStatus)             {}
+func (r *adoptRecorder) OnSkillError(_ string, _ error)                           {}
+func (r *adoptRecorder) OnSyncComplete(_ isync.SyncCompleteMsg)                   {}
+func (r *adoptRecorder) OnReconcileConflict(_ string, _ state.ProjectionConflict) {}
+func (r *adoptRecorder) OnReconcileComplete(_ isync.ReconcileCompleteMsg)         {}
+func (r *adoptRecorder) OnLegacyFormat(_ string)                                  {}
+func (r *adoptRecorder) OnConnectDuplicate(_ string)                              {}
+func (r *adoptRecorder) OnConnectSaved(_ string)                                  {}
+func (r *adoptRecorder) OnConnectSyncing()                                        {}
+func (r *adoptRecorder) OnConnectSyncWarning(_ string, _ error)                   {}
+func (r *adoptRecorder) OnPackageInstallPrompt(_, _, _ string)                    {}
+func (r *adoptRecorder) OnPackageApproved(_ string)                               {}
+func (r *adoptRecorder) OnPackageDenied(_ string)                                 {}
+func (r *adoptRecorder) OnPackageSkipped(_ string, _ string)                      {}
+func (r *adoptRecorder) OnPackageInstalling(_ string)                             {}
+func (r *adoptRecorder) OnPackageInstalled(_ string)                              {}
+func (r *adoptRecorder) OnPackageUpdating(_ string)                               {}
+func (r *adoptRecorder) OnPackageUpdated(_ string)                                {}
+func (r *adoptRecorder) OnPackageError(_ string, _ error, _ string)               {}
+func (r *adoptRecorder) OnPackageHashMismatch(_, _, _, _ string)                  {}
+func (r *adoptRecorder) Flush() error                                             { return nil }
 
 func (r *adoptRecorder) OnAdoptionSkipped(reason string) {
 	r.skipped = append(r.skipped, reason)
@@ -98,8 +100,8 @@ type mockAdoptTool struct {
 	installed  []string
 }
 
-func (m *mockAdoptTool) Name() string { return m.name }
-func (m *mockAdoptTool) Detect() bool { return true }
+func (m *mockAdoptTool) Name() string             { return m.name }
+func (m *mockAdoptTool) Detect() bool             { return true }
 func (m *mockAdoptTool) Uninstall(_ string) error { return nil }
 func (m *mockAdoptTool) Install(skillName, _ string) ([]string, error) {
 	if m.installErr != nil {
@@ -113,6 +115,8 @@ func (m *mockAdoptTool) Install(skillName, _ string) ([]string, error) {
 func (m *mockAdoptTool) SkillPath(skillName string) (string, error) {
 	return filepath.Join(m.name, skillName), nil
 }
+
+func (m *mockAdoptTool) CanonicalTarget(_ string) (string, bool) { return "", false }
 
 var _ tools.Tool = (*mockAdoptTool)(nil)
 

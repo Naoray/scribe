@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Naoray/scribe/internal/state"
 )
 
 func TestResolveRemoveTarget(t *testing.T) {
@@ -70,5 +74,64 @@ func TestResolveRemoveTarget(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRemoveLeavesConflictResidue(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	canonical, err := filepath.Abs(filepath.Join(home, ".scribe", "skills", "recap"))
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatalf("MkdirAll canonical: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(canonical, "SKILL.md"), []byte("# recap\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile canonical: %v", err)
+	}
+	managed := filepath.Join(home, ".codex", "skills", "recap")
+	if err := os.MkdirAll(filepath.Dir(managed), 0o755); err != nil {
+		t.Fatalf("MkdirAll managed dir: %v", err)
+	}
+	if err := os.Symlink(canonical, managed); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	residue := filepath.Join(home, ".claude", "skills", "recap")
+	if err := os.MkdirAll(filepath.Dir(residue), 0o755); err != nil {
+		t.Fatalf("MkdirAll residue dir: %v", err)
+	}
+	if err := os.WriteFile(residue, []byte("# recap\nlocal drift\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile residue: %v", err)
+	}
+
+	st := &state.State{
+		SchemaVersion: 4,
+		Installed: map[string]state.InstalledSkill{
+			"recap": {
+				Revision:     1,
+				Tools:        []string{},
+				ManagedPaths: []string{managed},
+				Paths:        []string{managed},
+				Conflicts:    []state.ProjectionConflict{{Tool: "claude", Path: residue, FoundHash: "hash"}},
+			},
+		},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newRemoveCommand()
+	cmd.SetArgs([]string{"recap", "--yes", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if _, err := os.Lstat(managed); !os.IsNotExist(err) {
+		t.Fatalf("managed path still exists: %v", err)
+	}
+	if _, err := os.Stat(residue); err != nil {
+		t.Fatalf("conflict residue missing: %v", err)
 	}
 }

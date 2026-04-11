@@ -92,6 +92,10 @@ func (t CursorTool) SkillPath(skillName string) (string, error) {
 	return filepath.Join(workDir, ".cursor", "rules", mdcName), nil
 }
 
+func (t CursorTool) CanonicalTarget(canonicalDir string) (string, bool) {
+	return filepath.Join(canonicalDir, ".cursor.mdc"), true
+}
+
 // generateMDC builds a Cursor .mdc file from a SKILL.md.
 // Maps `description` from frontmatter, strips frontmatter from body.
 func generateMDC(skillMD []byte) []byte {
