@@ -28,6 +28,8 @@ func key(label string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 0x0d}
 	case "esc":
 		return tea.KeyPressMsg{Code: 0x1b}
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "up":
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
@@ -211,14 +213,16 @@ func findAction(actions []actionItem, key string) actionItem {
 // detailModel builds a listModel with two filtered rows in the detail state,
 // ready for exercising updateDetail.
 func detailModel(focus detailFocus) listModel {
+	rows := []listRow{
+		{Name: "a", Group: "g1", Local: &discovery.Skill{Name: "a", LocalPath: "/p/a"}},
+		{Name: "b", Group: "g2", Local: &discovery.Skill{Name: "b", LocalPath: "/p/b"}},
+	}
 	return listModel{
 		selected: true,
 		focus:    focus,
 		cursor:   0,
-		filtered: []listRow{
-			{Name: "a", Local: &discovery.Skill{Name: "a", LocalPath: "/p/a"}},
-			{Name: "b", Local: &discovery.Skill{Name: "b", LocalPath: "/p/b"}},
-		},
+		rows:     rows,
+		filtered: rows,
 	}
 }
 
@@ -308,6 +312,64 @@ func TestUpdateDetail_FocusActionsMovesActionCursor(t *testing.T) {
 	}
 	if lm.actionCursor != 1 {
 		t.Errorf("focusActions j should advance actionCursor, got %d", lm.actionCursor)
+	}
+}
+
+func TestUpdateDetail_FocusListTypingFiltersRows(t *testing.T) {
+	m := detailModel(focusList)
+
+	nm, _ := m.updateDetail(key("b"))
+	lm := nm.(listModel)
+	if lm.search != "b" {
+		t.Fatalf("search = %q, want %q", lm.search, "b")
+	}
+	if len(lm.filtered) != 1 {
+		t.Fatalf("filtered len = %d, want 1", len(lm.filtered))
+	}
+	if lm.filtered[0].Name != "b" {
+		t.Fatalf("filtered[0] = %q, want %q", lm.filtered[0].Name, "b")
+	}
+	if !lm.selected {
+		t.Fatal("detail pane should stay open when search still has matches")
+	}
+	if lm.focus != focusList {
+		t.Fatalf("focus = %v, want focusList", lm.focus)
+	}
+}
+
+func TestUpdateDetail_FocusListBackspaceUpdatesSearch(t *testing.T) {
+	m := detailModel(focusList)
+	m.search = "b"
+	m.filtered = []listRow{
+		{Name: "b", Group: "g2", Local: &discovery.Skill{Name: "b", LocalPath: "/p/b"}},
+	}
+
+	nm, _ := m.updateDetail(key("backspace"))
+	lm := nm.(listModel)
+	if lm.search != "" {
+		t.Fatalf("search = %q, want empty", lm.search)
+	}
+	if len(lm.filtered) != 2 {
+		t.Fatalf("filtered len = %d, want 2", len(lm.filtered))
+	}
+	if !lm.selected {
+		t.Fatal("detail pane should stay open after restoring matching rows")
+	}
+}
+
+func TestUpdateDetail_FocusListTypingNoMatchesClosesDetail(t *testing.T) {
+	m := detailModel(focusList)
+
+	nm, _ := m.updateDetail(key("z"))
+	lm := nm.(listModel)
+	if lm.search != "z" {
+		t.Fatalf("search = %q, want %q", lm.search, "z")
+	}
+	if len(lm.filtered) != 0 {
+		t.Fatalf("filtered len = %d, want 0", len(lm.filtered))
+	}
+	if lm.selected {
+		t.Fatal("detail pane should close when the current search removes all rows")
 	}
 }
 
