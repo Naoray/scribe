@@ -135,6 +135,7 @@ type listModel struct {
 	spinnerFrame  int
 	rows          []listRow
 	filtered      []listRow
+	groupCounts   map[string]int
 	cursor        int
 	offset        int
 	search        string
@@ -354,7 +355,7 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case rowsLoadedMsg:
 		m.stage = stageBrowse
 		m.rows = msg.rows
-		m.filtered = m.applyFilter()
+		m = m.refreshFiltered()
 		return m, nil
 	case loadErrMsg:
 		m.stage = stageBrowse
@@ -428,8 +429,7 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		if m.search != "" {
 			m.search = ""
-			m.filtered = m.applyFilter()
-			m.cursor, m.offset = 0, 0
+			m = m.refreshFiltered()
 			return m, nil
 		}
 		m.quitting = true
@@ -437,8 +437,7 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc", "escape":
 		if m.search != "" {
 			m.search = ""
-			m.filtered = m.applyFilter()
-			m.cursor, m.offset = 0, 0
+			m = m.refreshFiltered()
 		}
 		return m, nil
 	case "up", "k":
@@ -467,14 +466,12 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "backspace":
 		if len(m.search) > 0 {
 			m.search = m.search[:len(m.search)-1]
-			m.filtered = m.applyFilter()
-			m.cursor, m.offset = 0, 0
+			m = m.refreshFiltered()
 		}
 	default:
 		if len(msg.String()) == 1 {
 			m.search += msg.String()
-			m.filtered = m.applyFilter()
-			m.cursor, m.offset = 0, 0
+			m = m.refreshFiltered()
 		}
 	}
 	return m, nil
@@ -737,6 +734,7 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 			break
 		}
 	}
+	m.groupCounts = buildGroupCounts(m.filtered)
 
 	if m.cursor >= len(m.filtered) {
 		m.cursor = len(m.filtered) - 1
@@ -767,6 +765,21 @@ func (m listModel) applyFilter() []listRow {
 		}
 	}
 	return out
+}
+
+func (m listModel) refreshFiltered() listModel {
+	m.filtered = m.applyFilter()
+	m.groupCounts = buildGroupCounts(m.filtered)
+	m.cursor, m.offset = 0, 0
+	return m
+}
+
+func buildGroupCounts(rows []listRow) map[string]int {
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		counts[row.Group]++
+	}
+	return counts
 }
 
 // ── View ────────────────────────────────────────────────────────────────────
@@ -976,12 +989,7 @@ func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, c
 }
 
 func (m listModel) formatGroupHeader(group string) string {
-	count := 0
-	for _, r := range m.filtered {
-		if r.Group == group {
-			count++
-		}
-	}
+	count := m.groupCounts[group]
 	label := group
 	if label == "" {
 		label = "(local)"
