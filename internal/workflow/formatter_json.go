@@ -13,6 +13,22 @@ type jsonFormatter struct {
 	registries []registryResult
 	current    *registryResult
 	summary    sync.SyncCompleteMsg
+	adoption   adoptionResult
+}
+
+type adoptedSkill struct {
+	Name  string   `json:"name"`
+	Tools []string `json:"tools,omitempty"`
+	Error string   `json:"error,omitempty"`
+}
+
+type adoptionResult struct {
+	Skipped   string         `json:"skipped,omitempty"`
+	Skills    []adoptedSkill `json:"skills,omitempty"`
+	Conflicts int            `json:"conflicts_deferred,omitempty"`
+	Adopted   int            `json:"adopted,omitempty"`
+	Failed    int            `json:"failed,omitempty"`
+	active    bool
 }
 
 type skillResult struct {
@@ -163,6 +179,31 @@ func (f *jsonFormatter) OnPackageError(name string, err error, stderr string) {
 
 func (f *jsonFormatter) OnPackageHashMismatch(name, oldCmd, newCmd, source string) {}
 
+func (f *jsonFormatter) OnAdoptionSkipped(reason string) {
+	f.adoption.Skipped = reason
+}
+
+func (f *jsonFormatter) OnAdoptionStarted(_ int) {
+	f.adoption.active = true
+}
+
+func (f *jsonFormatter) OnAdopted(name string, targetTools []string) {
+	f.adoption.Skills = append(f.adoption.Skills, adoptedSkill{Name: name, Tools: targetTools})
+}
+
+func (f *jsonFormatter) OnAdoptionError(name string, err error) {
+	f.adoption.Skills = append(f.adoption.Skills, adoptedSkill{Name: name, Error: err.Error()})
+}
+
+func (f *jsonFormatter) OnAdoptionConflictsDeferred(count int) {
+	f.adoption.Conflicts = count
+}
+
+func (f *jsonFormatter) OnAdoptionComplete(adopted, _, failed int) {
+	f.adoption.Adopted = adopted
+	f.adoption.Failed = failed
+}
+
 func (f *jsonFormatter) OnConnectDuplicate(_ string) {
 	// JSON mode: handled by caller via exit code / structured output.
 }
@@ -182,7 +223,7 @@ func (f *jsonFormatter) OnConnectSyncWarning(_ string, _ error) {
 func (f *jsonFormatter) OnLegacyFormat(_ string) {}
 
 func (f *jsonFormatter) Flush() error {
-	return json.NewEncoder(f.out).Encode(map[string]any{
+	out := map[string]any{
 		"registries": f.registries,
 		"summary": map[string]int{
 			"installed": f.summary.Installed,
@@ -190,5 +231,9 @@ func (f *jsonFormatter) Flush() error {
 			"skipped":   f.summary.Skipped,
 			"failed":    f.summary.Failed,
 		},
-	})
+	}
+	if f.adoption.active || f.adoption.Skipped != "" {
+		out["adoption"] = f.adoption
+	}
+	return json.NewEncoder(f.out).Encode(out)
 }

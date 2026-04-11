@@ -38,6 +38,14 @@ type Formatter interface {
 	OnPackageError(name string, err error, stderr string)
 	OnPackageHashMismatch(name, oldCmd, newCmd, source string)
 
+	// Adoption lifecycle
+	OnAdoptionSkipped(reason string)
+	OnAdoptionStarted(candidateCount int)
+	OnAdopted(name string, targetTools []string)
+	OnAdoptionError(name string, err error)
+	OnAdoptionConflictsDeferred(count int)
+	OnAdoptionComplete(adopted, skipped, failed int)
+
 	// Flush writes any buffered output (JSON mode). Text mode is a no-op.
 	Flush() error
 }

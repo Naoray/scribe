@@ -139,6 +139,37 @@ func (f *textFormatter) OnLegacyFormat(repo string) {
 	fmt.Fprintf(f.errOut, "note: %s uses legacy scribe.toml — consider migrating to scribe.yaml\n", repo)
 }
 
+func (f *textFormatter) OnAdoptionSkipped(reason string) {
+	fmt.Fprintf(f.errOut, "warning: %s\n", reason)
+}
+
+func (f *textFormatter) OnAdoptionStarted(_ int) {
+	// No per-batch header — summary line in OnAdoptionComplete is sufficient.
+}
+
+func (f *textFormatter) OnAdopted(name string, _ []string) {
+	fmt.Fprintf(f.out, "  %-20s adopted\n", name)
+}
+
+func (f *textFormatter) OnAdoptionError(name string, err error) {
+	fmt.Fprintf(f.errOut, "  %-20s adoption error: %v\n", name, err)
+}
+
+func (f *textFormatter) OnAdoptionConflictsDeferred(count int) {
+	fmt.Fprintf(f.errOut, "  %d conflict(s) skipped — run `scribe adopt` to resolve\n", count)
+}
+
+func (f *textFormatter) OnAdoptionComplete(adopted, _, failed int) {
+	if adopted == 0 && failed == 0 {
+		return
+	}
+	if failed > 0 {
+		fmt.Fprintf(f.out, "adopted %d skill(s), %d failed\n", adopted, failed)
+		return
+	}
+	fmt.Fprintf(f.out, "adopted %d skill(s)\n", adopted)
+}
+
 func (f *textFormatter) Flush() error {
 	fmt.Fprintf(f.out, "\ndone: %d installed, %d updated, %d current, %d failed\n",
 		f.totalSummary.Installed, f.totalSummary.Updated,
