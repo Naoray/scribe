@@ -8,6 +8,7 @@ import (
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 
+	"github.com/Naoray/scribe/internal/adopt"
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
@@ -26,6 +27,7 @@ func SyncSteps() []Step {
 		{"FilterRegistries", StepFilterRegistries},
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
+		{"Adopt", StepAdopt},
 		{"SyncSkills", StepSyncSkills},
 	}
 }
@@ -141,6 +143,60 @@ func StepResolveTools(_ context.Context, b *Bag) error {
 		}
 		b.Tools = resolved
 	}
+	return nil
+}
+
+// StepAdopt runs skill adoption as a prelude before registry sync.
+// Adoption errors are non-fatal — they are reported through Formatter and sync continues.
+func StepAdopt(_ context.Context, b *Bag) error {
+	mode := b.Config.AdoptionMode()
+	if mode == "off" {
+		return nil
+	}
+
+	isTTY := isatty.IsTerminal(os.Stdin.Fd())
+	if mode == "prompt" && (!isTTY || b.JSONFlag) {
+		b.Formatter.OnAdoptionSkipped(
+			`adoption mode is "prompt" but stdin is not a terminal — skipping adoption; run "scribe adopt --yes" or set adoption.mode to auto/off`,
+		)
+		return nil
+	}
+
+	candidates, conflicts, err := adopt.FindCandidates(b.State, b.Config.Adoption)
+	if err != nil {
+		b.Formatter.OnAdoptionSkipped(fmt.Sprintf("adoption scan failed: %v", err))
+		return nil
+	}
+
+	// In prompt mode during sync, still auto-adopt clean candidates and note conflicts.
+	// Interactive resolution belongs to cmd/adopt.go (Task 6).
+	if len(conflicts) > 0 {
+		b.Formatter.OnAdoptionConflictsDeferred(len(conflicts))
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	b.Formatter.OnAdoptionStarted(len(candidates))
+
+	adopter := &adopt.Adopter{
+		State: b.State,
+		Tools: b.Tools,
+		Emit: func(msg any) {
+			switch m := msg.(type) {
+			case adopt.AdoptedMsg:
+				b.Formatter.OnAdopted(m.Name, m.Tools)
+			case adopt.AdoptErrorMsg:
+				b.Formatter.OnAdoptionError(m.Name, m.Err)
+			case adopt.AdoptCompleteMsg:
+				b.Formatter.OnAdoptionComplete(m.Adopted, m.Skipped, m.Failed)
+			}
+		},
+	}
+
+	adopter.Apply(candidates) // errors routed through Emit; never abort sync
+
 	return nil
 }
 
