@@ -42,19 +42,19 @@ func NewClient(ctx context.Context, configToken string) *Client {
 }
 
 func resolveToken(configToken string) string {
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token
-	}
-	if token := strings.TrimSpace(configToken); token != "" {
-		return token
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
 		if token := strings.TrimSpace(string(out)); token != "" {
 			return token
 		}
+	}
+
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token
+	}
+	if token := strings.TrimSpace(configToken); token != "" {
+		return token
 	}
 
 	return ""
