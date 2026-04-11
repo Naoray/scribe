@@ -344,7 +344,7 @@ func TestOnDiskManagedField(t *testing.T) {
 		}
 	})
 
-	t.Run("tool-facing symlink into store state has it", func(t *testing.T) {
+	t.Run("dedup prefers canonical store over tool-facing symlink", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 
@@ -363,7 +363,8 @@ func TestOnDiskManagedField(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Deduplicated: scribe store scan finds it first, claude symlink is skipped.
+		// Store scan finds "bar" first; claude-dir symlink pass skips it as a duplicate.
+			// Result: exactly one entry, Managed=true because state tracks it.
 		var found *Skill
 		for i := range skills {
 			if skills[i].Name == "bar" {
