@@ -36,6 +36,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 
 	bag := &workflow.Bag{
 		RepoArg: repo,
+		Factory: newCommandFactory(),
 	}
 	return workflow.Run(cmd.Context(), workflow.ConnectSteps(), bag)
 }

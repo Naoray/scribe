@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/add"
-	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
@@ -59,8 +58,9 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 	useJSON := addJSON || !isatty.IsTerminal(os.Stdout.Fd())
+	factory := newCommandFactory()
 
-	cfg, err := config.Load()
+	cfg, err := factory.Config()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -68,12 +68,15 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
 	}
 
-	st, err := state.Load()
+	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
 
-	client := gh.NewClient(cmd.Context(), cfg.Token)
+	client, err := factory.Client()
+	if err != nil {
+		return fmt.Errorf("load github client: %w", err)
+	}
 	if !client.IsAuthenticated() {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}

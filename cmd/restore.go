@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -34,6 +33,7 @@ Example:
 func runRestore(cmd *cobra.Command, args []string) error {
 	skillName := args[0]
 	revArg := args[1]
+	factory := newCommandFactory()
 
 	// Parse revision number: accept "rev-2" or just "2".
 	revStr := strings.TrimPrefix(revArg, "rev-")
@@ -45,7 +45,7 @@ func runRestore(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid revision %d: must be a positive number", targetRev)
 	}
 
-	st, err := state.Load()
+	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}

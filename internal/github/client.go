@@ -36,16 +36,19 @@ func (c *Client) IsAuthenticated() bool { return c.authenticated }
 func NewClient(ctx context.Context, configToken string) *Client {
 	token := resolveToken(configToken)
 
-	var httpClient *http.Client
-	if token != "" {
-		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-		httpClient = oauth2.NewClient(ctx, ts)
-	}
+	httpClient := newHTTPClient(ctx, token)
 
 	return &Client{gh: github.NewClient(httpClient), authenticated: token != ""}
 }
 
 func resolveToken(configToken string) string {
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token
+	}
+	if token := strings.TrimSpace(configToken); token != "" {
+		return token
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
@@ -53,10 +56,34 @@ func resolveToken(configToken string) string {
 			return token
 		}
 	}
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token
+
+	return ""
+}
+
+func newHTTPClient(ctx context.Context, token string) *http.Client {
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		MaxConnsPerHost:       25,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
-	return configToken
+
+	if token == "" {
+		return &http.Client{Transport: transport}
+	}
+
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+	return &http.Client{
+		Transport: &oauth2.Transport{
+			Source: ts,
+			Base:   transport,
+		},
+	}
 }
 
 // FetchFile fetches a single file's content from a GitHub repo.

@@ -30,6 +30,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		JSONFlag:         jsonFlag,
 		RepoFlag:         repoFlag,
 		TrustAllFlag:     trustAllFlag,
+		Factory:          newCommandFactory(),
 		FilterRegistries: filterRegistries,
 	}
 	return workflow.Run(cmd.Context(), workflow.SyncSteps(), bag)

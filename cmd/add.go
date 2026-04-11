@@ -73,19 +73,23 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
+	factory := newCommandFactory()
 
-	cfg, err := config.Load()
+	cfg, err := factory.Config()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	st, err := state.Load()
+	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
 
 	ctx := cmd.Context()
-	client := gh.NewClient(ctx, cfg.Token)
+	client, err := factory.Client()
+	if err != nil {
+		return fmt.Errorf("load github client: %w", err)
+	}
 	targets := []tools.Tool{tools.ClaudeTool{}, tools.CursorTool{}}
 
 	// Direct install: owner/repo:skillname.
