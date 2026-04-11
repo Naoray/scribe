@@ -155,10 +155,14 @@ func StepAdopt(_ context.Context, b *Bag) error {
 	}
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd())
-	if mode == "prompt" && (!isTTY || b.JSONFlag) {
-		b.Formatter.OnAdoptionSkipped(
-			`adoption mode is "prompt" but stdin is not a terminal — skipping adoption; run "scribe adopt --yes" or set adoption.mode to auto/off`,
-		)
+	if mode == "prompt" {
+		if !isTTY || b.JSONFlag {
+			b.Formatter.OnAdoptionSkipped(
+				`adoption mode is "prompt" but stdin is not a terminal — skipping adoption; run "scribe adopt --yes" or set adoption.mode to auto/off`,
+			)
+		} else {
+			b.Formatter.OnAdoptionSkipped(`prompt mode — run 'scribe adopt' to review candidates`)
+		}
 		return nil
 	}
 
@@ -168,8 +172,6 @@ func StepAdopt(_ context.Context, b *Bag) error {
 		return nil
 	}
 
-	// In prompt mode during sync, still auto-adopt clean candidates and note conflicts.
-	// Interactive resolution belongs to cmd/adopt.go (Task 6).
 	if len(conflicts) > 0 {
 		b.Formatter.OnAdoptionConflictsDeferred(len(conflicts))
 	}
