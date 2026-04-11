@@ -81,8 +81,8 @@ func TestRunRestore(t *testing.T) {
 	if skill.Revision != 4 {
 		t.Errorf("expected revision 4, got %d", skill.Revision)
 	}
-	if skill.InstalledHash != sync.ComputeFileHash(oldContent) {
-		t.Errorf("expected hash of old content, got %q", skill.InstalledHash)
+	if skill.InstalledHash != sync.ComputeFileHash(currentContent) {
+		t.Errorf("expected original baseline hash to be preserved, got %q", skill.InstalledHash)
 	}
 }
 
