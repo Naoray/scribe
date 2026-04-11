@@ -40,12 +40,19 @@ type ToolConfig struct {
 	Path      string `yaml:"path,omitempty"`      // optional installed-path template for custom tools
 }
 
+// AdoptionConfig holds settings for local skill adoption scanning.
+type AdoptionConfig struct {
+	Mode  string   `yaml:"mode,omitempty"`  // "auto" | "prompt" | "off"
+	Paths []string `yaml:"paths,omitempty"` // optional extra dirs; builtins always included
+}
+
 // Config holds user preferences from ~/.scribe/config.yaml.
 type Config struct {
 	Registries []RegistryConfig `yaml:"registries,omitempty"`
 	Token      string           `yaml:"token,omitempty"`
 	Tools      []ToolConfig     `yaml:"tools,omitempty"`
 	Editor     string           `yaml:"editor,omitempty"`
+	Adoption   AdoptionConfig   `yaml:"adoption,omitempty"`
 }
 
 // TeamRepos returns the list of enabled registry repos.
@@ -92,6 +99,57 @@ func (c *Config) EnabledRegistries() []RegistryConfig {
 	return enabled
 }
 
+// AdoptionMode returns the validated adoption mode, defaulting to "auto".
+func (c *Config) AdoptionMode() string {
+	switch c.Adoption.Mode {
+	case "auto", "prompt", "off":
+		return c.Adoption.Mode
+	default:
+		return "auto"
+	}
+}
+
+// AdoptionPaths returns the full list of directories to scan for adoptable skills.
+// Builtins (~/.claude/skills and ~/.codex/skills) are always first, followed by
+// any user-configured paths. Tilde and relative paths are resolved against the
+// user's home directory. Paths outside the home directory are rejected.
+func (c *Config) AdoptionPaths() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("get home dir: %w", err)
+	}
+
+	builtins := []string{
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".codex", "skills"),
+	}
+
+	result := make([]string, 0, len(builtins)+len(c.Adoption.Paths))
+	result = append(result, builtins...)
+
+	for _, p := range c.Adoption.Paths {
+		var resolved string
+		if strings.HasPrefix(p, "~/") {
+			resolved = filepath.Join(home, p[2:])
+		} else if filepath.IsAbs(p) {
+			resolved = p
+		} else {
+			resolved = filepath.Join(home, p)
+		}
+		resolved = filepath.Clean(resolved)
+
+		// Reject paths outside home dir.
+		rel, err := filepath.Rel(home, resolved)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil, fmt.Errorf("adoption.paths entry %q is outside home", p)
+		}
+
+		result = append(result, resolved)
+	}
+
+	return result, nil
+}
+
 // IsTeam returns whether this is a team registry.
 func (rc RegistryConfig) IsTeam() bool {
 	return rc.Type == RegistryTypeTeam
@@ -118,6 +176,9 @@ func Load() (*Config, error) {
 		var cfg Config
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return nil, fmt.Errorf("parse config.yaml: %w", err)
+		}
+		if _, err := cfg.AdoptionPaths(); err != nil {
+			return nil, err
 		}
 		return &cfg, nil
 	}
