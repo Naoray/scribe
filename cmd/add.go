@@ -104,7 +104,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if !client.IsAuthenticated() {
 			return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 		}
-		return runAddDirectInstall(ctx, registryRepo, skillName, cfg, st, client, targets, useJSON, skipConfirm)
+		return runAddDirectInstall(ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets), true, useJSON, skipConfirm)
 	}
 
 	// Need at least one connected registry to search/browse.
@@ -199,12 +199,15 @@ func runAddDirectInstall(
 	registryRepo, skillName string,
 	cfg *config.Config,
 	st *state.State,
-	client *gh.Client,
-	targets []tools.Tool,
+	syncer *sync.Syncer,
+	authenticated bool,
 	useJSON bool,
 	skipConfirm bool,
 ) error {
-	syncer := newInstallSyncer(client, targets)
+	if !authenticated {
+		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
+	}
+
 	statuses, _, err := syncer.Diff(ctx, registryRepo, st)
 	if err != nil {
 		return fmt.Errorf("diff %s: %w", registryRepo, err)

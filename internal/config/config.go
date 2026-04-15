@@ -53,6 +53,7 @@ type Config struct {
 	Tools      []ToolConfig     `yaml:"tools,omitempty"`
 	Editor     string           `yaml:"editor,omitempty"`
 	Adoption   AdoptionConfig   `yaml:"adoption,omitempty"`
+	BuiltinsVersion int         `yaml:"builtins_version,omitempty"`
 }
 
 // TeamRepos returns the list of enabled registry repos.

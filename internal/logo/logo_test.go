@@ -8,7 +8,16 @@ import (
 	"github.com/Naoray/scribe/internal/logo"
 )
 
+func resetLogoEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("TERM", "")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("SCRIBE_NO_BANNER", "")
+}
+
 func TestRenderFull(t *testing.T) {
+	resetLogoEnv(t)
+
 	var buf bytes.Buffer
 	logo.Render(&buf, "1.0.0", 80)
 
@@ -22,6 +31,8 @@ func TestRenderFull(t *testing.T) {
 }
 
 func TestRenderCompact(t *testing.T) {
+	resetLogoEnv(t)
+
 	var buf bytes.Buffer
 	logo.Render(&buf, "1.0.0", 50)
 
@@ -35,6 +46,8 @@ func TestRenderCompact(t *testing.T) {
 }
 
 func TestRenderPlainText(t *testing.T) {
+	resetLogoEnv(t)
+
 	var buf bytes.Buffer
 	logo.Render(&buf, "2.0.0", 30)
 
@@ -48,6 +61,7 @@ func TestRenderPlainText(t *testing.T) {
 }
 
 func TestRenderNoColor(t *testing.T) {
+	resetLogoEnv(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var buf bytes.Buffer
@@ -64,6 +78,7 @@ func TestRenderNoColor(t *testing.T) {
 }
 
 func TestRenderDumbTerminal(t *testing.T) {
+	resetLogoEnv(t)
 	t.Setenv("TERM", "dumb")
 
 	var buf bytes.Buffer
@@ -79,6 +94,7 @@ func TestRenderDumbTerminal(t *testing.T) {
 }
 
 func TestRenderNoBanner(t *testing.T) {
+	resetLogoEnv(t)
 	t.Setenv("SCRIBE_NO_BANNER", "1")
 
 	var buf bytes.Buffer
@@ -91,6 +107,8 @@ func TestRenderNoBanner(t *testing.T) {
 }
 
 func TestRenderZeroWidth(t *testing.T) {
+	resetLogoEnv(t)
+
 	var buf bytes.Buffer
 	logo.Render(&buf, "1.0.0", 0)
 

@@ -16,12 +16,16 @@ import (
 	"github.com/Naoray/scribe/internal/tools"
 )
 
-// builtinRepos are well-known community registries auto-added during first run.
+// builtinRepos are well-known public registries auto-added during first run.
 var builtinRepos = []string{
+	"Naoray/scribe",
 	"anthropic/skills",
 	"openai/codex-skills",
 	"expo/skills",
 }
+
+// currentBuiltinsVersion bumps whenever builtinRepos changes.
+const currentBuiltinsVersion = 2
 
 // BuiltinRegistries returns RegistryConfig entries for built-in registries.
 func BuiltinRegistries() []config.RegistryConfig {
@@ -123,10 +127,18 @@ func promptYN(in io.Reader, out io.Writer, question string, defaultYes bool) boo
 }
 
 // ApplyBuiltins adds built-in registries to the config if not already present.
-func ApplyBuiltins(cfg *config.Config) {
+func ApplyBuiltins(cfg *config.Config) []string {
+	if cfg.BuiltinsVersion >= currentBuiltinsVersion {
+		return nil
+	}
+
+	var added []string
 	for _, builtin := range BuiltinRegistries() {
 		if cfg.FindRegistry(builtin.Repo) == nil {
 			cfg.AddRegistry(builtin)
+			added = append(added, builtin.Repo)
 		}
 	}
+	cfg.BuiltinsVersion = currentBuiltinsVersion
+	return added
 }

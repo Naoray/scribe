@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"path"
 
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
@@ -185,6 +186,14 @@ func (p *GitHubProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]Fil
 	skillPath := entry.Path
 	if skillPath == "" {
 		skillPath = entry.Name
+	}
+
+	if path.Base(skillPath) == skillFileName {
+		data, err := p.client.FetchFile(ctx, src.Owner, src.Repo, skillPath, src.Ref)
+		if err != nil {
+			return nil, err
+		}
+		return []File{{Path: skillFileName, Content: data}}, nil
 	}
 
 	ghFiles, err := p.client.FetchDirectory(ctx, src.Owner, src.Repo, skillPath, src.Ref)
