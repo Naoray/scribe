@@ -16,9 +16,14 @@ I want to use Scribe to manage my AI coding-agent skills on this machine.
 Repo: https://github.com/Naoray/scribe  (setup steps: /blob/main/SKILL.md)
 
 Please set it up for me:
-  1. If `scribe --version` fails, install it — prefer Homebrew (`brew install Naoray/tap/scribe`)
-     or Go (`go install github.com/Naoray/scribe/cmd/scribe@latest`); fall back to the official
-     release binary from the GitHub releases page if neither is available.
+  1. If `scribe --version` fails, install it. Prefer methods that land the binary on PATH:
+       a. Homebrew: `brew install Naoray/tap/scribe`
+       b. Release binary to /usr/local/bin, e.g. Apple Silicon:
+          `curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/`
+          (swap the asset for your OS/arch — see https://github.com/Naoray/scribe/releases/latest)
+       c. Last resort: `go install github.com/Naoray/scribe/cmd/scribe@latest`
+          (lands in ~/go/bin which is often NOT on PATH — only use if a and b aren't available,
+          and add the go bin dir to PATH afterwards)
   2. Register Scribe's own agent-facing skill locally so future sessions pick it up from
      `~/.scribe/skills/scribe-agent/`:
         scribe add Naoray/scribe:scribe-agent --yes --json
