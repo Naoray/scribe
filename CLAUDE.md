@@ -14,6 +14,9 @@ Team skill sync CLI for AI coding agents. Go + Cobra + Charm (Bubble Tea).
 cmd/                    # Cobra commands (add, list, remove, sync, tools, guide, create, explain, registry)
 internal/
   add/                  # Add workflow — local/remote discovery, GitHub push
+  adopt/                # Skill adoption scanning + apply (import/detect/candidate)
+  agent/                # Scribe agent skill bootstrap embedding
+  app/                  # Application factory + dependency injection
   config/               # config.yaml loading (~/.scribe/config.yaml), legacy config.toml migration
   discovery/            # On-disk skill discovery, YAML frontmatter parsing, content hashing
   firstrun/             # First-run experience and onboarding
@@ -24,10 +27,13 @@ internal/
   paths/                # XDG-style path helpers (~/.scribe/)
   prereq/               # Prerequisite checks (gh CLI availability)
   provider/             # Provider abstraction — GitHubProvider, marketplace.json, tree scan
+  reconcile/            # Managed tool projection reconciliation
   state/                # ~/.scribe/state.json management
+  storemigrate/         # Store format migration utilities
   sync/                 # Sync algorithm — UI-agnostic, emits tea.Msg events
   tools/                # Install target writers (claude, cursor)
   scaffold/             # Registry scaffolding (scribe create registry)
+  upgrade/              # Upgrade command (self-update via GitHub releases)
   workflow/             # Step-sequence engine: Runner, Bag, Formatter, per-command steps
 ```
 
@@ -62,3 +68,9 @@ go run ./cmd/scribe --help
   skills/         # canonical skill store (symlinked by targets)
   config.yaml     # user preferences (tool settings, registries)
 ```
+
+## Bootstrap Governance
+
+- Scribe auto-installs exactly one first-party bootstrap skill: `scribe-agent`.
+- That bootstrap payload is read-only markdown embedded in the binary and written only under `~/.scribe/skills/scribe-agent/`.
+- Do not auto-install third-party skills, package-style skills, or anything that writes outside the canonical scribe-agent store path and state file without a new design doc and changelog entry.

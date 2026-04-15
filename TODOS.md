@@ -1,5 +1,17 @@
 # TODOS
 
+## Install all skills from a registry
+
+**What:** Add a first-class flow to install every installable skill from a connected registry in one command, instead of requiring per-skill installs.
+
+**Why:** Once `browse` is the remote catalog surface, users will reasonably expect a bulk action for “bring me everything from this registry” during first-time setup or when trialing a curated registry.
+
+**Fix:** Add an explicit registry-wide install command or browse action that resolves the selected registry, filters out already-installed/current entries, presents a confirmation summary, then installs the remaining skills through the existing sync/install path.
+
+**Context:** Requested during browse/list UX follow-up (2026-04-15).
+
+---
+
 ## ~~Multi-registry sync/list UX~~ **Completed:** PR #21 (2026-03-29)
 
 `--registry` flag on sync/list, `--all` flag, grouped output by registry.

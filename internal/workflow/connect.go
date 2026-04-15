@@ -133,4 +133,3 @@ func StepConnectSyncError(ctx context.Context, b *Bag) error {
 	}
 	return nil
 }
-

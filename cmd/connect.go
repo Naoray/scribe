@@ -38,7 +38,10 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		RepoArg: repo,
 		Factory: newCommandFactory(),
 	}
-	return workflow.Run(cmd.Context(), workflow.ConnectSteps(), bag)
+	if err := workflow.Run(cmd.Context(), workflow.ConnectSteps(), bag); err != nil {
+		return err
+	}
+	return saveWorkflowState(bag)
 }
 
 // resolveRepo returns the owner/repo string from args or an interactive prompt.

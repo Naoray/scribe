@@ -5,6 +5,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/firstrun"
+	"github.com/Naoray/scribe/internal/state"
 )
 
 func TestBuiltinRegistries(t *testing.T) {
@@ -36,7 +37,7 @@ func TestIsFirstRun(t *testing.T) {
 
 func TestApplyBuiltins(t *testing.T) {
 	cfg := &config.Config{}
-	firstrun.ApplyBuiltins(cfg)
+	_, _ = firstrun.ApplyBuiltins(cfg)
 
 	if len(cfg.Registries) == 0 {
 		t.Fatal("expected registries to be populated")
@@ -54,11 +55,11 @@ func TestApplyBuiltins(t *testing.T) {
 
 func TestApplyBuiltinsIdempotent(t *testing.T) {
 	cfg := &config.Config{}
-	firstrun.ApplyBuiltins(cfg)
+	_, _ = firstrun.ApplyBuiltins(cfg)
 	count := len(cfg.Registries)
 
 	// Apply again -- should not duplicate.
-	firstrun.ApplyBuiltins(cfg)
+	_, _ = firstrun.ApplyBuiltins(cfg)
 	if len(cfg.Registries) != count {
 		t.Errorf("expected %d registries after second apply, got %d", count, len(cfg.Registries))
 	}
@@ -66,10 +67,13 @@ func TestApplyBuiltinsIdempotent(t *testing.T) {
 
 func TestApplyBuiltins_FirstRunAddsAllAndMarksVersion(t *testing.T) {
 	cfg := &config.Config{}
-	added := firstrun.ApplyBuiltins(cfg)
+	added, firstRun := firstrun.ApplyBuiltins(cfg)
 
-	if len(added) != 4 {
-		t.Errorf("first run should add 4 builtins, got %d: %v", len(added), added)
+	if !firstRun {
+		t.Error("first run should report firstRun=true")
+	}
+	if len(added) != 3 {
+		t.Errorf("first run should add 3 builtins, got %d: %v", len(added), added)
 	}
 	if added[0] != "Naoray/scribe" {
 		t.Errorf("Naoray/scribe must be first in builtin order, got %q", added[0])
@@ -81,16 +85,19 @@ func TestApplyBuiltins_FirstRunAddsAllAndMarksVersion(t *testing.T) {
 
 func TestApplyBuiltins_ExistingUserGetsNaorayScribeBackfilled(t *testing.T) {
 	cfg := &config.Config{
+		BuiltinsVersion: 1,
 		Registries: []config.RegistryConfig{
-			{Repo: "anthropic/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
-			{Repo: "openai/codex-skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "anthropics/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
 			{Repo: "expo/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
 		},
 	}
-	added := firstrun.ApplyBuiltins(cfg)
+	added, firstRun := firstrun.ApplyBuiltins(cfg)
 
 	if len(added) != 1 || added[0] != "Naoray/scribe" {
 		t.Errorf("only Naoray/scribe should be backfilled, got %v", added)
+	}
+	if firstRun {
+		t.Error("existing user should report firstRun=false")
 	}
 	if cfg.FindRegistry("Naoray/scribe") == nil {
 		t.Error("Naoray/scribe not in config after backfill")
@@ -100,16 +107,81 @@ func TestApplyBuiltins_ExistingUserGetsNaorayScribeBackfilled(t *testing.T) {
 func TestApplyBuiltins_DisabledBuiltinNotReEnabled(t *testing.T) {
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "anthropic/skills", Enabled: false, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "anthropics/skills", Enabled: false, Type: config.RegistryTypeCommunity, Builtin: true},
 		},
 	}
-	_ = firstrun.ApplyBuiltins(cfg)
+	_, _ = firstrun.ApplyBuiltins(cfg)
 
-	r := cfg.FindRegistry("anthropic/skills")
+	r := cfg.FindRegistry("anthropics/skills")
 	if r == nil {
-		t.Fatal("anthropic/skills should still be present")
+		t.Fatal("anthropics/skills should still be present")
 	}
 	if r.Enabled {
 		t.Error("disabled builtin must not be flipped back to enabled")
+	}
+}
+
+func TestApplyBuiltinsRemove_RemovesOpenAICodexOnce(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "openai/codex-skills", Enabled: true, Builtin: true, Type: config.RegistryTypeCommunity},
+			{Repo: "anthropics/skills", Enabled: true, Builtin: true, Type: config.RegistryTypeCommunity},
+		},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}, Migrations: map[string]bool{}}
+
+	removed, ran := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
+	if len(removed) != 1 || removed[0] != "openai/codex-skills" {
+		t.Fatalf("removed = %v, want [openai/codex-skills]", removed)
+	}
+	if !ran {
+		t.Fatal("ran = false, want true")
+	}
+	if cfg.FindRegistry("openai/codex-skills") != nil {
+		t.Fatal("openai/codex-skills should have been removed from config")
+	}
+
+	removed, ran = firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
+	if len(removed) != 0 {
+		t.Fatalf("second removal should be a no-op, got %v", removed)
+	}
+	if ran {
+		t.Fatal("second removal ran = true, want false")
+	}
+}
+
+func TestApplyBuiltinsRename_ReplacesAnthropicSkillsOnce(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "anthropic/skills", Enabled: false, Builtin: true, Type: config.RegistryTypeCommunity},
+			{Repo: "expo/skills", Enabled: true, Builtin: true, Type: config.RegistryTypeCommunity},
+		},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}, Migrations: map[string]bool{}}
+
+	renamed, ran := firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
+	if len(renamed) != 1 || renamed[0] != "anthropic/skills -> anthropics/skills" {
+		t.Fatalf("renamed = %v, want [anthropic/skills -> anthropics/skills]", renamed)
+	}
+	if !ran {
+		t.Fatal("ran = false, want true")
+	}
+	if cfg.FindRegistry("anthropic/skills") != nil {
+		t.Fatal("anthropic/skills should have been removed from config")
+	}
+	replacement := cfg.FindRegistry("anthropics/skills")
+	if replacement == nil {
+		t.Fatal("anthropics/skills should have been added to config")
+	}
+	if replacement.Enabled {
+		t.Fatal("replacement should preserve the disabled state from anthropic/skills")
+	}
+
+	renamed, ran = firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
+	if len(renamed) != 0 {
+		t.Fatalf("second rename should be a no-op, got %v", renamed)
+	}
+	if ran {
+		t.Fatal("second rename ran = true, want false")
 	}
 }

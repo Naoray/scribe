@@ -20,16 +20,20 @@ type Bag struct {
 	JSONFlag     bool
 	RepoFlag     string // --registry filter
 	RemoteFlag   bool   // --remote: show available skills from registries
+	BrowseFlag   bool   // browse mode: remote catalog UI with install-first actions
+	InitialQuery string // initial search/filter text for TUI surfaces
 	TrustAllFlag bool   // --trust-all: approve all package commands without prompting
+	LazyGitHub   bool   // skip eager GitHub client/provider setup for local-only flows
 	Factory      *app.Factory
 
 	// Populated by steps
-	Config    *config.Config
-	State     *state.State
-	Client    *gh.Client
-	Tools     []tools.Tool
-	Repos     []string // filtered registries to process
-	Formatter Formatter
+	Config     *config.Config
+	State      *state.State
+	Client     *gh.Client
+	Tools      []tools.Tool
+	Repos      []string // filtered registries to process
+	Formatter  Formatter
+	StateDirty bool
 
 	// Provider is the skill discovery/fetch backend. Set by StepLoadConfig.
 	Provider provider.Provider
@@ -53,4 +57,10 @@ type Bag struct {
 
 	// Internal fields populated by steps
 	manifest *manifest.Manifest
+}
+
+func (b *Bag) MarkStateDirty() {
+	if b != nil {
+		b.StateDirty = true
+	}
 }

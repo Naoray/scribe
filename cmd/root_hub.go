@@ -99,6 +99,9 @@ func writeStatusPlain(w io.Writer, cfg *config.Config, st *state.State) {
 	fmt.Fprintf(w, "Registries: %d connected\n", len(repos))
 	fmt.Fprintf(w, "Skills:     %d installed\n", len(st.Installed))
 	fmt.Fprintf(w, "Last sync:  %s\n", syncTime(st.LastSync))
+	if shouldShowNoToolHint(st) {
+		fmt.Fprintln(w, "Hint: scribe-agent installed but no AI tool detected. Run `scribe tools` to see what's supported.")
+	}
 }
 
 func writeStatusStyled(w io.Writer, cfg *config.Config, st *state.State) {
@@ -129,5 +132,22 @@ func writeStatusStyled(w io.Writer, cfg *config.Config, st *state.State) {
 			valueStyle.Render(line.value),
 		)
 	}
+	if shouldShowNoToolHint(st) {
+		fmt.Fprintf(w, "  %s  %s\n",
+			labelStyle.Render(fmt.Sprintf("%*s", labelWidth, "Hint")),
+			valueStyle.Render("scribe-agent installed but no AI tool detected. Run `scribe tools` to see what's supported."),
+		)
+	}
 	fmt.Fprintln(w)
+}
+
+func shouldShowNoToolHint(st *state.State) bool {
+	if len(st.Installed) != 1 {
+		return false
+	}
+	installed, ok := st.Installed["scribe-agent"]
+	if !ok {
+		return false
+	}
+	return installed.Origin == state.OriginBootstrap && len(installed.Tools) == 0
 }

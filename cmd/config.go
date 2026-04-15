@@ -159,4 +159,3 @@ func printAdoptionState(cmd *cobra.Command, cfg *config.Config) {
 		}
 	}
 }
-

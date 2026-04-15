@@ -46,14 +46,38 @@ type AdoptionConfig struct {
 	Paths []string `yaml:"paths,omitempty"` // optional extra dirs; builtins always included
 }
 
+// ScribeAgentConfig controls embedded bootstrap behavior.
+type ScribeAgentConfig struct {
+	Enabled    bool `yaml:"enabled"`
+	enabledSet bool `yaml:"-"`
+}
+
+func (c *ScribeAgentConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawScribeAgentConfig struct {
+		Enabled *bool `yaml:"enabled"`
+	}
+	var raw rawScribeAgentConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	c.Enabled = true
+	if raw.Enabled != nil {
+		c.Enabled = *raw.Enabled
+		c.enabledSet = true
+	}
+	return nil
+}
+
 // Config holds user preferences from ~/.scribe/config.yaml.
 type Config struct {
-	Registries []RegistryConfig `yaml:"registries,omitempty"`
-	Token      string           `yaml:"token,omitempty"`
-	Tools      []ToolConfig     `yaml:"tools,omitempty"`
-	Editor     string           `yaml:"editor,omitempty"`
-	Adoption   AdoptionConfig   `yaml:"adoption,omitempty"`
-	BuiltinsVersion int         `yaml:"builtins_version,omitempty"`
+	Registries      []RegistryConfig  `yaml:"registries,omitempty"`
+	Token           string            `yaml:"token,omitempty"`
+	Tools           []ToolConfig      `yaml:"tools,omitempty"`
+	Editor          string            `yaml:"editor,omitempty"`
+	Adoption        AdoptionConfig    `yaml:"adoption,omitempty"`
+	ScribeAgent     ScribeAgentConfig `yaml:"scribe_agent"`
+	BuiltinsVersion int               `yaml:"builtins_version,omitempty"`
+	LazyGitHub      bool              `yaml:"-"`
 }
 
 // TeamRepos returns the list of enabled registry repos.
@@ -205,6 +229,7 @@ func Load() (*Config, error) {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return nil, fmt.Errorf("parse config.yaml: %w", err)
 		}
+		cfg.applyDefaults()
 		if _, err := cfg.AdoptionPaths(); err != nil {
 			return nil, err
 		}
@@ -223,13 +248,16 @@ func Load() (*Config, error) {
 	var raw legacyTOML
 	if _, err := toml.DecodeFile(tomlPath, &raw); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return &Config{}, nil
+			cfg := &Config{}
+			cfg.applyDefaults()
+			return cfg, nil
 		}
 		return nil, fmt.Errorf("read config.toml: %w", err)
 	}
 
 	// Migrate TOML -> Config.
 	cfg := migrateFromTOML(raw)
+	cfg.applyDefaults()
 
 	// Write YAML (keep TOML as backup).
 	if err := cfg.Save(); err != nil {
@@ -237,6 +265,12 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c *Config) applyDefaults() {
+	if !c.ScribeAgent.enabledSet {
+		c.ScribeAgent.Enabled = true
+	}
 }
 
 // migrateFromTOML converts legacy TOML fields to the new Config struct.

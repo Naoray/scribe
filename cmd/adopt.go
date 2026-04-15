@@ -179,9 +179,9 @@ func filterPlanByName(p adopt.Plan, name string) adopt.Plan {
 
 // dryRunPlan is the JSON shape emitted by --dry-run --json.
 type dryRunPlan struct {
-	DryRun    bool               `json:"dry_run"`
-	Adopt     []dryRunCandidate  `json:"adopt"`
-	Conflicts []dryRunConflict   `json:"conflicts"`
+	DryRun    bool              `json:"dry_run"`
+	Adopt     []dryRunCandidate `json:"adopt"`
+	Conflicts []dryRunConflict  `json:"conflicts"`
 }
 
 type dryRunCandidate struct {
@@ -306,11 +306,11 @@ func promptAdoptPlan(plan adopt.Plan) ([]adopt.Candidate, error) {
 // Returns -1 (as Decision) to signal abort.
 func promptConflict(c adopt.Conflict) (adopt.Decision, error) {
 	const (
-		optSkip     = "skip"
+		optSkip      = "skip"
 		optOverwrite = "overwrite"
-		optReplace  = "replace"
-		optDiff     = "diff"
-		optAbort    = "abort"
+		optReplace   = "replace"
+		optDiff      = "diff"
+		optAbort     = "abort"
 	)
 
 	for {

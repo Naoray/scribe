@@ -101,8 +101,8 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse loadout: %w", err)
 	}
-	if !m.IsRegistry() {
-		return nil, nil, fmt.Errorf("%s has no team section", teamRepo)
+	if len(m.Catalog) == 0 {
+		return nil, nil, fmt.Errorf("%s has no skills", teamRepo)
 	}
 
 	var statuses []SkillStatus

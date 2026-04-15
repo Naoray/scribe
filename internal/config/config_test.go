@@ -172,6 +172,25 @@ func TestSaveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConfigRoundTripScribeAgentEnabled(t *testing.T) {
+	setupHome(t)
+
+	original := &config.Config{
+		ScribeAgent: config.ScribeAgentConfig{Enabled: false},
+	}
+	if err := original.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.ScribeAgent.Enabled {
+		t.Fatal("ScribeAgent.Enabled = true, want false")
+	}
+}
+
 // --- Migration tests (Task 1) ---
 
 func TestMigrateTOMLToYAML(t *testing.T) {

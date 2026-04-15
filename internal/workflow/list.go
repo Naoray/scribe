@@ -12,14 +12,24 @@ import (
 	"github.com/Naoray/scribe/internal/tools"
 )
 
-// ListLoadSteps returns the minimal step list needed before launching the
-// list TUI: it loads config/state, resolves active tools for in-place updates,
-// then leaves rendering to cmd/.
-func ListLoadSteps() []Step {
+// ListLoadStepsLocal returns the minimal local-only step list needed before
+// launching the list TUI.
+func ListLoadStepsLocal() []Step {
+	return []Step{
+		{"LoadConfig", StepLoadConfig},
+		{"LoadState", StepLoadState},
+		{"EnsureScribeAgent", StepEnsureScribeAgent},
+	}
+}
+
+// ListLoadStepsRemote returns the remote list setup path, including tool
+// resolution for in-place actions on remote rows.
+func ListLoadStepsRemote() []Step {
 	return []Step{
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
 		{"ResolveTools", StepResolveTools},
+		{"EnsureScribeAgent", StepEnsureScribeAgent},
 	}
 }
 
@@ -59,7 +69,11 @@ func StepWriteListJSON(ctx context.Context, b *Bag) error {
 		Tools:    []tools.Tool{},
 	}
 
-	return printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
+	stateDirty, err := printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
+	if stateDirty {
+		b.MarkStateDirty()
+	}
+	return err
 }
 
 func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) error {
@@ -105,7 +119,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 	return enc.Encode(out)
 }
 
-func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) error {
+func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) (bool, error) {
 	type skillJSON struct {
 		Name       string   `json:"name"`
 		Status     string   `json:"status"`
@@ -121,12 +135,23 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 	}
 
 	var registries []registryJSON
+	var warnings []string
+	stateDirty := false
 
 	for _, teamRepo := range repos {
+		if st.RegistryFailure(teamRepo).Muted {
+			continue
+		}
 		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
-			return err
+			failure, changed := st.RecordRegistryFailure(teamRepo, err, registryMuteAfter)
+			stateDirty = stateDirty || changed
+			if !failure.Muted {
+				warnings = append(warnings, teamRepo+": "+err.Error())
+			}
+			continue
 		}
+		stateDirty = stateDirty || st.ClearRegistryFailure(teamRepo)
 
 		skills := make([]skillJSON, 0, len(statuses))
 		for _, sk := range statuses {
@@ -152,9 +177,11 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 		})
 	}
 
-	return json.NewEncoder(w).Encode(map[string]any{
-		"registries": registries,
-	})
+	out := map[string]any{"registries": registries}
+	if len(warnings) > 0 {
+		out["warnings"] = warnings
+	}
+	return stateDirty, json.NewEncoder(w).Encode(out)
 }
 
 func CountStatuses(statuses []sync.SkillStatus) map[sync.Status]int {
