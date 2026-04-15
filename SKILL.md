@@ -17,16 +17,13 @@ scribe --version
 
 If the command succeeds, skip to Step 3. If it fails with "command not found" (or similar), run Step 2.
 
-Step 2 — install scribe. Pick the first option that fits the machine; stop on the first success:
+Step 2 — install scribe. Prefer install methods that land the binary on `PATH` so future sessions can call `scribe` directly. Pick the first option that fits the machine; stop on the first success:
 
 ```bash
-# macOS Homebrew (preferred on macOS)
+# macOS Homebrew (preferred on macOS — installs to a PATH directory)
 brew install Naoray/tap/scribe
 
-# Go toolchain (works anywhere Go is installed)
-go install github.com/Naoray/scribe/cmd/scribe@latest
-
-# macOS Apple Silicon binary
+# macOS Apple Silicon binary (installs to /usr/local/bin)
 curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
 
 # macOS Intel binary
@@ -34,9 +31,29 @@ curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_
 
 # Linux amd64 binary
 curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_amd64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
+
+# Linux arm64 binary
+curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
+
+# Go toolchain — LAST RESORT: installs to $(go env GOBIN) or ~/go/bin, which is
+# often not on PATH. Only use if none of the above work.
+go install github.com/Naoray/scribe/cmd/scribe@latest
 ```
 
-Re-run `scribe --version` to confirm. If all options fail, stop and tell the user which one errored and why.
+After install, verify `scribe` is reachable via PATH:
+
+```bash
+command -v scribe && scribe --version
+```
+
+If `command -v scribe` prints nothing but the binary exists (e.g. at `~/go/bin/scribe` or `$(go env GOBIN)/scribe`), the install directory is not on PATH. Fix it before continuing:
+
+1. Detect the install dir: `GOBIN=$(go env GOBIN); [ -z "$GOBIN" ] && GOBIN="$(go env GOPATH)/bin"; echo "$GOBIN"`
+2. Append to the user's shell rc (`~/.zshrc` for zsh, `~/.bashrc` for bash): `export PATH="$GOBIN:$PATH"`
+3. Tell the user the line you added and which file, and that they need to open a new shell (or `source` the file) for it to take effect.
+4. For the rest of this bootstrap, call scribe by absolute path (`"$GOBIN"/scribe ...`).
+
+If all install options fail, stop and tell the user which one errored and why.
 
 Step 3 — make sure this skill is registered locally so it survives future sessions:
 
