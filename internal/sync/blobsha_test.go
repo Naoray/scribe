@@ -52,6 +52,12 @@ func TestResolveSkillBlobSHA(t *testing.T) {
 			found: true,
 		},
 		{
+			name:  "handles root-level skill file path",
+			entry: manifest.Entry{Name: "repo-skill", Path: "SKILL.md"},
+			want:  "rootsha",
+			found: true,
+		},
+		{
 			name:  "ignores tree entries (only blobs)",
 			entry: manifest.Entry{Name: "skills", Path: "skills"},
 			want:  "",

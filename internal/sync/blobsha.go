@@ -23,7 +23,7 @@ func resolveSkillBlobSHA(tree []provider.TreeEntry, entry manifest.Entry) (strin
 	}
 	skillPath = strings.TrimSuffix(skillPath, "/")
 	target := "SKILL.md"
-	if skillPath != "" && skillPath != "." {
+	if skillPath != "" && skillPath != "." && skillPath != "SKILL.md" {
 		target = skillPath + "/SKILL.md"
 	}
 	for _, e := range tree {

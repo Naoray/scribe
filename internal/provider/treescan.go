@@ -28,9 +28,9 @@ func ScanTreeForSkills(tree []TreeEntry, owner, repo string) []manifest.Entry {
 		dir := path.Dir(entry.Path)
 		var name, skillPath string
 		if dir == "." {
-			// Root-level SKILL.md — use repo name.
+			// Root-level SKILL.md — use repo name and record the file path.
 			name = repo
-			skillPath = "."
+			skillPath = skillFileName
 		} else {
 			// Name is the immediate parent dir.
 			name = path.Base(dir)

@@ -3,9 +3,11 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 func setupHome(t *testing.T) string {
@@ -269,6 +271,36 @@ token: yaml_token
 	}
 	if cfg.Token != "yaml_token" {
 		t.Errorf("expected YAML token, got %q", cfg.Token)
+	}
+}
+
+func TestConfig_BuiltinsVersion_RoundTripsThroughYAML(t *testing.T) {
+	cfg := &config.Config{BuiltinsVersion: 2}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), "builtins_version: 2") {
+		t.Errorf("yaml output missing builtins_version: %s", data)
+	}
+
+	var decoded config.Config
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.BuiltinsVersion != 2 {
+		t.Errorf("want 2, got %d", decoded.BuiltinsVersion)
+	}
+}
+
+func TestConfig_BuiltinsVersion_OmittedWhenZero(t *testing.T) {
+	cfg := &config.Config{}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), "builtins_version") {
+		t.Errorf("zero builtins_version should be omitted; got: %s", data)
 	}
 }
 
