@@ -9,13 +9,23 @@ scribe sync
 
 ## Set up in one paste
 
-Paste this into any agent with shell access (Claude Code, Cursor, Codex, etc.). The skill itself handles install, first-run, and self-registration — you only need to point the agent at it once.
+Paste this into any agent with shell access (Claude Code, Cursor, Codex, etc.) to set up Scribe on the machine:
 
 ```
-Fetch https://raw.githubusercontent.com/Naoray/scribe/main/SKILL.md, read it, and follow its "First-run bootstrap" section before anything else. After bootstrap, use the rules in that skill for every future skill-management request.
+I want to use Scribe to manage my AI coding-agent skills on this machine.
+Repo: https://github.com/Naoray/scribe  (setup steps: /blob/main/SKILL.md)
+
+Please set it up for me:
+  1. If `scribe --version` fails, install it — prefer Homebrew (`brew install Naoray/tap/scribe`)
+     or Go (`go install github.com/Naoray/scribe/cmd/scribe@latest`); fall back to the official
+     release binary from the GitHub releases page if neither is available.
+  2. Register Scribe's own agent-facing skill locally so future sessions pick it up from
+     `~/.scribe/skills/scribe-agent/`:
+        scribe add Naoray/scribe:scribe-agent --yes --json
+  3. Show me `scribe list --json` to confirm.
 ```
 
-That's it. If `scribe` isn't installed, the skill installs it. If the `scribe-agent` skill isn't registered yet, the skill registers itself so the next session loads it directly from `~/.scribe/skills/scribe-agent/SKILL.md`.
+That's it — two commands wrapped in a readable request. You're telling the agent what you want installed and from where; the agent stays in charge of running the commands.
 
 ## What is this?
 
