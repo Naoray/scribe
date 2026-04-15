@@ -7,6 +7,16 @@ scribe registry connect ArtistfyHQ/team-skills
 scribe sync
 ```
 
+## Set up in one paste
+
+Paste this into any agent with shell access (Claude Code, Cursor, Codex, etc.). The skill itself handles install, first-run, and self-registration — you only need to point the agent at it once.
+
+```
+Fetch https://raw.githubusercontent.com/Naoray/scribe/main/SKILL.md, read it, and follow its "First-run bootstrap" section before anything else. After bootstrap, use the rules in that skill for every future skill-management request.
+```
+
+That's it. If `scribe` isn't installed, the skill installs it. If the `scribe-agent` skill isn't registered yet, the skill registers itself so the next session loads it directly from `~/.scribe/skills/scribe-agent/SKILL.md`.
+
 ## What is this?
 
 AI coding agents like Claude Code and Cursor work better with "skills" — markdown instruction files that teach the agent how to do specific tasks (code reviews, deployments, Laravel patterns, etc.). If you've built a good set of skills, sharing them with teammates currently means Slack links and manual file copying. Nobody knows if they're on the latest version. The person who just joined has no idea what they're missing.

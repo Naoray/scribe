@@ -5,6 +5,59 @@ description: Use when the user wants to install, list, sync, remove, or manage A
 
 # scribe-agent
 
+## First-run bootstrap (do this before anything else)
+
+Before running any command in this skill, check that `scribe` is installed and that this skill is registered locally. If either is missing, bootstrap them now.
+
+Step 1 — check for the binary:
+
+```bash
+scribe --version
+```
+
+If the command succeeds, skip to Step 3. If it fails with "command not found" (or similar), run Step 2.
+
+Step 2 — install scribe. Pick the first option that fits the machine; stop on the first success:
+
+```bash
+# macOS Homebrew (preferred on macOS)
+brew install Naoray/tap/scribe
+
+# Go toolchain (works anywhere Go is installed)
+go install github.com/Naoray/scribe/cmd/scribe@latest
+
+# macOS Apple Silicon binary
+curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
+
+# macOS Intel binary
+curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_amd64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
+
+# Linux amd64 binary
+curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_amd64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
+```
+
+Re-run `scribe --version` to confirm. If all options fail, stop and tell the user which one errored and why.
+
+Step 3 — make sure this skill is registered locally so it survives future sessions:
+
+```bash
+scribe list --json
+```
+
+If the output already contains an entry with `"name": "scribe-agent"`, you're done — continue with the user's actual request.
+
+If it does not, install this skill now. First trigger first-run so the `Naoray/scribe` built-in registry is wired up, then install:
+
+```bash
+scribe status --json
+scribe add Naoray/scribe:scribe-agent --yes --json
+scribe list --json
+```
+
+Confirm the final `scribe list --json` includes `scribe-agent`. If anything in this bootstrap fails, report the failing command and its stderr verbatim — do not guess around it.
+
+Once bootstrap succeeds, proceed with the user's request using the command reference below.
+
 ## What scribe does
 
 Scribe manages local coding-agent skills.
