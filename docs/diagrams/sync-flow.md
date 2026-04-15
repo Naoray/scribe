@@ -16,7 +16,7 @@
               ┌──────────────┐ ┌─────────────┐ ┌────────────────┐
               │ config.Load()│ │ state.Load()│ │ TTY detection  │
               │              │ │             │ │                │
-              │ config.toml  │ │ state.json  │ │ --json or pipe │
+              │ config.yaml  │ │ state.json  │ │ --json or pipe │
               │ → TeamRepos  │ │ → Installed │ │ → auto-JSON    │
               │ → Token      │ │ → LastSync  │ │                │
               └──────┬───────┘ └──────┬──────┘ └───────┬────────┘
@@ -274,7 +274,7 @@
 
  ~/.scribe/                ~/.claude/             .cursor/
  ┌──────────────────┐      ┌──────────────┐      ┌──────────────────┐
- │ config.toml      │      │ skills/      │      │ rules/           │
+ │ config.yaml      │      │ skills/      │      │ rules/           │
  │ state.json       │      │  gstack/ ──────────>│  gstack.mdc ────>│
  │ skills/          │ ◄────│  deploy/ ──────────>│  deploy.mdc ────>│
  │   gstack/        │      │              │      │                  │

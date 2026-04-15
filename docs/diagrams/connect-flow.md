@@ -32,7 +32,7 @@
                     ┌─────────────────────┐
                     │  config.Load()      │
                     │  ~/.scribe/         │
-                    │    config.toml      │
+                    │    config.yaml      │
                     └──────────┬──────────┘
                                │
                                ▼

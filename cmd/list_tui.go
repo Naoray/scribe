@@ -104,6 +104,10 @@ type actionItem struct {
 }
 
 func actionsForRow(row listRow, browseMode bool) []actionItem {
+	return actionsForRowWithRepair(row, browseMode, row.Managed && row.Local != nil && row.Local.LocalPath != "")
+}
+
+func actionsForRowWithRepair(row listRow, browseMode bool, hasRepair bool) []actionItem {
 	if browseMode {
 		canInstall := row.Entry != nil && row.Status != sync.StatusCurrent
 		reason := "already installed"
@@ -128,6 +132,9 @@ func actionsForRow(row listRow, browseMode bool) []actionItem {
 	}
 	actions := []actionItem{
 		{label: "update", key: "update", disabled: !canUpdate, reason: updateReason, style: ltUpdateStyle},
+	}
+	if hasRepair {
+		actions = append(actions, actionItem{label: "repair", key: "repair", style: ltNeutralStyle})
 	}
 	if row.Managed {
 		actions = append(actions, actionItem{label: "tools", key: "tools", disabled: !hasLocal, reason: "not on disk", style: ltNeutralStyle})
@@ -168,6 +175,10 @@ type updateDoneMsg struct {
 }
 type toolsSavedMsg struct {
 	result skillEditResult
+	err    error
+}
+type repairSavedMsg struct {
+	result skillProjectionRepairResult
 	err    error
 }
 
@@ -218,6 +229,9 @@ type listModel struct {
 	toolStatuses   []tools.Status
 	toolSelection  map[string]bool
 	toolMode       state.ToolsMode
+	restoreName    string
+	restoreGroup   string
+	restoreDetail  bool
 	statusMsg      string
 	updateHasMods  bool
 	pendingTickID  int
@@ -244,6 +258,10 @@ func newListModel(ctx context.Context, bag *workflow.Bag) listModel {
 
 func (m listModel) isBrowseMode() bool {
 	return m.bag != nil && m.bag.BrowseFlag
+}
+
+func (m listModel) actionsForRow(row listRow) []actionItem {
+	return actionsForRowWithRepair(row, m.isBrowseMode(), row.Managed && row.Local != nil && row.Local.LocalPath != "")
 }
 
 func (m listModel) Init() tea.Cmd {
@@ -381,6 +399,7 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rows = msg.rows
 		m.warnings = msg.warnings
 		m = m.refreshFiltered()
+		m = m.restoreSelection()
 		if !m.isBrowseMode() {
 			repos := registriesForBackgroundCheck(m.bag.Config, m.bag.State)
 			if len(repos) > 0 {
@@ -468,11 +487,28 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
 			return m, nil
 		}
+		if m.cursor >= 0 && m.cursor < len(m.filtered) {
+			m.restoreName = m.filtered[m.cursor].Name
+			m.restoreGroup = m.filtered[m.cursor].Group
+			m.restoreDetail = true
+		}
 		m.substate = listSubstateNone
 		m.toolCursor = 0
 		m.toolStatuses = nil
 		m.toolSelection = nil
 		m.statusMsg = fmt.Sprintf("Updated tools: %s", strings.Join(msg.result.Tools, ", "))
+		return m, loadRowsCmd(m.ctx, m.bag)
+	case repairSavedMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
+			return m, nil
+		}
+		if m.cursor >= 0 && m.cursor < len(m.filtered) {
+			m.restoreName = m.filtered[m.cursor].Name
+			m.restoreGroup = m.filtered[m.cursor].Group
+			m.restoreDetail = true
+		}
+		m.statusMsg = fmt.Sprintf("Reinstalled for: %s", strings.Join(msg.result.Tools, ", "))
 		return m, loadRowsCmd(m.ctx, m.bag)
 	case tea.KeyPressMsg:
 		if m.stage == stageLoading {
@@ -953,7 +989,7 @@ func (m listModel) updateToolsEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.toolCursor++
 		}
 		return m, nil
-	case "enter", " ":
+	case "enter", " ", "space":
 		return m.activateToolsEditorCursor()
 	}
 	return m, nil
@@ -1065,6 +1101,12 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 		}
 		m.statusMsg = "Adopting..."
 		return m, m.runAdopt(row)
+	case "repair":
+		if row.Local == nil || !row.Managed {
+			return m, nil
+		}
+		m.statusMsg = "Repairing..."
+		return m, m.runRepair(row.Name)
 	case "tools":
 		return m.openToolsEditor(row), nil
 	}
@@ -1145,6 +1187,15 @@ func (m listModel) runSaveTools(name string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := applySkillToolSelection(cfg, st, name, mode, desired)
 		return toolsSavedMsg{result: result, err: err}
+	}
+}
+
+func (m listModel) runRepair(name string) tea.Cmd {
+	cfg := m.bag.Config
+	st := m.bag.State
+	return func() tea.Msg {
+		result, err := repairSkillProjections(cfg, st, name)
+		return repairSavedMsg{result: result, err: err}
 	}
 }
 
@@ -1423,6 +1474,31 @@ func (m listModel) refreshFiltered() listModel {
 	m.filtered = m.applyFilter()
 	m.groupCounts = buildGroupCounts(m.filtered)
 	m.cursor, m.offset = 0, 0
+	return m
+}
+
+func (m listModel) restoreSelection() listModel {
+	if m.restoreName == "" || len(m.filtered) == 0 {
+		return m
+	}
+	for i := range m.filtered {
+		if m.filtered[i].Name != m.restoreName {
+			continue
+		}
+		if m.restoreGroup != "" && m.filtered[i].Group != m.restoreGroup {
+			continue
+		}
+		m.cursor = i
+		m = m.ensureCursorVisible()
+		m.selected = m.restoreDetail
+		if m.selected {
+			m.focus = focusActions
+		}
+		break
+	}
+	m.restoreName = ""
+	m.restoreGroup = ""
+	m.restoreDetail = false
 	return m
 }
 

@@ -4,16 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/state"
-	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -196,10 +192,6 @@ func runSkillRepair(cmd *cobra.Command, args []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 
-	if source != "managed" && source != "tool" {
-		return fmt.Errorf("skill repair: --from must be one of managed, tool")
-	}
-
 	factory := newCommandFactory()
 	cfg, err := factory.Config()
 	if err != nil {
@@ -211,75 +203,10 @@ func runSkillRepair(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
-	installed, ok := st.Installed[name]
-	if !ok {
-		return fmt.Errorf("skill %q is not installed", name)
-	}
-
-	tool, err := tools.ResolveByName(cfg, toolName)
+	result, err := applySkillRepair(cfg, st, name, toolName, source)
 	if err != nil {
 		return err
 	}
-	path, err := tool.SkillPath(name)
-	if err != nil {
-		return err
-	}
-	canonicalDir := filepath.Join(mustStoreDir(), name)
-
-	if source == "tool" {
-		if err := reconcile.CopyProjectionToCanonical(tool, path, canonicalDir); err != nil {
-			return err
-		}
-		skillMD, err := os.ReadFile(filepath.Join(canonicalDir, "SKILL.md"))
-		if err == nil {
-			installed.InstalledHash = sync.ComputeFileHash(skillMD)
-		}
-	}
-
-	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	links, err := tool.Install(name, canonicalDir)
-	if err != nil {
-		return err
-	}
-
-	newManaged := make(map[string]bool)
-	existingManagedPaths := installed.ManagedPaths
-	if len(existingManagedPaths) == 0 {
-		existingManagedPaths = installed.Paths
-	}
-	for _, p := range existingManagedPaths {
-		if p != path {
-			newManaged[p] = true
-		}
-	}
-	for _, p := range links {
-		newManaged[p] = true
-	}
-
-	managedPaths := make([]string, 0, len(newManaged))
-	for p := range newManaged {
-		managedPaths = append(managedPaths, p)
-	}
-	sort.Strings(managedPaths)
-
-	filteredConflicts := make([]state.ProjectionConflict, 0, len(installed.Conflicts))
-	for _, conflict := range installed.Conflicts {
-		if conflict.Tool == toolName && conflict.Path == path {
-			continue
-		}
-		filteredConflicts = append(filteredConflicts, conflict)
-	}
-	installed.ManagedPaths = managedPaths
-	installed.Paths = append([]string(nil), managedPaths...)
-	installed.Conflicts = filteredConflicts
-	st.Installed[name] = installed
-	if err := st.Save(); err != nil {
-		return err
-	}
-
-	result := skillRepairResult{Name: name, Tool: toolName, Source: source}
 	if useJSON {
 		return json.NewEncoder(os.Stdout).Encode(result)
 	}

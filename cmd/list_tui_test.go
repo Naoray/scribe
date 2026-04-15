@@ -69,8 +69,11 @@ func TestActionsForRow(t *testing.T) {
 		}
 		actions := actionsForRow(row, false)
 
-		if len(actions) != 6 {
-			t.Fatalf("expected 6 actions, got %d", len(actions))
+		if len(actions) != 7 {
+			t.Fatalf("expected 7 actions, got %d", len(actions))
+		}
+		if findAction(actions, "repair").key != "repair" {
+			t.Fatal("managed local row should expose repair action")
 		}
 		if findAction(actions, "tools").key != "tools" {
 			t.Fatal("managed local row should expose tools action")
@@ -192,6 +195,9 @@ func TestActionsForRow(t *testing.T) {
 		}
 		if adoptAction.disabled {
 			t.Fatal("adopt action should be enabled for unmanaged local rows")
+		}
+		if findAction(actions, "repair").key != "" {
+			t.Fatal("unmanaged row should not expose repair action")
 		}
 	})
 
@@ -1373,6 +1379,24 @@ func TestActivateToolsEditorCursor_TogglingInheritedToolPinsAndUnselects(t *test
 	}
 }
 
+func TestUpdateToolsEditor_SpaceTogglesCurrentTool(t *testing.T) {
+	m := listModel{
+		substate:     listSubstateTools,
+		toolCursor:   1,
+		toolMode:     state.ToolsModePinned,
+		toolStatuses: []tools.Status{{Name: "claude", Enabled: true}},
+		toolSelection: map[string]bool{
+			"claude": true,
+		},
+	}
+
+	nm, _ := m.updateToolsEditor(tea.KeyPressMsg{Code: tea.KeySpace})
+	lm := nm.(listModel)
+	if lm.toolSelection["claude"] {
+		t.Fatal("space should toggle the current tool off")
+	}
+}
+
 func TestRenderDetailPane_ToolsEditor(t *testing.T) {
 	m := listModel{
 		width:      80,
@@ -1425,6 +1449,31 @@ func TestRenderDetailPane_ToolsEditorInheritUsesInheritedMarker(t *testing.T) {
 	out := m.renderDetailPane(row, 60)
 	if !strings.Contains(out, "[~] claude") {
 		t.Fatalf("inherit-mode tools should use inherited marker:\n%s", out)
+	}
+}
+
+func TestRestoreSelection_PreservesFocusedSkillAfterReload(t *testing.T) {
+	m := listModel{
+		restoreName:   "review-triage",
+		restoreGroup:  "artistfy/hq",
+		restoreDetail: true,
+		rows: []listRow{
+			{Name: "ascii", Group: "artistfy/hq"},
+			{Name: "review-triage", Group: "artistfy/hq"},
+		},
+	}
+
+	m = m.refreshFiltered()
+	m = m.restoreSelection()
+
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", m.cursor)
+	}
+	if !m.selected {
+		t.Fatal("detail pane should stay open after reload")
+	}
+	if m.focus != focusActions {
+		t.Fatalf("focus = %v, want focusActions", m.focus)
 	}
 }
 
