@@ -147,9 +147,9 @@ func ApplyBuiltins(cfg *config.Config) ([]string, bool) {
 	return added, firstRun
 }
 
-func ApplyBuiltinsRemove(cfg *config.Config, st *state.State, removed []string) []string {
+func ApplyBuiltinsRemove(cfg *config.Config, st *state.State, removed []string) ([]string, bool) {
 	if st != nil && st.HasMigration(removeOpenAICodexMigration) {
-		return nil
+		return nil, false
 	}
 
 	removeSet := map[string]bool{}
@@ -175,12 +175,12 @@ func ApplyBuiltinsRemove(cfg *config.Config, st *state.State, removed []string) 
 		}
 	}
 
-	return pruned
+	return pruned, true
 }
 
-func ApplyBuiltinsRename(cfg *config.Config, st *state.State, renamed map[string]string) []string {
+func ApplyBuiltinsRename(cfg *config.Config, st *state.State, renamed map[string]string) ([]string, bool) {
 	if st != nil && st.HasMigration(renameBuiltinReposMigration) {
-		return nil
+		return nil, false
 	}
 
 	type renameOp struct {
@@ -223,5 +223,5 @@ func ApplyBuiltinsRename(cfg *config.Config, st *state.State, renamed map[string
 		}
 	}
 
-	return applied
+	return applied, true
 }

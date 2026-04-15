@@ -130,17 +130,23 @@ func TestApplyBuiltinsRemove_RemovesOpenAICodexOnce(t *testing.T) {
 	}
 	st := &state.State{Installed: map[string]state.InstalledSkill{}, Migrations: map[string]bool{}}
 
-	removed := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
+	removed, ran := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
 	if len(removed) != 1 || removed[0] != "openai/codex-skills" {
 		t.Fatalf("removed = %v, want [openai/codex-skills]", removed)
+	}
+	if !ran {
+		t.Fatal("ran = false, want true")
 	}
 	if cfg.FindRegistry("openai/codex-skills") != nil {
 		t.Fatal("openai/codex-skills should have been removed from config")
 	}
 
-	removed = firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
+	removed, ran = firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
 	if len(removed) != 0 {
 		t.Fatalf("second removal should be a no-op, got %v", removed)
+	}
+	if ran {
+		t.Fatal("second removal ran = true, want false")
 	}
 }
 
@@ -153,9 +159,12 @@ func TestApplyBuiltinsRename_ReplacesAnthropicSkillsOnce(t *testing.T) {
 	}
 	st := &state.State{Installed: map[string]state.InstalledSkill{}, Migrations: map[string]bool{}}
 
-	renamed := firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
+	renamed, ran := firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
 	if len(renamed) != 1 || renamed[0] != "anthropic/skills -> anthropics/skills" {
 		t.Fatalf("renamed = %v, want [anthropic/skills -> anthropics/skills]", renamed)
+	}
+	if !ran {
+		t.Fatal("ran = false, want true")
 	}
 	if cfg.FindRegistry("anthropic/skills") != nil {
 		t.Fatal("anthropic/skills should have been removed from config")
@@ -168,8 +177,11 @@ func TestApplyBuiltinsRename_ReplacesAnthropicSkillsOnce(t *testing.T) {
 		t.Fatal("replacement should preserve the disabled state from anthropic/skills")
 	}
 
-	renamed = firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
+	renamed, ran = firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
 	if len(renamed) != 0 {
 		t.Fatalf("second rename should be a no-op, got %v", renamed)
+	}
+	if ran {
+		t.Fatal("second rename ran = true, want false")
 	}
 }

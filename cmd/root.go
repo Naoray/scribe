@@ -60,8 +60,8 @@ func newRootCmd() *cobra.Command {
 			}
 
 			added, builtinsFirstRun := firstrun.ApplyBuiltins(cfg)
-			removed := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
-			renamed := firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
+			removed, removedRan := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
+			renamed, renamedRan := firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
 			if len(added) > 0 {
 				out := c.ErrOrStderr()
 				if builtinsFirstRun {
@@ -88,7 +88,7 @@ func newRootCmd() *cobra.Command {
 					return err
 				}
 			}
-			if len(removed) > 0 || len(added) > 0 || len(renamed) > 0 {
+			if builtinsFirstRun || removedRan || renamedRan {
 				if err := st.Save(); err != nil {
 					return err
 				}
