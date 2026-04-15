@@ -11,9 +11,9 @@ import (
 // toolClaude is the identifier for the Claude Code tool.
 const toolClaude = "claude"
 
-// ClaudeTool symlinks ~/.claude/skills/<name> → ~/.scribe/skills/<name>/SKILL.md.
-// Only the SKILL.md file is linked, so Claude Code does not see internal files
-// like .scribe-base.md or versions/.
+// ClaudeTool symlinks ~/.claude/skills/<name> → ~/.scribe/skills/<name>/.
+// Claude Code expects a directory containing SKILL.md — a file symlink would
+// appear as a bare file and not be recognised as a skill.
 type ClaudeTool struct{}
 
 func (t ClaudeTool) Name() string { return toolClaude }
@@ -37,7 +37,7 @@ func (t ClaudeTool) Install(skillName, canonicalDir string) ([]string, error) {
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create claude skills dir: %w", err)
 	}
-	if err := replaceSymlink(link, filepath.Join(canonicalDir, "SKILL.md")); err != nil {
+	if err := replaceSymlink(link, canonicalDir); err != nil {
 		return nil, fmt.Errorf("symlink claude/%s: %w", skillName, err)
 	}
 	return []string{link}, nil

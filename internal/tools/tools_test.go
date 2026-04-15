@@ -66,20 +66,19 @@ func TestClaudeInstall(t *testing.T) {
 		t.Fatalf("expected 1 symlink path, got %d", len(paths))
 	}
 
-	// Link resolves to SKILL.md file, not the directory.
+	// Link resolves to the canonical directory (Claude Code expects a dir with SKILL.md inside).
 	resolved, err := os.Readlink(paths[0])
 	if err != nil {
 		t.Fatalf("Readlink: %v", err)
 	}
-	wantTarget := filepath.Join(canonicalDir, "SKILL.md")
-	if resolved != wantTarget {
-		t.Errorf("symlink points to %q, want %q", resolved, wantTarget)
+	if resolved != canonicalDir {
+		t.Errorf("symlink points to %q, want %q", resolved, canonicalDir)
 	}
 
-	// Content accessible through the symlink.
-	content, err := os.ReadFile(paths[0])
+	// SKILL.md accessible through the directory symlink.
+	content, err := os.ReadFile(filepath.Join(paths[0], "SKILL.md"))
 	if err != nil {
-		t.Fatalf("read through symlink: %v", err)
+		t.Fatalf("read SKILL.md through symlink: %v", err)
 	}
 	if len(content) == 0 {
 		t.Error("SKILL.md content empty through symlink")

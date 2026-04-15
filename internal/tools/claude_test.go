@@ -21,7 +21,7 @@ func TestClaudeSkillPath(t *testing.T) {
 	}
 }
 
-func TestClaudeInstallSymlinksToFile(t *testing.T) {
+func TestClaudeInstallSymlinksToDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -40,11 +40,6 @@ func TestClaudeInstallSymlinksToFile(t *testing.T) {
 	if err := os.WriteFile(skillMD, []byte("# Cleanup"), 0o644); err != nil {
 		t.Fatalf("write SKILL.md: %v", err)
 	}
-	// Also write .scribe-base.md to verify it's NOT visible through the symlink.
-	baseMD := filepath.Join(canonicalDir, ".scribe-base.md")
-	if err := os.WriteFile(baseMD, []byte("# Cleanup"), 0o644); err != nil {
-		t.Fatalf("write .scribe-base.md: %v", err)
-	}
 
 	tool := ClaudeTool{}
 	paths, err := tool.Install("cleanup", canonicalDir)
@@ -58,23 +53,28 @@ func TestClaudeInstallSymlinksToFile(t *testing.T) {
 
 	link := paths[0]
 
-	// Verify symlink target points to SKILL.md file, not the directory.
+	// Verify symlink target points to the canonical directory.
 	target, err := os.Readlink(link)
 	if err != nil {
 		t.Fatalf("readlink: %v", err)
 	}
 
-	wantTarget := filepath.Join(canonicalDir, "SKILL.md")
-	if target != wantTarget {
-		t.Errorf("symlink target = %q, want %q", target, wantTarget)
+	if target != canonicalDir {
+		t.Errorf("symlink target = %q, want %q", target, canonicalDir)
 	}
 
-	// Verify the symlink resolves to a file, not a directory.
+	// Verify the symlink resolves to a directory (Claude Code expects this).
 	info, err := os.Stat(link)
 	if err != nil {
 		t.Fatalf("stat symlink: %v", err)
 	}
-	if info.IsDir() {
-		t.Error("symlink should resolve to a file, not a directory")
+	if !info.IsDir() {
+		t.Error("symlink should resolve to a directory, not a file")
+	}
+
+	// Verify SKILL.md is accessible through the symlink.
+	linkedSkillMD := filepath.Join(link, "SKILL.md")
+	if _, err := os.Stat(linkedSkillMD); err != nil {
+		t.Errorf("SKILL.md not accessible through symlink: %v", err)
 	}
 }
