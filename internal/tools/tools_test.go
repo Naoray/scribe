@@ -303,6 +303,46 @@ func TestCodexInstallAndUninstall(t *testing.T) {
 	}
 }
 
+func TestCodexInstall_ProjectsCodexCompatibleSkillMD(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	canonicalDir := t.TempDir()
+	raw := "# ASCII Diagram Generator\n\nCreate ASCII diagrams for flows, architectures, and processes.\n"
+	if err := os.WriteFile(filepath.Join(canonicalDir, "SKILL.md"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write canonical SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(canonicalDir, "helper.txt"), []byte("helper"), 0o644); err != nil {
+		t.Fatalf("write helper.txt: %v", err)
+	}
+
+	tool := tools.CodexTool{}
+	paths, err := tool.Install("ascii", canonicalDir)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	projected, err := os.ReadFile(filepath.Join(paths[0], "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read projected SKILL.md: %v", err)
+	}
+	content := string(projected)
+	if !strings.HasPrefix(content, "---\n") {
+		t.Fatalf("projected SKILL.md missing YAML frontmatter:\n%s", content)
+	}
+	if !strings.Contains(content, "name: ascii\n") {
+		t.Fatalf("projected SKILL.md missing generated name:\n%s", content)
+	}
+	if !strings.Contains(content, "description: Create ASCII diagrams for flows, architectures, and processes.\n") {
+		t.Fatalf("projected SKILL.md missing generated description:\n%s", content)
+	}
+	if !strings.Contains(content, "# ASCII Diagram Generator") {
+		t.Fatalf("projected SKILL.md missing original body:\n%s", content)
+	}
+	if _, err := os.Stat(filepath.Join(paths[0], "helper.txt")); err != nil {
+		t.Fatalf("projected skill missing sibling files: %v", err)
+	}
+}
+
 func TestDefaultToolsIncludesGeminiAndCodex(t *testing.T) {
 	var names []string
 	for _, tool := range tools.DefaultTools() {

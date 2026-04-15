@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 const toolCodex = "codex"
@@ -28,6 +29,9 @@ func (t CodexTool) Detect() bool {
 }
 
 func (t CodexTool) Install(skillName, canonicalDir string) ([]string, error) {
+	if err := ensureCodexCompatibleSkillMD(skillName, canonicalDir); err != nil {
+		return nil, err
+	}
 	skillsDir, err := codexSkillsDir()
 	if err != nil {
 		return nil, err
@@ -72,4 +76,36 @@ func codexSkillsDir() (string, error) {
 		return "", fmt.Errorf("home dir: %w", err)
 	}
 	return filepath.Join(home, ".codex", "skills"), nil
+}
+
+func ensureCodexCompatibleSkillMD(skillName, canonicalDir string) error {
+	skillPath := filepath.Join(canonicalDir, "SKILL.md")
+	content, err := os.ReadFile(skillPath)
+	if err != nil {
+		return fmt.Errorf("read codex skill %q: %w", skillName, err)
+	}
+	if strings.HasPrefix(string(content), "---\n") {
+		return nil
+	}
+
+	description := firstBodyParagraph(content)
+	if description == "" {
+		description = skillName
+	}
+	normalized := []byte(fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s", skillName, description, strings.TrimLeft(string(content), "\n")))
+	if err := WriteCanonicalSkill(canonicalDir, normalized); err != nil {
+		return fmt.Errorf("normalize codex skill %q: %w", skillName, err)
+	}
+	return nil
+}
+
+func firstBodyParagraph(content []byte) string {
+	for _, line := range strings.Split(string(content), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		return trimmed
+	}
+	return ""
 }

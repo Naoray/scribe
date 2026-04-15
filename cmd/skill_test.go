@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,7 +265,11 @@ func TestSkillRepair_ToolWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if string(data) != string(toolContent) {
-		t.Fatalf("canonical SKILL.md = %q, want %q", string(data), string(toolContent))
+	content := string(data)
+	if !strings.Contains(content, "# commit\npromoted\n") {
+		t.Fatalf("canonical SKILL.md = %q, want promoted tool body", content)
+	}
+	if !strings.Contains(content, "name: commit\n") {
+		t.Fatalf("canonical SKILL.md = %q, want generated codex frontmatter", content)
 	}
 }

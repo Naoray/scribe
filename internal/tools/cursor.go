@@ -33,16 +33,15 @@ func (t CursorTool) Detect() bool {
 }
 
 func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
-	workDir, err := t.resolveWorkDir()
-	if err != nil {
-		return nil, err
-	}
-
 	// Generate .cursor.mdc from SKILL.md in the store.
 	skillMDPath := filepath.Join(canonicalDir, "SKILL.md")
 	skillMD, err := os.ReadFile(skillMDPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
+			mdcPath := filepath.Join(canonicalDir, ".cursor.mdc")
+			if _, statErr := os.Stat(mdcPath); statErr == nil {
+				return t.installFromMDC(skillName, mdcPath)
+			}
 			return nil, fmt.Errorf("skill %q has no SKILL.md in store", skillName)
 		}
 		return nil, fmt.Errorf("read SKILL.md for %q: %w", skillName, err)
@@ -54,20 +53,7 @@ func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
 		return nil, fmt.Errorf("write .cursor.mdc for %q: %w", skillName, err)
 	}
 
-	rulesDir := filepath.Join(workDir, ".cursor", "rules")
-
-	// Slugify for safety — bare names pass through unchanged,
-	// but this protects against any residual slashes.
-	mdcName := SlugifyRegistry(skillName) + ".mdc"
-
-	link := filepath.Join(rulesDir, mdcName)
-	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-		return nil, fmt.Errorf("create cursor rules dir: %w", err)
-	}
-	if err := replaceSymlink(link, mdcPath); err != nil {
-		return nil, fmt.Errorf("symlink cursor/%s: %w", skillName, err)
-	}
-	return []string{link}, nil
+	return t.installFromMDC(skillName, mdcPath)
 }
 
 func (t CursorTool) Uninstall(skillName string) error {
@@ -163,4 +149,21 @@ func stripFrontmatter(content []byte) []byte {
 		return content
 	}
 	return []byte(strings.TrimLeft(rest[idx+4:], "\n"))
+}
+
+func (t CursorTool) installFromMDC(skillName, mdcPath string) ([]string, error) {
+	workDir, err := t.resolveWorkDir()
+	if err != nil {
+		return nil, err
+	}
+	rulesDir := filepath.Join(workDir, ".cursor", "rules")
+	mdcName := SlugifyRegistry(skillName) + ".mdc"
+	link := filepath.Join(rulesDir, mdcName)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return nil, fmt.Errorf("create cursor rules dir: %w", err)
+	}
+	if err := replaceSymlink(link, mdcPath); err != nil {
+		return nil, fmt.Errorf("symlink cursor/%s: %w", skillName, err)
+	}
+	return []string{link}, nil
 }
