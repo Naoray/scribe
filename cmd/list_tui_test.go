@@ -703,6 +703,16 @@ func TestUpdateDetail_FocusListTypingFiltersRows(t *testing.T) {
 	}
 }
 
+func TestUpdateDetail_FocusListColonEntersCommandMode(t *testing.T) {
+	m := detailModel(focusList)
+
+	nm, _ := m.updateDetail(tea.KeyPressMsg{Text: ":"})
+	lm := nm.(listModel)
+	if !lm.commandMode {
+		t.Fatal("typing ':' in focusList detail mode should enter command mode")
+	}
+}
+
 func TestUpdateDetail_FocusListBackspaceUpdatesSearch(t *testing.T) {
 	m := detailModel(focusList)
 	m.search = "b"

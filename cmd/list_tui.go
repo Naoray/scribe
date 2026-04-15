@@ -219,6 +219,7 @@ type listModel struct {
 	cursor         int
 	offset         int
 	search         string
+	searchMode     bool
 	commandMode    bool
 	commandInput   string
 	selected       bool        // true when right-side detail/action pane is open
@@ -533,14 +534,14 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	text := typedText(msg)
 	switch msg.String() {
 	case "ctrl+c", "q":
-		if m.search != "" {
+		if m.searchMode || m.search != "" {
 			m = m.resetSearch()
 			return m, nil
 		}
 		m.quitting = true
 		return m, tea.Quit
 	case "esc", "escape":
-		if m.search != "" {
+		if m.searchMode || m.search != "" {
 			m = m.resetSearch()
 		}
 		return m, nil
@@ -570,7 +571,8 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "backspace":
 		m = m.backspaceSearch()
 	default:
-		if text == "/" && m.search == "" {
+		if text == "/" && !m.searchMode && m.search == "" {
+			m.searchMode = true
 			return m, nil
 		}
 		if text == ":" && m.search == "" {
@@ -765,6 +767,7 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.commandMode {
 			return m.updateCommandMode(msg)
 		}
+		text := typedText(msg)
 		// Browsing the list with the detail pane open: arrow keys move
 		// the row cursor and the right pane refreshes live. Right/enter
 		// hands focus to the action menu. Character keys still filter the
@@ -795,15 +798,16 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.focus = focusList
 			}
 		default:
-			if key == "/" && m.search == "" {
+			if text == "/" && !m.searchMode && m.search == "" {
+				m.searchMode = true
 				return m, nil
 			}
-			if key == ":" && m.search == "" {
+			if text == ":" && m.search == "" {
 				m.commandMode = true
 				m.commandInput = ""
 				return m, nil
 			}
-			next := m.appendSearch(key)
+			next := m.appendSearch(text)
 			if next.search != m.search {
 				m = next
 				m.actionCursor = 0
@@ -2270,6 +2274,3 @@ func (m listModel) paneWidths() (int, int) {
 	}
 	return left, right
 }
-
-// readExcerpt reads SKILL.md from skillDir, strips YAML frontmatter, and
-// returns the first maxLines non-empty body lines as a single string.
