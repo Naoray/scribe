@@ -44,6 +44,42 @@ func TestReconcileRepairsMissingCodexProjection(t *testing.T) {
 	}
 }
 
+func TestReconcileClaudeUnchangedOnSecondPass(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	canonical, err := tools.WriteToStore("recap", []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}})
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+	canonical, _ = filepath.EvalSymlinks(canonical)
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"recap": {Revision: 1, Tools: []string{"claude"}, ToolsMode: state.ToolsModePinned},
+	}}
+
+	engine := reconcile.Engine{Tools: []tools.Tool{tools.ClaudeTool{}}, Now: func() time.Time { return time.Unix(1, 0).UTC() }}
+	if _, _, err := engine.Run(st); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	link := filepath.Join(home, ".claude", "skills", "recap")
+	if resolved, err := filepath.EvalSymlinks(link); err != nil || resolved != canonical {
+		t.Fatalf("claude skill link = %q, %v; want %q", resolved, err, canonical)
+	}
+
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if summary.Installed != 0 || summary.Relinked != 0 || len(summary.Conflicts) != 0 {
+		t.Fatalf("second pass summary = %+v, want no changes", summary)
+	}
+	if len(actions) != 1 || actions[0].Kind != reconcile.ActionUnchanged {
+		t.Fatalf("actions = %+v, want single Unchanged", actions)
+	}
+}
+
 func TestReconcileNormalizesSameHashDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

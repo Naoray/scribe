@@ -69,7 +69,7 @@ func (t ClaudeTool) SkillPath(skillName string) (string, error) {
 }
 
 func (t ClaudeTool) CanonicalTarget(canonicalDir string) (string, bool) {
-	return filepath.Join(canonicalDir, "SKILL.md"), true
+	return canonicalDir, true
 }
 
 func claudeSkillsDir() (string, error) {
