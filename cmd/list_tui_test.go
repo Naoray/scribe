@@ -57,6 +57,10 @@ func key(label string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Text: label}
 }
 
+func testActionsForRow(row listRow, browseMode bool) []actionItem {
+	return listModel{bag: &workflow.Bag{BrowseFlag: browseMode}}.actionsForRow(row)
+}
+
 func TestActionsForRow(t *testing.T) {
 	t.Run("row with local skill has copy and edit enabled", func(t *testing.T) {
 		row := listRow{
@@ -67,7 +71,7 @@ func TestActionsForRow(t *testing.T) {
 				LocalPath: "/home/user/.claude/skills/my-skill",
 			},
 		}
-		actions := actionsForRow(row, false)
+		actions := testActionsForRow(row, false)
 
 		if len(actions) != 7 {
 			t.Fatalf("expected 7 actions, got %d", len(actions))
@@ -94,7 +98,7 @@ func TestActionsForRow(t *testing.T) {
 
 	t.Run("row without local skill has actions disabled", func(t *testing.T) {
 		row := listRow{Name: "ghost-skill", Local: nil}
-		actions := actionsForRow(row, false)
+		actions := testActionsForRow(row, false)
 
 		copyAction := findAction(actions, "copy")
 		if !copyAction.disabled {
@@ -120,7 +124,7 @@ func TestActionsForRow(t *testing.T) {
 			Name:  "tracked-only",
 			Local: &discovery.Skill{Name: "tracked-only", LocalPath: ""},
 		}
-		actions := actionsForRow(row, false)
+		actions := testActionsForRow(row, false)
 
 		if !findAction(actions, "copy").disabled {
 			t.Error("copy should be disabled when local path is empty")
@@ -132,7 +136,7 @@ func TestActionsForRow(t *testing.T) {
 			Name:  "any",
 			Local: &discovery.Skill{Name: "any", LocalPath: "/some/path"},
 		}
-		if !findAction(actionsForRow(row, false), "update").disabled {
+		if !findAction(testActionsForRow(row, false), "update").disabled {
 			t.Error("update action should always be disabled")
 		}
 	})
@@ -142,7 +146,7 @@ func TestActionsForRow(t *testing.T) {
 			Name:  "any",
 			Local: &discovery.Skill{Name: "any", LocalPath: "/some/path"},
 		}
-		if !findAction(actionsForRow(row, false), "category").disabled {
+		if !findAction(testActionsForRow(row, false), "category").disabled {
 			t.Error("category action should always be disabled")
 		}
 	})
@@ -155,7 +159,7 @@ func TestActionsForRow(t *testing.T) {
 			Origin:  state.OriginRegistry,
 			Local:   &discovery.Skill{Name: "recap", LocalPath: "/home/user/.scribe/skills/recap"},
 		}
-		updateAction := findAction(actionsForRow(row, false), "update")
+		updateAction := findAction(testActionsForRow(row, false), "update")
 		if updateAction.reason == "no registry" {
 			t.Fatalf("update reason = %q, should use cached-registry wording", updateAction.reason)
 		}
@@ -168,7 +172,7 @@ func TestActionsForRow(t *testing.T) {
 			HasStatus: true,
 			Status:    sync.StatusMissing,
 		}
-		actions := actionsForRow(row, true)
+		actions := testActionsForRow(row, true)
 
 		if len(actions) != 1 {
 			t.Fatalf("expected 1 action, got %d", len(actions))
@@ -187,7 +191,7 @@ func TestActionsForRow(t *testing.T) {
 			Managed: false,
 			Local:   &discovery.Skill{Name: "bare-skill", LocalPath: "/home/user/.claude/skills/bare-skill"},
 		}
-		actions := actionsForRow(row, false)
+		actions := testActionsForRow(row, false)
 
 		adoptAction := findAction(actions, "adopt")
 		if adoptAction.key != "adopt" {
@@ -208,7 +212,7 @@ func TestActionsForRow(t *testing.T) {
 			Origin:  state.OriginLocal,
 			Local:   &discovery.Skill{Name: "adopted-skill", LocalPath: "/home/user/.scribe/skills/adopted-skill"},
 		}
-		adoptAction := findAction(actionsForRow(row, false), "adopt")
+		adoptAction := findAction(testActionsForRow(row, false), "adopt")
 		if adoptAction.key != "" {
 			t.Fatal("adopt action should not be shown for already managed/adopted rows")
 		}
@@ -409,6 +413,23 @@ func TestUpdateList_ColonEntersCommandModeAndAcceptsTypedText(t *testing.T) {
 	}
 }
 
+func TestUpdateList_SlashShowsSearchPromptImmediately(t *testing.T) {
+	m := listModel{
+		rows:        []listRow{{Name: "alpha", Group: "artistfy/hq"}},
+		filtered:    []listRow{{Name: "alpha", Group: "artistfy/hq"}},
+		groupCounts: map[string]int{"artistfy/hq": 1},
+	}
+
+	nm, _ := m.updateList(tea.KeyPressMsg{Text: "/"})
+	lm := nm.(listModel)
+	if !lm.searchMode {
+		t.Fatal("typing '/' should enter search mode")
+	}
+	if got := lm.renderQueryLine(); got != "/ " {
+		t.Fatalf("renderQueryLine() = %q, want %q", got, "/ ")
+	}
+}
+
 func TestViewListFull_ShowsCommandModeHint(t *testing.T) {
 	m := listModel{
 		width:        80,
@@ -426,6 +447,59 @@ func TestViewListFull_ShowsCommandModeHint(t *testing.T) {
 	}
 	if !strings.Contains(view, "enter run") || !strings.Contains(view, "esc cancel") {
 		t.Fatalf("view missing command-mode controls:\n%s", view)
+	}
+}
+
+func TestRenderQueryLine_CommandModeShowsVisiblePrompt(t *testing.T) {
+	m := listModel{commandMode: true}
+
+	got := m.renderQueryLine()
+	if !strings.Contains(got, ":") {
+		t.Fatalf("renderQueryLine() = %q, want visible ':' prompt", got)
+	}
+	if strings.Contains(got, "command...") {
+		t.Fatalf("renderQueryLine() = %q, should not hide behind placeholder copy", got)
+	}
+}
+
+func TestContentHeight_AccountsForListChrome(t *testing.T) {
+	m := listModel{
+		height:         30,
+		backgroundLoad: true,
+		bag:            &workflow.Bag{},
+	}
+
+	if got := m.contentHeight(); got != 22 {
+		t.Fatalf("contentHeight() = %d, want 22", got)
+	}
+}
+
+func TestViewListFull_DoesNotOverflowViewportAndKeepsTopChrome(t *testing.T) {
+	rows := make([]listRow, 0, 24)
+	for i := 0; i < 24; i++ {
+		rows = append(rows, listRow{Name: "skill-" + string(rune('a'+(i%26))), Group: "artistfy/hq"})
+	}
+
+	m := listModel{
+		width:       80,
+		height:      20,
+		commandMode: true,
+		rows:        rows,
+		filtered:    rows,
+		groupCounts: map[string]int{"artistfy/hq": len(rows)},
+		bag:         &workflow.Bag{},
+	}
+
+	view := strings.TrimRight(m.viewListFull(), "\n")
+	lines := strings.Split(view, "\n")
+	if len(lines) > m.height {
+		t.Fatalf("view rendered %d lines for height %d:\n%s", len(lines), m.height, view)
+	}
+	if !strings.Contains(view, "Installed Skills") {
+		t.Fatalf("view missing header:\n%s", view)
+	}
+	if !strings.Contains(view, ":") {
+		t.Fatalf("view missing visible command prompt:\n%s", view)
 	}
 }
 
