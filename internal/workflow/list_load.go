@@ -75,15 +75,18 @@ func BuildRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
 		}
 		statuses, _, derr := syncer.Diff(ctx, repo, bag.State)
 		if derr != nil {
-			failure := bag.State.RecordRegistryFailure(repo, derr, registryMuteAfter)
-			_ = bag.State.Save()
+			failure, changed := bag.State.RecordRegistryFailure(repo, derr, registryMuteAfter)
+			if changed {
+				bag.MarkStateDirty()
+			}
 			if !failure.Muted {
 				warnings = append(warnings, fmt.Sprintf("%s: %v", repo, derr))
 			}
 			continue
 		}
-		bag.State.ClearRegistryFailure(repo)
-		_ = bag.State.Save()
+		if bag.State.ClearRegistryFailure(repo) {
+			bag.MarkStateDirty()
+		}
 		for _, ss := range statuses {
 			local := localByName[ss.Name]
 			if local != nil {

@@ -159,7 +159,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Run `scribe connect %s` to retry.\n", repoSlug)
 		return err
 	}
-	return nil
+	return saveWorkflowState(bag)
 }
 
 // promptOrRequire prompts for a missing string value in TTY mode, or returns an

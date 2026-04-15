@@ -401,7 +401,7 @@ func (s *State) MarkMigration(name string) {
 	s.Migrations[name] = true
 }
 
-func (s *State) RecordRegistryFailure(repo string, err error, muteAfter int) RegistryFailure {
+func (s *State) RecordRegistryFailure(repo string, err error, muteAfter int) (RegistryFailure, bool) {
 	if s.RegistryFailures == nil {
 		s.RegistryFailures = map[string]RegistryFailure{}
 	}
@@ -415,14 +415,18 @@ func (s *State) RecordRegistryFailure(repo string, err error, muteAfter int) Reg
 		failure.Muted = true
 	}
 	s.RegistryFailures[repo] = failure
-	return failure
+	return failure, true
 }
 
-func (s *State) ClearRegistryFailure(repo string) {
+func (s *State) ClearRegistryFailure(repo string) bool {
 	if s.RegistryFailures == nil {
-		return
+		return false
+	}
+	if _, ok := s.RegistryFailures[repo]; !ok {
+		return false
 	}
 	delete(s.RegistryFailures, repo)
+	return true
 }
 
 func (s *State) RegistryFailure(repo string) RegistryFailure {

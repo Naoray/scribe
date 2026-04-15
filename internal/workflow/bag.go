@@ -27,12 +27,13 @@ type Bag struct {
 	Factory      *app.Factory
 
 	// Populated by steps
-	Config    *config.Config
-	State     *state.State
-	Client    *gh.Client
-	Tools     []tools.Tool
-	Repos     []string // filtered registries to process
-	Formatter Formatter
+	Config     *config.Config
+	State      *state.State
+	Client     *gh.Client
+	Tools      []tools.Tool
+	Repos      []string // filtered registries to process
+	Formatter  Formatter
+	StateDirty bool
 
 	// Provider is the skill discovery/fetch backend. Set by StepLoadConfig.
 	Provider provider.Provider
@@ -56,4 +57,10 @@ type Bag struct {
 
 	// Internal fields populated by steps
 	manifest *manifest.Manifest
+}
+
+func (b *Bag) MarkStateDirty() {
+	if b != nil {
+		b.StateDirty = true
+	}
 }

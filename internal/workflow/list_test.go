@@ -282,7 +282,7 @@ func TestPrintLocalJSON(t *testing.T) {
 			Tools:    []tools.Tool{},
 		}
 		var buf bytes.Buffer
-		err := printMultiListJSON(context.Background(), &buf,
+		_, err := printMultiListJSON(context.Background(), &buf,
 			[]string{"acme/broken", "acme/ok"}, syncer, &state.State{
 				Installed: map[string]state.InstalledSkill{},
 			})

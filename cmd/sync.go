@@ -33,5 +33,8 @@ func runSync(cmd *cobra.Command, args []string) error {
 		Factory:          newCommandFactory(),
 		FilterRegistries: filterRegistries,
 	}
-	return workflow.Run(cmd.Context(), workflow.SyncSteps(), bag)
+	if err := workflow.Run(cmd.Context(), workflow.SyncSteps(), bag); err != nil {
+		return err
+	}
+	return saveWorkflowState(bag)
 }

@@ -57,7 +57,10 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if useJSON {
-		return workflow.Run(cmd.Context(), workflow.ListJSONSteps(), bag)
+		if err := workflow.Run(cmd.Context(), workflow.ListJSONSteps(), bag); err != nil {
+			return err
+		}
+		return saveWorkflowState(bag)
 	}
 
 	m := newListModel(cmd.Context(), bag)

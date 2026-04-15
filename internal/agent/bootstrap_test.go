@@ -47,7 +47,11 @@ func TestEnsureScribeAgentNoOpWhenPresent(t *testing.T) {
 	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"scribe-agent": {Revision: 1, Origin: state.OriginBootstrap},
+		"scribe-agent": {
+			Revision: 1,
+			Origin:   state.OriginBootstrap,
+			Sources:  []state.SkillSource{{Ref: EmbeddedVersion}},
+		},
 	}}
 	cfg := &config.Config{}
 	cfg.ScribeAgent.Enabled = true

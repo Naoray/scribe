@@ -228,7 +228,10 @@ func TestRegistryFailureTracking(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	s, _ := state.Load()
-	failure := s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
+	failure, changed := s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
 	if failure.Consecutive != 1 {
 		t.Fatalf("Consecutive = %d, want 1", failure.Consecutive)
 	}
@@ -236,13 +239,15 @@ func TestRegistryFailureTracking(t *testing.T) {
 		t.Fatal("Muted = true, want false")
 	}
 
-	failure = s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
-	failure = s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
+	failure, _ = s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
+	failure, _ = s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
 	if !failure.Muted {
 		t.Fatal("Muted = false, want true after threshold")
 	}
 
-	s.ClearRegistryFailure("acme/skills")
+	if !s.ClearRegistryFailure("acme/skills") {
+		t.Fatal("ClearRegistryFailure() = false, want true")
+	}
 	if got := s.RegistryFailure("acme/skills"); got.Consecutive != 0 {
 		t.Fatalf("registry failure was not cleared: %+v", got)
 	}

@@ -68,7 +68,8 @@ func StepReconcileSystem(_ context.Context, b *Bag) error {
 		}
 	}
 	b.Formatter.OnReconcileComplete(sync.ReconcileCompleteMsg{Summary: summary})
-	return b.State.Save()
+	b.MarkStateDirty()
+	return nil
 }
 
 func StepLoadConfig(ctx context.Context, b *Bag) error {
@@ -118,21 +119,17 @@ func StepEnsureScribeAgent(_ context.Context, b *Bag) error {
 
 	storeDir, err := tools.StoreDir()
 	if err != nil {
-		agent.WarnBootstrapError(fmt.Errorf("resolve store dir: %w", err))
-		return nil
+		return fmt.Errorf("resolve store dir: %w", err)
 	}
 
 	changed, err := agent.EnsureScribeAgent(storeDir, b.State, b.Config)
 	if err != nil {
-		agent.WarnBootstrapError(err)
-		return nil
+		return fmt.Errorf("ensure scribe-agent: %w", err)
 	}
 	if !changed {
 		return nil
 	}
-	if err := b.State.Save(); err != nil {
-		agent.WarnBootstrapError(fmt.Errorf("save bootstrap state: %w", err))
-	}
+	b.MarkStateDirty()
 	return nil
 }
 
@@ -341,19 +338,17 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		b.Formatter.OnRegistryStart(teamRepo)
 
 		if err := syncer.Run(ctx, teamRepo, b.State); err != nil {
-			failure := b.State.RecordRegistryFailure(teamRepo, err, registryMuteAfter)
-			if saveErr := b.State.Save(); saveErr != nil {
-				return fmt.Errorf("save state: %w", saveErr)
+			failure, changed := b.State.RecordRegistryFailure(teamRepo, err, registryMuteAfter)
+			if changed {
+				b.MarkStateDirty()
 			}
 			if failure.Muted {
 				continue
 			}
 			return err
 		}
-		b.State.ClearRegistryFailure(teamRepo)
-
-		if err := b.State.Save(); err != nil {
-			return fmt.Errorf("save state: %w", err)
+		if b.State.ClearRegistryFailure(teamRepo) {
+			b.MarkStateDirty()
 		}
 	}
 

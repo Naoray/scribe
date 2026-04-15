@@ -69,7 +69,11 @@ func StepWriteListJSON(ctx context.Context, b *Bag) error {
 		Tools:    []tools.Tool{},
 	}
 
-	return printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
+	stateDirty, err := printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
+	if stateDirty {
+		b.MarkStateDirty()
+	}
+	return err
 }
 
 func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) error {
@@ -115,7 +119,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 	return enc.Encode(out)
 }
 
-func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) error {
+func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) (bool, error) {
 	type skillJSON struct {
 		Name       string   `json:"name"`
 		Status     string   `json:"status"`
@@ -132,6 +136,7 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 
 	var registries []registryJSON
 	var warnings []string
+	stateDirty := false
 
 	for _, teamRepo := range repos {
 		if st.RegistryFailure(teamRepo).Muted {
@@ -139,15 +144,14 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 		}
 		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
-			failure := st.RecordRegistryFailure(teamRepo, err, registryMuteAfter)
-			_ = st.Save()
+			failure, changed := st.RecordRegistryFailure(teamRepo, err, registryMuteAfter)
+			stateDirty = stateDirty || changed
 			if !failure.Muted {
 				warnings = append(warnings, teamRepo+": "+err.Error())
 			}
 			continue
 		}
-		st.ClearRegistryFailure(teamRepo)
-		_ = st.Save()
+		stateDirty = stateDirty || st.ClearRegistryFailure(teamRepo)
 
 		skills := make([]skillJSON, 0, len(statuses))
 		for _, sk := range statuses {
@@ -177,7 +181,7 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 	if len(warnings) > 0 {
 		out["warnings"] = warnings
 	}
-	return json.NewEncoder(w).Encode(out)
+	return stateDirty, json.NewEncoder(w).Encode(out)
 }
 
 func CountStatuses(statuses []sync.SkillStatus) map[sync.Status]int {

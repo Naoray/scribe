@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	stdsync "sync"
 	"time"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -13,8 +12,6 @@ import (
 	isync "github.com/Naoray/scribe/internal/sync"
 	"gopkg.in/yaml.v3"
 )
-
-var warnBootstrapOnce stdsync.Once
 
 // EnsureScribeAgent installs or refreshes the embedded scribe-agent skill in
 // the canonical store. It never performs network I/O.
@@ -41,7 +38,6 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 			if len(installed.Sources) > 0 && installed.Sources[0].Ref == version {
 				return false, nil
 			}
-			return false, nil
 		}
 	}
 
@@ -87,20 +83,6 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 
 	return true, nil
 }
-
-func WarnBootstrapError(err error) {
-	if err == nil {
-		return
-	}
-	warnBootstrapOnce.Do(func() {
-		fmt.Fprintf(os.Stderr, "scribe: bootstrap scribe-agent warning: %v\n", err)
-	})
-}
-
-func skillMatchesEmbedded(content []byte) bool {
-	return skillMatches(content, EmbeddedSkillMD)
-}
-
 func skillMatches(content, want []byte) bool {
 	return isync.ComputeFileHash(content) == isync.ComputeFileHash(want)
 }

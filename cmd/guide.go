@@ -239,6 +239,9 @@ func runGuideInteractive(cmd *cobra.Command) error {
 		if err := workflow.Run(cmd.Context(), workflow.ConnectSteps(), bag); err != nil {
 			return err
 		}
+		if err := saveWorkflowState(bag); err != nil {
+			return err
+		}
 
 		displayGuideSummary(repo, "join")
 
