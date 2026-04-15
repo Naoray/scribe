@@ -12,14 +12,24 @@ import (
 	"github.com/Naoray/scribe/internal/tools"
 )
 
-// ListLoadSteps returns the minimal step list needed before launching the
-// list TUI: it loads config/state, resolves active tools for in-place updates,
-// then leaves rendering to cmd/.
-func ListLoadSteps() []Step {
+// ListLoadStepsLocal returns the minimal local-only step list needed before
+// launching the list TUI.
+func ListLoadStepsLocal() []Step {
+	return []Step{
+		{"LoadConfig", StepLoadConfig},
+		{"LoadState", StepLoadState},
+		{"EnsureScribeAgent", StepEnsureScribeAgent},
+	}
+}
+
+// ListLoadStepsRemote returns the remote list setup path, including tool
+// resolution for in-place actions on remote rows.
+func ListLoadStepsRemote() []Step {
 	return []Step{
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
 		{"ResolveTools", StepResolveTools},
+		{"EnsureScribeAgent", StepEnsureScribeAgent},
 	}
 }
 
@@ -121,12 +131,23 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 	}
 
 	var registries []registryJSON
+	var warnings []string
 
 	for _, teamRepo := range repos {
+		if st.RegistryFailure(teamRepo).Muted {
+			continue
+		}
 		statuses, _, err := syncer.Diff(ctx, teamRepo, st)
 		if err != nil {
-			return err
+			failure := st.RecordRegistryFailure(teamRepo, err, registryMuteAfter)
+			_ = st.Save()
+			if !failure.Muted {
+				warnings = append(warnings, teamRepo+": "+err.Error())
+			}
+			continue
 		}
+		st.ClearRegistryFailure(teamRepo)
+		_ = st.Save()
 
 		skills := make([]skillJSON, 0, len(statuses))
 		for _, sk := range statuses {
@@ -152,9 +173,11 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 		})
 	}
 
-	return json.NewEncoder(w).Encode(map[string]any{
-		"registries": registries,
-	})
+	out := map[string]any{"registries": registries}
+	if len(warnings) > 0 {
+		out["warnings"] = warnings
+	}
+	return json.NewEncoder(w).Encode(out)
 }
 
 func CountStatuses(statuses []sync.SkillStatus) map[sync.Status]int {

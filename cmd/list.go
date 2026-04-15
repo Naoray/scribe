@@ -51,16 +51,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		JSONFlag:         useJSON,
 		RemoteFlag:       remoteFlag,
 		RepoFlag:         repoFlag,
+		LazyGitHub:       !remoteFlag,
 		Factory:          newCommandFactory(),
 		FilterRegistries: filterRegistries,
 	}
 
 	if useJSON {
 		return workflow.Run(cmd.Context(), workflow.ListJSONSteps(), bag)
-	}
-
-	if err := workflow.Run(cmd.Context(), workflow.ListLoadSteps(), bag); err != nil {
-		return err
 	}
 
 	m := newListModel(cmd.Context(), bag)

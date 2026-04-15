@@ -20,7 +20,10 @@ type Bag struct {
 	JSONFlag     bool
 	RepoFlag     string // --registry filter
 	RemoteFlag   bool   // --remote: show available skills from registries
+	BrowseFlag   bool   // browse mode: remote catalog UI with install-first actions
+	InitialQuery string // initial search/filter text for TUI surfaces
 	TrustAllFlag bool   // --trust-all: approve all package commands without prompting
+	LazyGitHub   bool   // skip eager GitHub client/provider setup for local-only flows
 	Factory      *app.Factory
 
 	// Populated by steps

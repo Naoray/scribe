@@ -62,3 +62,9 @@ go run ./cmd/scribe --help
   skills/         # canonical skill store (symlinked by targets)
   config.yaml     # user preferences (tool settings, registries)
 ```
+
+## Bootstrap Governance
+
+- Scribe auto-installs exactly one first-party bootstrap skill: `scribe-agent`.
+- That bootstrap payload is read-only markdown embedded in the binary and written only under `~/.scribe/skills/scribe-agent/`.
+- Do not auto-install third-party skills, package-style skills, or anything that writes outside the canonical scribe-agent store path and state file without a new design doc and changelog entry.

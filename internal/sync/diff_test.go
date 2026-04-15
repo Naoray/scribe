@@ -88,3 +88,70 @@ func TestDiffMarksBranchSkillOutdatedWhenSkillFileMissingFromTree(t *testing.T) 
 		t.Fatalf("latest SHA = %q, want %q", statuses[0].LatestSHA, missingSkillBlobSHA)
 	}
 }
+
+// nonTeamProvider mirrors what GitHubProvider returns when a repo has skills
+// but no scribe.yaml team section — e.g. a root SKILL.md single-skill repo
+// or a marketplace.json registry. IsTeam=false used to make Diff abort with
+// "has no team section"; it should now succeed because the catalog is
+// non-empty.
+type nonTeamProvider struct {
+	entries []manifest.Entry
+}
+
+func (p *nonTeamProvider) Discover(ctx context.Context, repo string) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{Entries: p.entries, IsTeam: false}, nil
+}
+
+func (p *nonTeamProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]tools.SkillFile, error) {
+	return nil, nil
+}
+
+func TestDiffAcceptsNonTeamRegistryWithSkills(t *testing.T) {
+	syncer := &Syncer{
+		Client: &diffTestFetcher{},
+		Provider: &nonTeamProvider{
+			entries: []manifest.Entry{{
+				Name:   "scribe-agent",
+				Path:   "SKILL.md",
+				Source: "github:Naoray/scribe@main",
+			}},
+		},
+	}
+
+	statuses, m, err := syncer.Diff(context.Background(), "Naoray/scribe", &state.State{
+		Installed: map[string]state.InstalledSkill{},
+	})
+	if err != nil {
+		t.Fatalf("Diff on non-team registry returned error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %d, want 1", len(statuses))
+	}
+	if m.IsRegistry() {
+		t.Fatal("manifest should report IsRegistry()=false for non-team repo")
+	}
+}
+
+// emptyCatalogProvider returns zero entries — Diff must surface a clear
+// "no skills" error rather than silently succeeding.
+type emptyCatalogProvider struct{}
+
+func (p *emptyCatalogProvider) Discover(ctx context.Context, repo string) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{Entries: nil, IsTeam: false}, nil
+}
+
+func (p *emptyCatalogProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]tools.SkillFile, error) {
+	return nil, nil
+}
+
+func TestDiffRejectsEmptyCatalog(t *testing.T) {
+	syncer := &Syncer{
+		Client:   &diffTestFetcher{},
+		Provider: &emptyCatalogProvider{},
+	}
+
+	_, _, err := syncer.Diff(context.Background(), "acme/empty", &state.State{})
+	if err == nil {
+		t.Fatal("expected error for empty catalog, got nil")
+	}
+}

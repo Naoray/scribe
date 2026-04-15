@@ -54,20 +54,42 @@ func newRootCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			st, err := factory.State()
+			if err != nil {
+				return err
+			}
 
-			added := firstrun.ApplyBuiltins(cfg)
+			added, builtinsFirstRun := firstrun.ApplyBuiltins(cfg)
+			removed := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
+			renamed := firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
 			if len(added) > 0 {
 				out := c.ErrOrStderr()
-				if isFirstRun {
+				if builtinsFirstRun {
 					fmt.Fprintln(out, "Welcome to Scribe! Adding built-in registries...")
-				} else {
-					fmt.Fprintln(out, "Scribe: new built-in registries available:")
+					for _, repo := range added {
+						fmt.Fprintf(out, "  + %s\n", repo)
+					}
+					fmt.Fprintln(out)
 				}
-				for _, repo := range added {
-					fmt.Fprintf(out, "  + %s\n", repo)
-				}
-				fmt.Fprintln(out)
 				if err := cfg.Save(); err != nil {
+					return err
+				}
+			}
+			if len(removed) > 0 {
+				for _, repo := range removed {
+					fmt.Fprintf(c.ErrOrStderr(), "scribe: removed %s (no manifest) from connected registries\n", repo)
+				}
+				if err := cfg.Save(); err != nil {
+					return err
+				}
+			}
+			if len(renamed) > 0 && len(added) == 0 && len(removed) == 0 {
+				if err := cfg.Save(); err != nil {
+					return err
+				}
+			}
+			if len(removed) > 0 || len(added) > 0 || len(renamed) > 0 {
+				if err := st.Save(); err != nil {
 					return err
 				}
 			}
@@ -77,11 +99,8 @@ func newRootCmd() *cobra.Command {
 			}
 
 			if isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()) {
-				st, stErr := factory.State()
-				if stErr == nil {
-					toolSet, _ := tools.ResolveActive(cfg)
-					_ = firstrun.PromptAdoption(cfg, st, toolSet, os.Stdin, os.Stdout)
-				}
+				toolSet, _ := tools.ResolveActive(cfg)
+				_ = firstrun.PromptAdoption(cfg, st, toolSet, os.Stdin, os.Stdout)
 			}
 
 			return nil
@@ -104,6 +123,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newListCommand(),
+		newBrowseCommand(),
 		newAddCommand(),
 		newRemoveCommand(),
 		newSyncCommand(),
@@ -123,6 +143,7 @@ func newRootCmd() *cobra.Command {
 		newCreateCommand(),
 		newExplainCommand(),
 		newUpgradeCommand(),
+		newUpgradeAgentCommand(),
 	)
 
 	return cmd

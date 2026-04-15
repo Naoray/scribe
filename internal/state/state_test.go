@@ -224,6 +224,30 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestRegistryFailureTracking(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	s, _ := state.Load()
+	failure := s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
+	if failure.Consecutive != 1 {
+		t.Fatalf("Consecutive = %d, want 1", failure.Consecutive)
+	}
+	if failure.Muted {
+		t.Fatal("Muted = true, want false")
+	}
+
+	failure = s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
+	failure = s.RecordRegistryFailure("acme/skills", fmt.Errorf("boom"), 3)
+	if !failure.Muted {
+		t.Fatal("Muted = false, want true after threshold")
+	}
+
+	s.ClearRegistryFailure("acme/skills")
+	if got := s.RegistryFailure("acme/skills"); got.Consecutive != 0 {
+		t.Fatalf("registry failure was not cleared: %+v", got)
+	}
+}
+
 // --- Migration tests ---
 
 func TestMigrationNamespacesKeys(t *testing.T) {

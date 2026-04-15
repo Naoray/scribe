@@ -19,6 +19,8 @@ func newRegistryCommand() *cobra.Command {
 	cmd.AddCommand(newConnectCommand()) // connect lives under registry
 	cmd.AddCommand(newRegistryEnableCommand())
 	cmd.AddCommand(newRegistryDisableCommand())
+	cmd.AddCommand(newRegistryForgetCommand())
+	cmd.AddCommand(newRegistryResyncCommand())
 	cmd.AddCommand(newRegistryAddCommand())
 	cmd.AddCommand(newRegistryCreateCommand())
 	cmd.AddCommand(newRegistryMigrateCommand())

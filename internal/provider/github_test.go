@@ -268,3 +268,37 @@ func TestDiscoverTreeScanAsLastResort(t *testing.T) {
 		t.Errorf("expected deploy and lint, got %v", names)
 	}
 }
+
+func TestDiscoverTreeScanAnthropicsFixture(t *testing.T) {
+	client := &stubClient{
+		treeFiles: []provider.TreeEntry{
+			{Path: "skills/algorithmic-art/SKILL.md", Type: "blob"},
+			{Path: "skills/brand-guidelines/SKILL.md", Type: "blob"},
+			{Path: "skills/webapp-testing/SKILL.md", Type: "blob"},
+			{Path: "template/SKILL.md", Type: "blob"},
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	result, err := p.Discover(context.Background(), "anthropics/skills")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if result.IsTeam {
+		t.Error("expected IsTeam=false for tree-scan discovery")
+	}
+	if len(result.Entries) != 4 {
+		t.Fatalf("entries: got %d, want 4", len(result.Entries))
+	}
+
+	names := map[string]bool{}
+	for _, e := range result.Entries {
+		names[e.Name] = true
+	}
+	for _, want := range []string{"algorithmic-art", "brand-guidelines", "webapp-testing", "template"} {
+		if !names[want] {
+			t.Errorf("missing entry %q in %v", want, names)
+		}
+	}
+}

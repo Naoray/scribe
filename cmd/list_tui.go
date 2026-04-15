@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,9 +17,10 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/Naoray/scribe/internal/adopt"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/discovery"
-	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -41,6 +42,7 @@ const (
 	listSubstateNone listSubstate = iota
 	listSubstateConfirm
 	listSubstateUpdateChoice
+	listSubstateTools
 )
 
 type updateChoice int
@@ -78,30 +80,18 @@ var (
 	ltMetaValStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cccccc"))
 	ltReasonStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Italic(true)
 	ltExcerptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	ltExcerptH1    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F4B942"))
+	ltExcerptH2    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7DD3FC"))
+	ltExcerptCode  = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#F9A8D4"))
+	ltExcerptList  = lipgloss.NewStyle().Foreground(lipgloss.Color("#B8C1EC"))
+	ltSkeleton     = lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563"))
 	ltPaneStyle    = lipgloss.NewStyle()
 	ltErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
 )
 
 // ── Row data ────────────────────────────────────────────────────────────────
 
-// listRow is the unified display unit consumed by the TUI. It flattens
-// either a sync.SkillStatus (registry mode) or a discovery.Skill (local-only
-// mode) into a single shape so the view layer never branches on data source.
-type listRow struct {
-	Name      string
-	Group     string // registry name (e.g. "owner/repo") or package name in local mode
-	Status    sync.Status
-	HasStatus bool // true in registry mode, false in local-only mode
-	Version   string
-	Author    string
-	Targets   []string
-	Local     *discovery.Skill // populated when the skill exists on disk
-	Entry     *manifest.Entry  // from SkillStatus.Entry, nil for local-only
-	LatestSHA string           // for triggering update
-	Excerpt   string           // first ~8 lines of SKILL.md body
-	Managed   bool             // true when tracked in state AND path is inside ~/.scribe/skills/
-	Origin    state.Origin     // how the skill was acquired; OriginLocal for adopted/hand-written
-}
+type listRow = workflow.ListRow
 
 // ── Action items ───────────────────────────────────────────────────────────
 
@@ -113,31 +103,62 @@ type actionItem struct {
 	style    lipgloss.Style
 }
 
-func actionsForRow(row listRow) []actionItem {
+func actionsForRow(row listRow, browseMode bool) []actionItem {
+	if browseMode {
+		canInstall := row.Entry != nil && row.Status != sync.StatusCurrent
+		reason := "already installed"
+		if row.Entry == nil {
+			reason = "source unknown"
+		}
+		return []actionItem{
+			{label: "install", key: "install", disabled: !canInstall, reason: reason, style: ltUpdateStyle},
+		}
+	}
 	hasLocal := row.Local != nil && row.Local.LocalPath != ""
+	canAdopt := hasLocal && !row.Managed
 	canUpdate := row.HasStatus && row.Status == sync.StatusOutdated && row.Entry != nil
 	updateReason := "up to date"
 	if !row.HasStatus {
 		updateReason = "no registry"
+		if row.Managed && row.Origin == state.OriginRegistry && row.Group != "" {
+			updateReason = "checking registry..."
+		}
 	} else if row.Entry == nil {
 		updateReason = "source unknown"
 	}
-	return []actionItem{
+	actions := []actionItem{
 		{label: "update", key: "update", disabled: !canUpdate, reason: updateReason, style: ltUpdateStyle},
-		{label: "remove", key: "remove", disabled: !hasLocal, reason: "not on disk", style: ltRemoveStyle},
-		{label: "add to category", key: "category", disabled: true, reason: "coming soon", style: ltDimStyle},
-		{label: "copy path", key: "copy", disabled: !hasLocal, reason: "not on disk", style: ltNeutralStyle},
-		{label: "open in editor", key: "edit", disabled: !hasLocal, reason: "not on disk", style: ltNeutralStyle},
 	}
+	if row.Managed {
+		actions = append(actions, actionItem{label: "tools", key: "tools", disabled: !hasLocal, reason: "not on disk", style: ltNeutralStyle})
+	}
+	if canAdopt {
+		actions = append(actions, actionItem{label: "adopt", key: "adopt", style: ltUpdateStyle})
+	}
+	actions = append(actions,
+		actionItem{label: "add to category", key: "category", disabled: true, reason: "coming soon", style: ltDimStyle},
+		actionItem{label: "copy path", key: "copy", disabled: !hasLocal, reason: "not on disk", style: ltNeutralStyle},
+		actionItem{label: "open in editor", key: "edit", disabled: !hasLocal, reason: "not on disk", style: ltNeutralStyle},
+		actionItem{label: "remove", key: "remove", disabled: !hasLocal, reason: "not on disk", style: ltRemoveStyle},
+	)
+	return actions
 }
 
 // ── Messages ───────────────────────────────────────────────────────────────
 
 type tickSpinnerMsg struct{}
-type rowsLoadedMsg struct{ rows []listRow }
+type rowsLoadedMsg struct {
+	rows     []listRow
+	warnings []string
+}
 type loadErrMsg struct{ err error }
+type registryStatusesLoadedMsg struct {
+	statuses map[string][]sync.SkillStatus
+	warnings []string
+}
 type clipboardTickMsg struct{ id int }
 type editorDoneMsg struct{ err error }
+type commandDoneMsg struct{ err error }
 type updateDoneMsg struct {
 	name       string
 	err        error
@@ -145,8 +166,31 @@ type updateDoneMsg struct {
 	conflicted bool
 	openPath   string
 }
+type toolsSavedMsg struct {
+	result skillEditResult
+	err    error
+}
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+const registryMuteAfter = 3
+const registryStatusCacheTTL = 5 * time.Minute
+
+var listRegistryStatusesFn = loadRegistryStatuses
+var listEnsureRemoteDepsFn = ensureListRemoteDepsLoaded
+var nowFn = time.Now
+
+type cachedRegistryStatuses struct {
+	at       time.Time
+	statuses []sync.SkillStatus
+}
+
+var registryStatusCache = struct {
+	mu    stdsync.Mutex
+	items map[string]cachedRegistryStatuses
+}{
+	items: map[string]cachedRegistryStatuses{},
+}
 
 func tickSpinnerCmd() tea.Cmd {
 	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return tickSpinnerMsg{} })
@@ -155,21 +199,28 @@ func tickSpinnerCmd() tea.Cmd {
 // ── Model ───────────────────────────────────────────────────────────────────
 
 type listModel struct {
-	stage         listStage
-	spinnerFrame  int
-	rows          []listRow
-	filtered      []listRow
-	groupCounts   map[string]int
-	cursor        int
-	offset        int
-	search        string
-	selected      bool        // true when right-side detail/action pane is open
-	focus         detailFocus // which pane is focused while selected
-	actionCursor  int
-	substate      listSubstate
-	statusMsg     string
-	updateHasMods bool
-	pendingTickID int
+	stage          listStage
+	spinnerFrame   int
+	backgroundLoad bool
+	rows           []listRow
+	filtered       []listRow
+	groupCounts    map[string]int
+	cursor         int
+	offset         int
+	search         string
+	commandMode    bool
+	commandInput   string
+	selected       bool        // true when right-side detail/action pane is open
+	focus          detailFocus // which pane is focused while selected
+	actionCursor   int
+	substate       listSubstate
+	toolCursor     int
+	toolStatuses   []tools.Status
+	toolSelection  map[string]bool
+	toolMode       state.ToolsMode
+	statusMsg      string
+	updateHasMods  bool
+	pendingTickID  int
 
 	ctx context.Context
 	bag *workflow.Bag
@@ -178,15 +229,21 @@ type listModel struct {
 	height int
 
 	err      error
+	warnings []string
 	quitting bool
 }
 
 func newListModel(ctx context.Context, bag *workflow.Bag) listModel {
 	return listModel{
-		stage: stageLoading,
-		ctx:   ctx,
-		bag:   bag,
+		stage:  stageLoading,
+		search: bag.InitialQuery,
+		ctx:    ctx,
+		bag:    bag,
 	}
+}
+
+func (m listModel) isBrowseMode() bool {
+	return m.bag != nil && m.bag.BrowseFlag
 }
 
 func (m listModel) Init() tea.Cmd {
@@ -201,172 +258,104 @@ func (m listModel) Init() tea.Cmd {
 
 func loadRowsCmd(ctx context.Context, bag *workflow.Bag) tea.Cmd {
 	return func() tea.Msg {
-		rows, err := buildRows(ctx, bag)
+		if err := ensureListBagLoaded(ctx, bag); err != nil {
+			return loadErrMsg{err: err}
+		}
+		rows, warnings, err := workflow.BuildRows(ctx, bag)
 		if err != nil {
 			return loadErrMsg{err: err}
 		}
-		return rowsLoadedMsg{rows: rows}
+		return rowsLoadedMsg{rows: rows, warnings: warnings}
 	}
 }
 
-func buildRows(ctx context.Context, bag *workflow.Bag) ([]listRow, error) {
-	// Always discover local skills — we need them to enable copy/edit/remove
-	// actions on registry rows that happen to be installed.
-	localSkills, err := discovery.OnDisk(bag.State)
-	if err != nil {
-		return nil, err
+func ensureListBagLoaded(ctx context.Context, bag *workflow.Bag) error {
+	if bag == nil {
+		return fmt.Errorf("list loader: missing workflow bag")
 	}
-	localByName := make(map[string]*discovery.Skill, len(localSkills))
-	for i := range localSkills {
-		sk := &localSkills[i]
-		localByName[sk.Name] = sk
+	needsTools := bag.RemoteFlag || bag.BrowseFlag
+	if bag.Config != nil && bag.State != nil && (!needsTools || bag.Tools != nil) {
+		return nil
 	}
 
-	repos := bag.Config.TeamRepos()
-
-	// Local-only mode: no team registries connected.
-	if len(repos) == 0 {
-		return buildLocalRows(localSkills, bag.State), nil
+	steps := workflow.ListLoadStepsLocal()
+	if needsTools {
+		steps = workflow.ListLoadStepsRemote()
 	}
-
-	// Registry mode: filter, then diff per repo.
-	if bag.FilterRegistries != nil {
-		filtered, ferr := bag.FilterRegistries(bag.RepoFlag, repos)
-		if ferr != nil {
-			return nil, ferr
-		}
-		repos = filtered
-	}
-
-	syncer := &sync.Syncer{
-		Client:   sync.WrapGitHubClient(bag.Client),
-		Provider: bag.Provider,
-		Tools:    []tools.Tool{},
-	}
-
-	// matchedLocal records which locally-discovered skills have already
-	// been represented by a registry row, so we can append the rest as
-	// untracked rows below.
-	matchedLocal := make(map[string]bool, len(localSkills))
-
-	var rows []listRow
-	for _, repo := range repos {
-		statuses, _, derr := syncer.Diff(ctx, repo, bag.State)
-		if derr != nil {
-			return nil, fmt.Errorf("%s: %w", repo, derr)
-		}
-		for _, ss := range statuses {
-			local := localByName[ss.Name]
-			if local != nil {
-				matchedLocal[ss.Name] = true
-			}
-			row := listRow{
-				Name:      ss.Name,
-				Group:     repo,
-				Status:    ss.Status,
-				HasStatus: true,
-				Version:   ss.DisplayVersion(),
-				Author:    ss.Maintainer,
-				Local:     local,
-				Entry:     ss.Entry,
-				LatestSHA: ss.LatestSHA,
-			}
-			if local != nil {
-				row.Managed = local.Managed
-			}
-			if installed, ok := bag.State.Installed[ss.Name]; ok {
-				row.Origin = installed.Origin
-			}
-			if ss.Installed != nil {
-				row.Targets = ss.Installed.Tools
-			}
-			if local != nil && local.LocalPath != "" {
-				row.Excerpt = readExcerpt(local.LocalPath, 8)
-			}
-			rows = append(rows, row)
-		}
-	}
-
-	// Append every local skill that didn't surface through any team registry.
-	// These show up under their package (or "uncategorized") with no status
-	// column — they're outside the team-registry concept entirely.
-	rows = append(rows, buildLocalRowsExcluding(localSkills, matchedLocal, bag.State)...)
-	return rows, nil
+	return workflow.Run(ctx, steps, bag)
 }
 
-// buildLocalRowsExcluding returns local rows for every skill whose name is
-// not present in the matched set, grouped/sorted the same way as the
-// local-only fallback view.
-func buildLocalRowsExcluding(skills []discovery.Skill, matched map[string]bool, st *state.State) []listRow {
-	var remaining []discovery.Skill
-	for _, sk := range skills {
-		if matched[sk.Name] {
-			continue
-		}
-		remaining = append(remaining, sk)
+func ensureListRemoteDepsLoaded(ctx context.Context, bag *workflow.Bag) error {
+	if bag == nil {
+		return fmt.Errorf("list action: missing workflow bag")
 	}
-	return buildLocalRows(remaining, st)
+	if bag.Config == nil || bag.State == nil {
+		if err := ensureListBagLoaded(ctx, bag); err != nil {
+			return err
+		}
+	}
+	if bag.Provider != nil && bag.Tools != nil {
+		return nil
+	}
+
+	originalLazy := bag.LazyGitHub
+	bag.LazyGitHub = false
+	defer func() {
+		bag.LazyGitHub = originalLazy
+	}()
+
+	return workflow.Run(ctx, []workflow.Step{
+		{Name: "LoadConfig", Fn: workflow.StepLoadConfig},
+		{Name: "LoadState", Fn: workflow.StepLoadState},
+		{Name: "ResolveTools", Fn: workflow.StepResolveTools},
+	}, bag)
 }
 
-const unmanagedGroup = "Local (unmanaged)"
+type listCommandHandler func(args []string) ([]string, error)
 
-// registryGroupFromName extracts the registry group from a namespaced skill name.
-// "Artistfy-hq/deploy" → "Artistfy-hq", "local/foo" → unmanagedGroup, "bare" → unmanagedGroup
-func registryGroupFromName(name string) string {
-	if idx := strings.Index(name, "/"); idx > 0 {
-		prefix := name[:idx]
-		if prefix == "local" {
-			return unmanagedGroup
+var listCommandHandlers = map[string]listCommandHandler{
+	"add": func(args []string) ([]string, error) {
+		if len(args) == 0 {
+			return nil, fmt.Errorf("usage: :add <query>")
 		}
-		return prefix
-	}
-	return unmanagedGroup
+		return []string{"browse", "--query", strings.Join(args, " ")}, nil
+	},
+	"remove": func(args []string) ([]string, error) {
+		if len(args) != 1 {
+			return nil, fmt.Errorf("usage: :remove <name>")
+		}
+		return []string{"remove", args[0]}, nil
+	},
+	"sync": func(args []string) ([]string, error) {
+		if len(args) != 0 {
+			return nil, fmt.Errorf("usage: :sync")
+		}
+		return []string{"sync"}, nil
+	},
+	"help": func(args []string) ([]string, error) {
+		if len(args) != 0 {
+			return nil, fmt.Errorf("usage: :help")
+		}
+		return []string{"browse", "--help"}, nil
+	},
 }
 
-func buildLocalRows(skills []discovery.Skill, st *state.State) []listRow {
-	groups := map[string][]listRow{}
-	for i := range skills {
-		sk := &skills[i]
-		g := registryGroupFromName(sk.Name)
-		row := listRow{
-			Name:    sk.Name,
-			Group:   g,
-			Targets: sk.Targets,
-			Local:   sk,
-			Managed: sk.Managed,
+func parseListCommand(input string) ([]string, error) {
+	fields := strings.Fields(strings.TrimSpace(input))
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("empty command")
+	}
+	for _, field := range fields[1:] {
+		if strings.HasPrefix(field, "-") {
+			return nil, fmt.Errorf("flags are not supported in ':' commands")
 		}
-		if installed, ok := st.Installed[sk.Name]; ok {
-			row.Origin = installed.Origin
-		}
-		if sk.LocalPath != "" {
-			row.Excerpt = readExcerpt(sk.LocalPath, 8)
-		}
-		groups[g] = append(groups[g], row)
 	}
 
-	// Sort: unmanagedGroup last, then alphabetical group names; rows
-	// within a group sorted by name.
-	var keys []string
-	for k := range groups {
-		if k != unmanagedGroup {
-			keys = append(keys, k)
-		}
+	handler, ok := listCommandHandlers[fields[0]]
+	if !ok {
+		return nil, fmt.Errorf("unknown command: %s", fields[0])
 	}
-	sort.Strings(keys)
-
-	var ordered []string
-	ordered = append(ordered, keys...)
-	if _, ok := groups[unmanagedGroup]; ok {
-		ordered = append(ordered, unmanagedGroup)
-	}
-
-	var rows []listRow
-	for _, g := range ordered {
-		gs := groups[g]
-		sort.SliceStable(gs, func(i, j int) bool { return gs[i].Name < gs[j].Name })
-		rows = append(rows, gs...)
-	}
-	return rows
+	return handler(fields[1:])
 }
 
 // ── Update ──────────────────────────────────────────────────────────────────
@@ -390,11 +379,26 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case rowsLoadedMsg:
 		m.stage = stageBrowse
 		m.rows = msg.rows
+		m.warnings = msg.warnings
 		m = m.refreshFiltered()
+		if !m.isBrowseMode() {
+			repos := registriesForBackgroundCheck(m.bag.Config, m.bag.State)
+			if len(repos) > 0 {
+				m.backgroundLoad = true
+				return m, loadRegistryStatusesCmd(m.ctx, m.bag, repos)
+			}
+		}
 		return m, nil
 	case loadErrMsg:
 		m.stage = stageBrowse
 		m.err = msg.err
+		return m, nil
+	case registryStatusesLoadedMsg:
+		m.backgroundLoad = false
+		m = m.applyRegistryStatuses(msg.statuses)
+		if len(msg.warnings) > 0 {
+			m.warnings = append(m.warnings, msg.warnings...)
+		}
 		return m, nil
 	case clipboardTickMsg:
 		if msg.id == m.pendingTickID {
@@ -406,6 +410,13 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Editor exited with error"
 		}
 		return m, nil
+	case commandDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Command failed: %v", msg.err)
+			return m, nil
+		}
+		m.statusMsg = ""
+		return m, loadRowsCmd(m.ctx, m.bag)
 	case updateDoneMsg:
 		if msg.err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
@@ -452,6 +463,17 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return clipboardTickMsg{id: tickID}
 		}))
 		return m, tea.Batch(cmds...)
+	case toolsSavedMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
+			return m, nil
+		}
+		m.substate = listSubstateNone
+		m.toolCursor = 0
+		m.toolStatuses = nil
+		m.toolSelection = nil
+		m.statusMsg = fmt.Sprintf("Updated tools: %s", strings.Join(msg.result.Tools, ", "))
+		return m, loadRowsCmd(m.ctx, m.bag)
 	case tea.KeyPressMsg:
 		if m.stage == stageLoading {
 			if msg.String() == "ctrl+c" || msg.String() == "q" {
@@ -469,6 +491,10 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.commandMode {
+		return m.updateCommandMode(msg)
+	}
+	text := typedText(msg)
 	switch msg.String() {
 	case "ctrl+c", "q":
 		if m.search != "" {
@@ -508,9 +534,147 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "backspace":
 		m = m.backspaceSearch()
 	default:
-		m = m.appendSearch(msg.String())
+		if text == "/" && m.search == "" {
+			return m, nil
+		}
+		if text == ":" && m.search == "" {
+			m.commandMode = true
+			m.commandInput = ""
+			return m, nil
+		}
+		m = m.appendSearch(text)
 	}
 	return m, nil
+}
+
+func loadRegistryStatusesCmd(ctx context.Context, bag *workflow.Bag, repos []string) tea.Cmd {
+	return func() tea.Msg {
+		statuses, warnings := listRegistryStatusesFn(ctx, bag, repos)
+		return registryStatusesLoadedMsg{statuses: statuses, warnings: warnings}
+	}
+}
+
+func registriesForBackgroundCheck(cfg *config.Config, st *state.State) []string {
+	if cfg == nil || st == nil {
+		return nil
+	}
+	enabled := make(map[string]bool, len(cfg.TeamRepos()))
+	for _, repo := range cfg.TeamRepos() {
+		enabled[repo] = true
+	}
+	set := map[string]bool{}
+	for _, installed := range st.Installed {
+		if installed.Origin != state.OriginRegistry {
+			continue
+		}
+		for _, src := range installed.Sources {
+			if src.Registry != "" && enabled[src.Registry] {
+				set[src.Registry] = true
+			}
+		}
+	}
+	repos := make([]string, 0, len(set))
+	for repo := range set {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	return repos
+}
+
+func loadRegistryStatuses(ctx context.Context, bag *workflow.Bag, repos []string) (map[string][]sync.SkillStatus, []string) {
+	if bag == nil || bag.Factory == nil {
+		return nil, nil
+	}
+	client, err := bag.Factory.Client()
+	if err != nil {
+		return nil, []string{fmt.Sprintf("load github client: %v", err)}
+	}
+	prov := provider.NewGitHubProvider(provider.WrapGitHubClient(client))
+	syncer := &sync.Syncer{
+		Client:   sync.WrapGitHubClient(client),
+		Provider: prov,
+		Tools:    []tools.Tool{},
+	}
+	statusesByRepo := make(map[string][]sync.SkillStatus, len(repos))
+	var warnings []string
+	for _, repo := range repos {
+		if cached, ok := loadCachedRegistryStatuses(repo); ok {
+			statusesByRepo[repo] = cached
+			continue
+		}
+		statuses, _, err := syncer.Diff(ctx, repo, bag.State)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: %v", repo, err))
+			continue
+		}
+		storeCachedRegistryStatuses(repo, statuses)
+		statusesByRepo[repo] = statuses
+	}
+	return statusesByRepo, warnings
+}
+
+func loadCachedRegistryStatuses(repo string) ([]sync.SkillStatus, bool) {
+	registryStatusCache.mu.Lock()
+	defer registryStatusCache.mu.Unlock()
+	cached, ok := registryStatusCache.items[repo]
+	if !ok {
+		return nil, false
+	}
+	if nowFn().Sub(cached.at) > registryStatusCacheTTL {
+		delete(registryStatusCache.items, repo)
+		return nil, false
+	}
+	return cached.statuses, true
+}
+
+func storeCachedRegistryStatuses(repo string, statuses []sync.SkillStatus) {
+	registryStatusCache.mu.Lock()
+	defer registryStatusCache.mu.Unlock()
+	copied := make([]sync.SkillStatus, len(statuses))
+	copy(copied, statuses)
+	registryStatusCache.items[repo] = cachedRegistryStatuses{
+		at:       nowFn(),
+		statuses: copied,
+	}
+}
+
+func (m listModel) applyRegistryStatuses(statusesByRepo map[string][]sync.SkillStatus) listModel {
+	if len(statusesByRepo) == 0 {
+		return m
+	}
+	currentName := ""
+	if m.cursor >= 0 && m.cursor < len(m.filtered) {
+		currentName = m.filtered[m.cursor].Name
+	}
+	for i := range m.rows {
+		statuses := statusesByRepo[m.rows[i].Group]
+		for _, ss := range statuses {
+			if ss.Name != m.rows[i].Name {
+				continue
+			}
+			m.rows[i].HasStatus = true
+			m.rows[i].Status = ss.Status
+			m.rows[i].Entry = ss.Entry
+			m.rows[i].Version = ss.DisplayVersion()
+			m.rows[i].Author = ss.Maintainer
+			m.rows[i].LatestSHA = ss.LatestSHA
+			if ss.Installed != nil {
+				m.rows[i].Targets = ss.Installed.Tools
+			}
+			break
+		}
+	}
+	m = m.refreshFiltered()
+	if currentName != "" {
+		for i := range m.filtered {
+			if m.filtered[i].Name == currentName {
+				m.cursor = i
+				m = m.ensureCursorVisible()
+				break
+			}
+		}
+	}
+	return m
 }
 
 func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -519,6 +683,9 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.substate == listSubstateUpdateChoice {
 		return m.updateUpdateChoice(msg)
+	}
+	if m.substate == listSubstateTools {
+		return m.updateToolsEditor(msg)
 	}
 
 	if m.cursor >= len(m.filtered) {
@@ -559,6 +726,9 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.focus == focusList {
+		if m.commandMode {
+			return m.updateCommandMode(msg)
+		}
 		// Browsing the list with the detail pane open: arrow keys move
 		// the row cursor and the right pane refreshes live. Right/enter
 		// hands focus to the action menu. Character keys still filter the
@@ -589,6 +759,14 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.focus = focusList
 			}
 		default:
+			if key == "/" && m.search == "" {
+				return m, nil
+			}
+			if key == ":" && m.search == "" {
+				m.commandMode = true
+				m.commandInput = ""
+				return m, nil
+			}
 			next := m.appendSearch(key)
 			if next.search != m.search {
 				m = next
@@ -604,7 +782,7 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// focusActions: arrow keys move within the action list, left returns
 	// focus to the row list, enter executes.
-	actions := actionsForRow(m.filtered[m.cursor])
+	actions := actionsForRow(m.filtered[m.cursor], m.isBrowseMode())
 	switch key {
 	case "up", "k":
 		if m.actionCursor > 0 {
@@ -624,6 +802,50 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.executeAction(action.key)
 	}
 	return m, nil
+}
+
+func (m listModel) updateCommandMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	text := typedText(msg)
+	switch msg.String() {
+	case "ctrl+c", "q", "esc", "escape":
+		m.commandMode = false
+		m.commandInput = ""
+		return m, nil
+	case "backspace":
+		if len(m.commandInput) > 0 {
+			m.commandInput = m.commandInput[:len(m.commandInput)-1]
+			return m, nil
+		}
+		m.commandMode = false
+		return m, nil
+	case "enter":
+		args, err := parseListCommand(m.commandInput)
+		m.commandMode = false
+		m.commandInput = ""
+		if err != nil {
+			m.statusMsg = err.Error()
+			return m, nil
+		}
+		cmd := exec.Command(os.Args[0], args...)
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return commandDoneMsg{err: err}
+		})
+	default:
+		if text != "" {
+			m.commandInput += text
+		}
+	}
+	return m, nil
+}
+
+func typedText(msg tea.KeyPressMsg) string {
+	if msg.Text != "" {
+		return msg.Text
+	}
+	if len(msg.String()) == 1 {
+		return msg.String()
+	}
+	return ""
 }
 
 func (m listModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -673,9 +895,156 @@ func (m listModel) updateUpdateChoice(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
+func (m listModel) openToolsEditor(row listRow) listModel {
+	if m.bag == nil || m.bag.State == nil {
+		m.statusMsg = "State unavailable"
+		return m
+	}
+	installed, ok := m.bag.State.Installed[row.Name]
+	if !ok {
+		m.statusMsg = fmt.Sprintf("Skill %q is not managed", row.Name)
+		return m
+	}
+
+	statuses, err := tools.ResolveStatuses(m.bag.Config)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Resolve tools: %v", err)
+		return m
+	}
+
+	selection := make(map[string]bool, len(installed.Tools))
+	for _, toolName := range installed.Tools {
+		selection[toolName] = true
+	}
+	if installed.ToolsMode != state.ToolsModePinned {
+		for _, toolName := range availableToolNames(statuses) {
+			selection[toolName] = true
+		}
+	}
+
+	m.substate = listSubstateTools
+	m.toolCursor = 0
+	if len(statuses) > 0 {
+		m.toolCursor = 1
+	}
+	m.toolStatuses = statuses
+	m.toolSelection = selection
+	m.toolMode = installed.ToolsMode
+	m.statusMsg = ""
+	return m
+}
+
+func (m listModel) updateToolsEditor(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	maxCursor := len(m.toolStatuses) + 2
+	switch key {
+	case "esc", "escape":
+		m.substate = listSubstateNone
+		m.toolCursor = 0
+		m.statusMsg = ""
+		return m, nil
+	case "up", "k":
+		if m.toolCursor > 0 {
+			m.toolCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.toolCursor < maxCursor {
+			m.toolCursor++
+		}
+		return m, nil
+	case "enter", " ":
+		return m.activateToolsEditorCursor()
+	}
+	return m, nil
+}
+
+func (m listModel) activateToolsEditorCursor() (tea.Model, tea.Cmd) {
+	switch {
+	case m.toolCursor == 0:
+		if m.toolMode == state.ToolsModePinned {
+			m.toolMode = state.ToolsModeInherit
+			m.toolSelection = make(map[string]bool, len(m.toolStatuses))
+			for _, toolName := range availableToolNames(m.toolStatuses) {
+				m.toolSelection[toolName] = true
+			}
+		} else {
+			m.toolMode = state.ToolsModePinned
+		}
+		return m, nil
+	case m.toolCursor <= len(m.toolStatuses):
+		status := m.toolStatuses[m.toolCursor-1]
+		available, reason := toolStatusAvailable(status)
+		if !available {
+			m.statusMsg = reason
+			return m, nil
+		}
+		if m.toolMode != state.ToolsModePinned {
+			m.toolMode = state.ToolsModePinned
+		}
+		if m.toolSelection == nil {
+			m.toolSelection = map[string]bool{}
+		}
+		m.toolSelection[status.Name] = !m.toolSelection[status.Name]
+		if !m.toolSelection[status.Name] {
+			delete(m.toolSelection, status.Name)
+		}
+		return m, nil
+	case m.toolCursor == len(m.toolStatuses)+1:
+		if err := m.validateToolsEditor(); err != nil {
+			m.statusMsg = err.Error()
+			return m, nil
+		}
+		row := m.filtered[m.cursor]
+		m.statusMsg = "Saving tool changes..."
+		return m, m.runSaveTools(row.Name)
+	default:
+		m.substate = listSubstateNone
+		m.toolCursor = 0
+		m.statusMsg = ""
+		return m, nil
+	}
+}
+
+func (m listModel) validateToolsEditor() error {
+	if m.toolMode != state.ToolsModePinned {
+		return nil
+	}
+	if len(m.selectedToolNames()) == 0 {
+		return fmt.Errorf("select at least one tool or switch back to inherit")
+	}
+	return nil
+}
+
+func (m listModel) selectedToolNames() []string {
+	names := make([]string, 0, len(m.toolSelection))
+	for _, st := range m.toolStatuses {
+		if m.toolSelection[st.Name] {
+			names = append(names, st.Name)
+		}
+	}
+	return names
+}
+
+func toolStatusAvailable(st tools.Status) (bool, string) {
+	if !st.Enabled {
+		return false, fmt.Sprintf("%s is disabled in config", st.Name)
+	}
+	if st.DetectKnown && !st.Detected {
+		return false, fmt.Sprintf("%s is not available on this machine", st.Name)
+	}
+	return true, ""
+}
+
 func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 	row := m.filtered[m.cursor]
 	switch key {
+	case "install":
+		if m.isBrowseMode() && row.Entry != nil {
+			m.statusMsg = "Installing..."
+			return m, m.runInstall(row)
+		}
+		return m, nil
 	case "update":
 		if row.Entry == nil {
 			return m, nil
@@ -690,6 +1059,14 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 		m.updateHasMods = false
 		m.statusMsg = "No local edits detected. Update will replace the local copy with the registry version."
 		return m, nil
+	case "adopt":
+		if row.Local == nil || row.Managed {
+			return m, nil
+		}
+		m.statusMsg = "Adopting..."
+		return m, m.runAdopt(row)
+	case "tools":
+		return m.openToolsEditor(row), nil
 	}
 	if row.Local == nil {
 		return m, nil
@@ -721,6 +1098,81 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m listModel) runAdopt(row listRow) tea.Cmd {
+	if row.Local == nil {
+		return nil
+	}
+	bag := m.bag
+	return func() tea.Msg {
+		candidates, _, err := adopt.FindCandidates(bag.State, bag.Config.Adoption)
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+
+		var target *adopt.Candidate
+		for i := range candidates {
+			if candidates[i].Name == row.Name && candidates[i].LocalPath == row.Local.LocalPath {
+				target = &candidates[i]
+				break
+			}
+		}
+		if target == nil {
+			return commandDoneMsg{err: fmt.Errorf("skill %q is not adoptable", row.Name)}
+		}
+
+		resolvedTools, err := tools.ResolveActive(bag.Config)
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+
+		adopter := &adopt.Adopter{
+			State: bag.State,
+			Tools: resolvedTools,
+		}
+		result := adopter.Apply([]adopt.Candidate{*target})
+		if err := result.Failed[target.Name]; err != nil {
+			return commandDoneMsg{err: err}
+		}
+		return commandDoneMsg{}
+	}
+}
+
+func (m listModel) runSaveTools(name string) tea.Cmd {
+	cfg := m.bag.Config
+	st := m.bag.State
+	mode := m.toolMode
+	desired := append([]string(nil), m.selectedToolNames()...)
+	return func() tea.Msg {
+		result, err := applySkillToolSelection(cfg, st, name, mode, desired)
+		return toolsSavedMsg{result: result, err: err}
+	}
+}
+
+func (m listModel) runInstall(row listRow) tea.Cmd {
+	if row.Entry == nil {
+		return nil
+	}
+	ctx := m.ctx
+	bag := m.bag
+	return func() tea.Msg {
+		if err := listEnsureRemoteDepsFn(ctx, bag); err != nil {
+			return commandDoneMsg{err: err}
+		}
+		err := runAddDirectInstall(
+			ctx,
+			row.Group,
+			row.Name,
+			bag.Config,
+			bag.State,
+			newInstallSyncer(bag.Client, bag.Tools),
+			bag.Client != nil && bag.Client.IsAuthenticated(),
+			false,
+			true,
+		)
+		return commandDoneMsg{err: err}
+	}
+}
+
 func (m listModel) runUpdate(choice updateChoice) tea.Cmd {
 	if m.cursor >= len(m.filtered) {
 		return nil
@@ -746,6 +1198,9 @@ func (m listModel) runUpdate(choice updateChoice) tea.Cmd {
 	ctx := m.ctx
 	bag := m.bag
 	return func() tea.Msg {
+		if err := listEnsureRemoteDepsFn(ctx, bag); err != nil {
+			return updateDoneMsg{name: row.Name, err: err}
+		}
 		syncer := &sync.Syncer{
 			Client:           sync.WrapGitHubClient(bag.Client),
 			Provider:         bag.Provider,
@@ -943,12 +1398,19 @@ func (m listModel) executeRemove() (tea.Model, tea.Cmd) {
 // ── Filter ──────────────────────────────────────────────────────────────────
 
 func (m listModel) applyFilter() []listRow {
-	if m.search == "" {
-		return m.rows
-	}
 	lower := strings.ToLower(m.search)
 	var out []listRow
 	for _, r := range m.rows {
+		if m.isBrowseMode() && r.Local != nil {
+			continue
+		}
+		if m.isBrowseMode() && r.Status == sync.StatusCurrent {
+			continue
+		}
+		if m.search == "" {
+			out = append(out, r)
+			continue
+		}
 		if strings.Contains(strings.ToLower(r.Name), lower) ||
 			strings.Contains(strings.ToLower(r.Group), lower) {
 			out = append(out, r)
@@ -998,15 +1460,19 @@ func (m listModel) View() tea.View {
 
 func (m listModel) viewLoading() string {
 	frame := spinnerFrames[m.spinnerFrame]
-	msg := "Discovering local skills…"
-	if m.bag != nil && m.bag.RemoteFlag {
-		msg = "Fetching team skills…"
+	msg := "Loading skills..."
+	if m.isBrowseMode() {
+		msg = "Loading registry skills..."
 	}
 	return "\n  " + ltSpinnerStyle.Render(frame) + "  " + ltDimStyle.Render(msg) + "\n"
 }
 
 func (m listModel) viewError() string {
-	return "\n  " + ltErrorStyle.Render("Error: "+m.err.Error()) + "\n"
+	width := m.width
+	if width < 40 {
+		width = 40
+	}
+	return "\n  " + ltErrorStyle.Render(wrapText("Error: "+m.err.Error(), width-4)) + "\n"
 }
 
 // viewListFull is the default browse view: full-width list with status icons
@@ -1015,19 +1481,25 @@ func (m listModel) viewListFull() string {
 	var b strings.Builder
 
 	b.WriteString(m.renderHeader())
-
-	if m.search != "" {
-		b.WriteString("/ " + m.search + "\n")
-	} else {
-		b.WriteString(ltDimStyle.Render("/ search...") + "\n")
-	}
+	b.WriteString(m.renderQueryLine() + "\n")
 
 	contentHeight := m.contentHeight()
 	m.renderRows(&b, contentHeight, m.width-4, false)
 
 	b.WriteString("\n")
 	b.WriteString(m.renderSummary() + "\n")
-	b.WriteString(ltDimStyle.Render("↑↓ navigate · /search · enter detail · q quit") + "\n")
+	if m.backgroundLoad {
+		b.WriteString(ltDimStyle.Render(spinnerFrames[m.spinnerFrame]+" checking registry updates in background...") + "\n")
+	}
+	if m.commandMode {
+		b.WriteString(ltDimStyle.Render("Command mode · enter run · esc cancel · backspace delete") + "\n")
+	}
+	if m.isBrowseMode() {
+		b.WriteString(ltDimStyle.Render("↑↓ navigate · /search · enter detail · q quit") + "\n")
+	} else {
+		b.WriteString(ltDimStyle.Render("↑↓ navigate · /search · :commands · enter detail · q quit") + "\n")
+		b.WriteString(ltDimStyle.Render("Commands: :add <query> · :sync · :remove <name> · :help") + "\n")
+	}
 	return b.String()
 }
 
@@ -1037,11 +1509,7 @@ func (m listModel) viewSplit() string {
 	var b strings.Builder
 
 	b.WriteString(m.renderHeader())
-	if m.search != "" {
-		b.WriteString("/ " + m.search + "\n")
-	} else {
-		b.WriteString(ltDimStyle.Render("/ search...") + "\n")
-	}
+	b.WriteString(m.renderQueryLine() + "\n")
 
 	contentHeight := m.contentHeight()
 	leftWidth, rightWidth := m.paneWidths()
@@ -1073,6 +1541,12 @@ func (m listModel) viewSplit() string {
 	b.WriteString(body)
 
 	b.WriteString("\n\n")
+	if m.backgroundLoad {
+		b.WriteString(ltDimStyle.Render(spinnerFrames[m.spinnerFrame]+" checking registry updates in background...") + "\n")
+	}
+	if m.commandMode {
+		b.WriteString(ltDimStyle.Render("Command mode · enter run · esc cancel · backspace delete") + "\n")
+	}
 	switch {
 	case m.substate == listSubstateConfirm:
 		b.WriteString(ltDimStyle.Render("y confirm · n cancel") + "\n")
@@ -1082,25 +1556,87 @@ func (m listModel) viewSplit() string {
 		} else {
 			b.WriteString(ltDimStyle.Render("u update · esc cancel") + "\n")
 		}
+	case m.substate == listSubstateTools:
+		b.WriteString(ltDimStyle.Render("↑↓ choose · enter toggle/save · esc cancel") + "\n")
 	case m.focus == focusList:
-		b.WriteString(ltDimStyle.Render("↑↓ browse skills · →/enter actions · esc close · q quit") + "\n")
+		if m.isBrowseMode() {
+			b.WriteString(ltDimStyle.Render("↑↓ browse skills · →/enter install · esc close · q quit") + "\n")
+		} else {
+			b.WriteString(ltDimStyle.Render("↑↓ browse skills · →/enter actions · esc close · q quit") + "\n")
+		}
 	default:
-		b.WriteString(ltDimStyle.Render("↑↓ pick action · enter run · ←/tab back to list · esc close") + "\n")
+		if m.isBrowseMode() {
+			b.WriteString(ltDimStyle.Render("↑↓ choose install · enter run · ←/tab back to list · esc close") + "\n")
+		} else {
+			b.WriteString(ltDimStyle.Render("↑↓ pick action · enter run · ←/tab back to list · esc close") + "\n")
+		}
 	}
 	return b.String()
+}
+
+func (m listModel) renderQueryLine() string {
+	if m.commandMode {
+		if m.commandInput != "" {
+			return ": " + m.commandInput
+		}
+		return ltDimStyle.Render(": command...")
+	}
+	if m.search != "" {
+		return "/ " + m.search
+	}
+	if m.isBrowseMode() {
+		return ltDimStyle.Render("/ search registries...")
+	}
+	return ltDimStyle.Render("/ search...")
 }
 
 // renderHeader prints the title row "Installed Skills · N skills".
 func (m listModel) renderHeader() string {
 	var b strings.Builder
 	total := ltCountStyle.Render(fmt.Sprintf("%d skills", len(m.rows)))
-	b.WriteString(ltHeaderStyle.Render("Installed Skills") + "  " + total + "\n")
+	title := "Installed Skills"
+	if m.isBrowseMode() {
+		title = "Browse Skills"
+	}
+	b.WriteString(ltHeaderStyle.Render(title) + "  " + total + "\n")
 	width := m.width
 	if width < 40 {
 		width = 40
 	}
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width)) + "\n")
+	for _, warn := range m.warnings {
+		b.WriteString("  " + ltErrorStyle.Render("! "+wrapText(warn, width-4)) + "\n")
+	}
 	return b.String()
+}
+
+// wrapText wraps s so no visual line exceeds width cells. Preserves existing
+// newlines. Used for per-registry warnings and error messages so long errors
+// don't bleed past the right edge of the viewport.
+func wrapText(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	var out strings.Builder
+	for i, line := range strings.Split(s, "\n") {
+		if i > 0 {
+			out.WriteString("\n")
+		}
+		for runewidth.StringWidth(line) > width {
+			cut := width
+			for cut > 0 && runewidth.StringWidth(line[:cut]) > width {
+				cut--
+			}
+			if cut <= 0 {
+				cut = len(line)
+			}
+			out.WriteString(line[:cut])
+			out.WriteString("\n")
+			line = line[cut:]
+		}
+		out.WriteString(line)
+	}
+	return out.String()
 }
 
 // renderRows writes up to contentHeight lines (including group headers and
@@ -1165,11 +1701,14 @@ func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, c
 		row := m.filtered[i]
 		if row.Group != prevGroup {
 			// Reserve a line for group header. Skip if not enough room.
-			if linesUsed+1 >= contentHeight {
-				break
+			header := m.formatGroupHeader(row.Group)
+			if header != "" {
+				if linesUsed+1 >= contentHeight {
+					break
+				}
+				b.WriteString(header + "\n")
+				linesUsed++
 			}
-			b.WriteString(m.formatGroupHeader(row.Group) + "\n")
-			linesUsed++
 			prevGroup = row.Group
 		}
 		isCursor := i == m.cursor
@@ -1185,12 +1724,11 @@ func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, c
 }
 
 func (m listModel) formatGroupHeader(group string) string {
-	count := m.groupCounts[group]
-	label := group
-	if label == "" {
-		label = "(local)"
+	if group == "" {
+		return ""
 	}
-	return ltGroupStyle.Render(label) + " " + ltCountStyle.Render(fmt.Sprintf("(%d)", count))
+	count := m.groupCounts[group]
+	return ltGroupStyle.Render(group) + " " + ltCountStyle.Render(fmt.Sprintf("(%d)", count))
 }
 
 // formatRow renders a single row with name padded to nameCol so the status
@@ -1219,6 +1757,17 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 		line := prefix + nameStyle.Render(name) + "  " + icon
 		if !row.Managed {
 			line += " " + ltDimStyle.Render("[unmanaged]")
+		}
+		return line
+	}
+
+	if !row.HasStatus {
+		line := prefix + nameStyle.Render(name)
+		if !row.Managed {
+			line += " " + ltDimStyle.Render("[unmanaged]")
+		} else if m.backgroundLoad && row.Origin == state.OriginRegistry && row.Group != "" {
+			ver, author := m.renderSkeletonColumns(row)
+			line += "  " + ver + "  " + author
 		}
 		return line
 	}
@@ -1253,6 +1802,35 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 	return line
 }
 
+func (m listModel) renderSkeletonColumns(row listRow) (string, string) {
+	phase := (m.spinnerFrame + skeletonSeed(row.Name)) % 3
+	ver := renderSkeletonToken([]int{5, 3}, phase)
+	author := renderSkeletonToken([]int{4, 2}, (phase+1)%3)
+	return ver, author
+}
+
+func renderSkeletonToken(parts []int, phase int) string {
+	shades := []string{"░", "▒", "▓"}
+	segments := make([]string, 0, len(parts))
+	width := 0
+	for i, n := range parts {
+		fill := shades[(phase+i)%len(shades)]
+		segments = append(segments, ltSkeleton.Render(strings.Repeat(fill, n)))
+		width += n
+	}
+	out := strings.Join(segments, " ")
+	width += len(parts) - 1
+	return runewidth.FillRight(out, width)
+}
+
+func skeletonSeed(name string) int {
+	sum := 0
+	for _, r := range name {
+		sum += int(r)
+	}
+	return sum % 3
+}
+
 // renderSummary builds the colored "N current · N update · N missing" footer.
 func (m listModel) renderSummary() string {
 	if len(m.rows) == 0 {
@@ -1285,8 +1863,15 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	var b strings.Builder
 	b.WriteString(ltCursorStyle.Render(row.Name) + "\n")
 
-	if row.Local != nil && row.Local.Description != "" {
-		b.WriteString(ltDescStyle.Width(width-2).Render(row.Local.Description) + "\n")
+	desc := ""
+	switch {
+	case row.Local != nil && row.Local.Description != "":
+		desc = row.Local.Description
+	case row.Entry != nil && row.Entry.Description != "":
+		desc = row.Entry.Description
+	}
+	if desc != "" {
+		b.WriteString(ltDescStyle.Width(width-2).Render(desc) + "\n")
 	}
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
 
@@ -1296,7 +1881,7 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	if row.HasStatus {
 		pairs = append(pairs, kv{"Status", row.Status.Display().Label})
 	}
-	if !row.Managed {
+	if row.Local != nil && !row.Managed {
 		pairs = append(pairs, kv{"Managed", "no"})
 	}
 	if row.Version != "" {
@@ -1326,18 +1911,39 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 		b.WriteString(ltMetaKeyStyle.Render(p.key) + ltMetaValStyle.Render(p.value) + "\n")
 	}
 
-	if !row.Managed {
+	if row.Local != nil && !row.Managed {
 		b.WriteString(ltDimStyle.Render("run: scribe adopt "+row.Name) + "\n")
 	}
 
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
 
-	if m.statusMsg != "" {
-		b.WriteString(m.statusMsg + "\n")
+	if m.substate == listSubstateTools {
+		b.WriteString(m.renderToolsEditor(width))
 		return b.String()
 	}
 
-	actions := actionsForRow(row)
+	if m.statusMsg != "" {
+		b.WriteString(m.statusMsg + "\n")
+		switch m.substate {
+		case listSubstateUpdateChoice:
+			b.WriteString("\n")
+			if m.updateHasMods {
+				b.WriteString(ltDimStyle.Render("[m] merge with upstream") + "\n")
+				b.WriteString(ltDimStyle.Render("[r] replace with registry version") + "\n")
+				b.WriteString(ltDimStyle.Render("[l] keep local version") + "\n")
+			} else {
+				b.WriteString(ltDimStyle.Render("[u] update now") + "\n")
+			}
+			b.WriteString(ltDimStyle.Render("[esc] cancel") + "\n")
+		case listSubstateConfirm:
+			b.WriteString("\n")
+			b.WriteString(ltDimStyle.Render("[y] confirm remove") + "\n")
+			b.WriteString(ltDimStyle.Render("[n] cancel") + "\n")
+		}
+		return b.String()
+	}
+
+	actions := actionsForRow(row, m.isBrowseMode())
 	for i, a := range actions {
 		isCursor := i == m.actionCursor && m.focus == focusActions
 		prefix := "  "
@@ -1362,9 +1968,156 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 
 	if row.Excerpt != "" {
 		b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
-		b.WriteString(ltExcerptStyle.Width(width-2).Render(row.Excerpt) + "\n")
+		b.WriteString(renderExcerptPreview(row.Excerpt, width-2) + "\n")
 	}
 	return b.String()
+}
+
+func (m listModel) renderToolsEditor(width int) string {
+	var b strings.Builder
+	effective := "none"
+	if names := m.selectedToolNames(); len(names) > 0 {
+		effective = strings.Join(names, ", ")
+	}
+	modeLabel := "inherit"
+	if m.toolMode == state.ToolsModePinned {
+		modeLabel = "pinned"
+	}
+
+	b.WriteString(ltMetaKeyStyle.Render("Mode") + ltMetaValStyle.Render(modeLabel) + "\n")
+	b.WriteString(ltMetaKeyStyle.Render("Effective") + ltMetaValStyle.Render(effective) + "\n")
+	if m.toolMode != state.ToolsModePinned {
+		b.WriteString(ltDimStyle.Render("Toggle a tool to switch this skill to a custom tool set.") + "\n")
+	}
+	b.WriteString("\n")
+
+	cursorPrefix := func(i int) string {
+		if i == m.toolCursor && m.focus == focusActions {
+			return ltCursorStyle.Render("▸") + " "
+		}
+		return "  "
+	}
+
+	b.WriteString(cursorPrefix(0) + ltNeutralStyle.Render("mode: toggle inherit/pinned") + "\n")
+	for i, st := range m.toolStatuses {
+		selected := m.toolSelection[st.Name]
+		marker := "[ ]"
+		if selected {
+			if m.toolMode == state.ToolsModePinned {
+				marker = "[x]"
+			} else {
+				marker = "[~]"
+			}
+		}
+		line := marker + " " + st.Name
+		style := ltNeutralStyle
+		if available, reason := toolStatusAvailable(st); !available {
+			style = ltDimStyle
+			line += " " + ltReasonStyle.Render(reason)
+		}
+		b.WriteString(cursorPrefix(i+1) + style.Render(line) + "\n")
+	}
+
+	saveIndex := len(m.toolStatuses) + 1
+	cancelIndex := len(m.toolStatuses) + 2
+	saveLabel := "save"
+	saveStyle := ltUpdateStyle
+	if err := m.validateToolsEditor(); err != nil {
+		saveLabel += " " + ltReasonStyle.Render(err.Error())
+		saveStyle = ltDimStyle
+	}
+	b.WriteString("\n")
+	b.WriteString(cursorPrefix(saveIndex) + saveStyle.Render(saveLabel) + "\n")
+	b.WriteString(cursorPrefix(cancelIndex) + ltNeutralStyle.Render("cancel") + "\n")
+	if m.statusMsg != "" {
+		b.WriteString("\n" + m.statusMsg + "\n")
+	}
+
+	return lipgloss.NewStyle().Width(width - 2).Render(strings.TrimRight(b.String(), "\n"))
+}
+
+func renderExcerptPreview(excerpt string, width int) string {
+	var lines []string
+	prevWasHeading := false
+	for _, raw := range strings.Split(excerpt, "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			if len(lines) > 0 && lines[len(lines)-1] != "" {
+				lines = append(lines, "")
+			}
+			prevWasHeading = false
+			continue
+		}
+
+		style := ltExcerptStyle
+		text := trimmed
+		isHeading := false
+		switch {
+		case strings.HasPrefix(trimmed, "# "):
+			style = ltExcerptH1
+			text = strings.TrimSpace(strings.TrimPrefix(trimmed, "# "))
+			isHeading = true
+		case strings.HasPrefix(trimmed, "## "):
+			style = ltExcerptH2
+			text = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+			isHeading = true
+		case strings.HasPrefix(trimmed, "### "):
+			style = ltExcerptH2
+			text = strings.TrimSpace(strings.TrimPrefix(trimmed, "### "))
+			isHeading = true
+		case strings.HasPrefix(trimmed, "- "), strings.HasPrefix(trimmed, "* "):
+			style = ltExcerptList
+			text = "• " + workflow.NormalizeExcerptLine(trimmed)
+		case isNumberedListLine(trimmed):
+			style = ltExcerptList
+			text = trimmed
+		default:
+			text = workflow.NormalizeExcerptLine(trimmed)
+		}
+
+		if text == "" {
+			continue
+		}
+		lines = append(lines, renderInlineCode(style, text))
+		if isHeading {
+			lines = append(lines, "")
+		} else if prevWasHeading {
+			lines = append(lines, "")
+		}
+		prevWasHeading = isHeading
+	}
+
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func renderInlineCode(base lipgloss.Style, text string) string {
+	parts := strings.Split(text, "`")
+	if len(parts) == 1 {
+		return base.Render(text)
+	}
+	var b strings.Builder
+	for i, part := range parts {
+		if i%2 == 1 {
+			b.WriteString(ltExcerptCode.Render(part))
+		} else if part != "" {
+			b.WriteString(base.Render(part))
+		}
+	}
+	return b.String()
+}
+
+func isNumberedListLine(text string) bool {
+	if len(text) < 3 {
+		return false
+	}
+	i := 0
+	for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+		i++
+	}
+	return i > 0 && i+1 < len(text) && text[i] == '.' && text[i+1] == ' '
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -1444,46 +2197,3 @@ func (m listModel) paneWidths() (int, int) {
 
 // readExcerpt reads SKILL.md from skillDir, strips YAML frontmatter, and
 // returns the first maxLines non-empty body lines as a single string.
-func readExcerpt(skillDir string, maxLines int) string {
-	f, err := os.Open(filepath.Join(skillDir, "SKILL.md"))
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	inFrontmatter := false
-	pastFrontmatter := false
-	var lines []string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-
-		if !pastFrontmatter {
-			if trimmed == "---" {
-				if !inFrontmatter {
-					inFrontmatter = true
-					continue
-				}
-				// Closing ---
-				pastFrontmatter = true
-				continue
-			}
-			if inFrontmatter {
-				continue
-			}
-			// No frontmatter at all — treat everything as body.
-			pastFrontmatter = true
-		}
-
-		if trimmed == "" {
-			continue
-		}
-		lines = append(lines, line)
-		if len(lines) >= maxLines {
-			break
-		}
-	}
-	return strings.Join(lines, "\n")
-}

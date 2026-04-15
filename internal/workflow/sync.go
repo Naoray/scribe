@@ -9,6 +9,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/adopt"
+	"github.com/Naoray/scribe/internal/agent"
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
@@ -19,6 +20,8 @@ import (
 	"github.com/Naoray/scribe/internal/tools"
 )
 
+const registryMuteAfter = 3
+
 // SyncSteps returns the step list for the sync command.
 func SyncSteps() []Step {
 	return []Step{
@@ -28,6 +31,7 @@ func SyncSteps() []Step {
 		{"FilterRegistries", StepFilterRegistries},
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
+		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
 		{"SyncSkills", StepSyncSkills},
@@ -40,6 +44,7 @@ func SyncTail() []Step {
 	return []Step{
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
+		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
 	}
@@ -75,6 +80,10 @@ func StepLoadConfig(ctx context.Context, b *Bag) error {
 		b.Config = cfg
 	}
 
+	if b.LazyGitHub {
+		return nil
+	}
+
 	if b.Client == nil {
 		if b.Factory != nil {
 			client, err := b.Factory.Client()
@@ -99,6 +108,31 @@ func StepLoadConfig(ctx context.Context, b *Bag) error {
 		}
 	}
 
+	return nil
+}
+
+func StepEnsureScribeAgent(_ context.Context, b *Bag) error {
+	if b.Config == nil || b.State == nil {
+		return nil
+	}
+
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		agent.WarnBootstrapError(fmt.Errorf("resolve store dir: %w", err))
+		return nil
+	}
+
+	changed, err := agent.EnsureScribeAgent(storeDir, b.State, b.Config)
+	if err != nil {
+		agent.WarnBootstrapError(err)
+		return nil
+	}
+	if !changed {
+		return nil
+	}
+	if err := b.State.Save(); err != nil {
+		agent.WarnBootstrapError(fmt.Errorf("save bootstrap state: %w", err))
+	}
 	return nil
 }
 
@@ -300,12 +334,23 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	}
 
 	for _, teamRepo := range b.Repos {
+		if b.State.RegistryFailure(teamRepo).Muted {
+			continue
+		}
 		clear(resolved)
 		b.Formatter.OnRegistryStart(teamRepo)
 
 		if err := syncer.Run(ctx, teamRepo, b.State); err != nil {
+			failure := b.State.RecordRegistryFailure(teamRepo, err, registryMuteAfter)
+			if saveErr := b.State.Save(); saveErr != nil {
+				return fmt.Errorf("save state: %w", saveErr)
+			}
+			if failure.Muted {
+				continue
+			}
 			return err
 		}
+		b.State.ClearRegistryFailure(teamRepo)
 
 		if err := b.State.Save(); err != nil {
 			return fmt.Errorf("save state: %w", err)

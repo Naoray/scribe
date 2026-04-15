@@ -16,16 +16,18 @@ import (
 	"github.com/Naoray/scribe/internal/tools"
 )
 
+const removeOpenAICodexMigration = "remove_openai_codex_v1"
+const renameBuiltinReposMigration = "rename_builtin_repos_v1"
+
 // builtinRepos are well-known public registries auto-added during first run.
 var builtinRepos = []string{
 	"Naoray/scribe",
-	"anthropic/skills",
-	"openai/codex-skills",
+	"anthropics/skills",
 	"expo/skills",
 }
 
 // currentBuiltinsVersion bumps whenever builtinRepos changes.
-const currentBuiltinsVersion = 2
+const currentBuiltinsVersion = 3
 
 // BuiltinRegistries returns RegistryConfig entries for built-in registries.
 func BuiltinRegistries() []config.RegistryConfig {
@@ -86,7 +88,7 @@ func PromptAdoption(cfg *config.Config, st *state.State, toolSet []tools.Tool, i
 	adopter := &adopt.Adopter{
 		State: st,
 		Tools: toolSet,
-		Emit:  func(msg any) {
+		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case adopt.AdoptedMsg:
 				fmt.Fprintf(out, "  + adopted: %s\n", m.Name)
@@ -127,9 +129,11 @@ func promptYN(in io.Reader, out io.Writer, question string, defaultYes bool) boo
 }
 
 // ApplyBuiltins adds built-in registries to the config if not already present.
-func ApplyBuiltins(cfg *config.Config) []string {
+// firstRun is true only when the config had no prior builtins version.
+func ApplyBuiltins(cfg *config.Config) ([]string, bool) {
+	firstRun := cfg.BuiltinsVersion == 0
 	if cfg.BuiltinsVersion >= currentBuiltinsVersion {
-		return nil
+		return nil, false
 	}
 
 	var added []string
@@ -140,5 +144,84 @@ func ApplyBuiltins(cfg *config.Config) []string {
 		}
 	}
 	cfg.BuiltinsVersion = currentBuiltinsVersion
-	return added
+	return added, firstRun
+}
+
+func ApplyBuiltinsRemove(cfg *config.Config, st *state.State, removed []string) []string {
+	if st != nil && st.HasMigration(removeOpenAICodexMigration) {
+		return nil
+	}
+
+	removeSet := map[string]bool{}
+	for _, repo := range removed {
+		removeSet[strings.ToLower(repo)] = true
+	}
+
+	kept := cfg.Registries[:0]
+	var pruned []string
+	for _, rc := range cfg.Registries {
+		if removeSet[strings.ToLower(rc.Repo)] {
+			pruned = append(pruned, rc.Repo)
+			continue
+		}
+		kept = append(kept, rc)
+	}
+	cfg.Registries = kept
+
+	if st != nil {
+		st.MarkMigration(removeOpenAICodexMigration)
+		for _, repo := range pruned {
+			st.ClearRegistryFailure(repo)
+		}
+	}
+
+	return pruned
+}
+
+func ApplyBuiltinsRename(cfg *config.Config, st *state.State, renamed map[string]string) []string {
+	if st != nil && st.HasMigration(renameBuiltinReposMigration) {
+		return nil
+	}
+
+	type renameOp struct {
+		from string
+		to   string
+	}
+	var ops []renameOp
+	for from, to := range renamed {
+		ops = append(ops, renameOp{from: from, to: to})
+	}
+
+	var applied []string
+	for _, op := range ops {
+		src := cfg.FindRegistry(op.from)
+		if src == nil {
+			continue
+		}
+
+		if cfg.FindRegistry(op.to) == nil {
+			replacement := *src
+			replacement.Repo = op.to
+			cfg.AddRegistry(replacement)
+		}
+
+		kept := cfg.Registries[:0]
+		for _, rc := range cfg.Registries {
+			if strings.EqualFold(rc.Repo, op.from) {
+				continue
+			}
+			kept = append(kept, rc)
+		}
+		cfg.Registries = kept
+		applied = append(applied, op.from+" -> "+op.to)
+	}
+
+	if st != nil {
+		st.MarkMigration(renameBuiltinReposMigration)
+		for _, op := range ops {
+			st.ClearRegistryFailure(op.from)
+		}
+	}
+
+	return applied
 }

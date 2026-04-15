@@ -2,15 +2,73 @@ package workflow
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/app"
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/discovery"
+	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
+type listTestFetcher struct{}
+
+func (listTestFetcher) FetchFile(ctx context.Context, o, r, p, ref string) ([]byte, error) {
+	return nil, nil
+}
+func (listTestFetcher) FetchDirectory(ctx context.Context, o, r, p, ref string) ([]tools.SkillFile, error) {
+	return nil, nil
+}
+func (listTestFetcher) LatestCommitSHA(ctx context.Context, o, r, b string) (string, error) {
+	return "", nil
+}
+func (listTestFetcher) GetTree(ctx context.Context, o, r, ref string) ([]provider.TreeEntry, error) {
+	return nil, nil
+}
+
+type panicListProvider struct{}
+
+func (panicListProvider) Discover(context.Context, string) (*provider.DiscoverResult, error) {
+	panic("Discover should not be called")
+}
+
+func (panicListProvider) Fetch(context.Context, manifest.Entry) ([]tools.SkillFile, error) {
+	panic("Fetch should not be called")
+}
+
+// partialFailProvider returns skills for one repo and errors for another —
+// exercises the per-registry warning path in printMultiListJSON.
+type partialFailProvider struct {
+	failRepo string
+}
+
+func (p *partialFailProvider) Discover(ctx context.Context, repo string) (*provider.DiscoverResult, error) {
+	if repo == p.failRepo {
+		return nil, fmt.Errorf("%s: no skills found", repo)
+	}
+	return &provider.DiscoverResult{
+		Entries: []manifest.Entry{{
+			Name:   "xray",
+			Path:   "SKILL.md",
+			Source: "github:acme/ok@main",
+		}},
+		IsTeam: false,
+	}, nil
+}
+
+func (p *partialFailProvider) Fetch(ctx context.Context, e manifest.Entry) ([]tools.SkillFile, error) {
+	return nil, nil
+}
+
 func TestListLoadSteps_Composition(t *testing.T) {
-	steps := ListLoadSteps()
+	steps := ListLoadStepsLocal()
 	if len(steps) != 3 {
 		t.Fatalf("ListLoadSteps() = %d steps, want 3", len(steps))
 	}
@@ -20,8 +78,27 @@ func TestListLoadSteps_Composition(t *testing.T) {
 	if steps[1].Name != "LoadState" {
 		t.Errorf("step[1] = %s, want LoadState", steps[1].Name)
 	}
+	if steps[2].Name != "EnsureScribeAgent" {
+		t.Errorf("step[2] = %s, want EnsureScribeAgent", steps[2].Name)
+	}
+}
+
+func TestListLoadStepsRemote_Composition(t *testing.T) {
+	steps := ListLoadStepsRemote()
+	if len(steps) != 4 {
+		t.Fatalf("ListLoadStepsRemote() = %d steps, want 4", len(steps))
+	}
+	if steps[0].Name != "LoadConfig" {
+		t.Errorf("step[0] = %s, want LoadConfig", steps[0].Name)
+	}
+	if steps[1].Name != "LoadState" {
+		t.Errorf("step[1] = %s, want LoadState", steps[1].Name)
+	}
 	if steps[2].Name != "ResolveTools" {
 		t.Errorf("step[2] = %s, want ResolveTools", steps[2].Name)
+	}
+	if steps[3].Name != "EnsureScribeAgent" {
+		t.Errorf("step[3] = %s, want EnsureScribeAgent", steps[3].Name)
 	}
 }
 
@@ -35,6 +112,35 @@ func TestListJSONSteps_Composition(t *testing.T) {
 	}
 	if steps[len(steps)-1].Name != "WriteListJSON" {
 		t.Errorf("last step = %s, want WriteListJSON", steps[len(steps)-1].Name)
+	}
+}
+
+func TestListLocalPathSkipsGitHubClient(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	clientCalled := false
+	bag := &Bag{
+		Factory: &app.Factory{
+			Config: func() (*config.Config, error) {
+				return &config.Config{}, nil
+			},
+			Client: func() (*gh.Client, error) {
+				clientCalled = true
+				return nil, nil
+			},
+		},
+		LazyGitHub: true,
+	}
+
+	if err := StepLoadConfig(context.Background(), bag); err != nil {
+		t.Fatalf("StepLoadConfig() error = %v", err)
+	}
+
+	if clientCalled {
+		t.Fatal("StepLoadConfig() called Factory.Client in lazy mode")
+	}
+	if bag.Client != nil {
+		t.Fatalf("bag.Client = %#v, want nil", bag.Client)
 	}
 }
 
@@ -166,6 +272,40 @@ func TestPrintLocalJSON(t *testing.T) {
 		}
 		if got[0].Revision != 3 {
 			t.Errorf("registry-skill: revision = %d, want 3", got[0].Revision)
+		}
+	})
+
+	t.Run("failing registry is reported as warning, others still listed", func(t *testing.T) {
+		syncer := &sync.Syncer{
+			Client:   listTestFetcher{},
+			Provider: &partialFailProvider{failRepo: "acme/broken"},
+			Tools:    []tools.Tool{},
+		}
+		var buf bytes.Buffer
+		err := printMultiListJSON(context.Background(), &buf,
+			[]string{"acme/broken", "acme/ok"}, syncer, &state.State{
+				Installed: map[string]state.InstalledSkill{},
+			})
+		if err != nil {
+			t.Fatalf("printMultiListJSON returned error, want nil: %v", err)
+		}
+		var decoded struct {
+			Registries []struct {
+				Registry string `json:"registry"`
+			} `json:"registries"`
+			Warnings []string `json:"warnings"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+			t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+		}
+		if len(decoded.Registries) != 1 || decoded.Registries[0].Registry != "acme/ok" {
+			t.Errorf("registries = %+v, want one entry for acme/ok", decoded.Registries)
+		}
+		if len(decoded.Warnings) != 1 {
+			t.Fatalf("warnings = %v, want 1 entry", decoded.Warnings)
+		}
+		if want := "acme/broken"; !bytes.Contains([]byte(decoded.Warnings[0]), []byte(want)) {
+			t.Errorf("warning missing repo name: %q", decoded.Warnings[0])
 		}
 	})
 

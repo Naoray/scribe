@@ -17,9 +17,18 @@ import (
 
 // State is the contents of ~/.scribe/state.json.
 type State struct {
-	SchemaVersion int                       `json:"schema_version"`
-	LastSync      time.Time                 `json:"last_sync,omitempty"`
-	Installed     map[string]InstalledSkill `json:"installed"`
+	SchemaVersion    int                        `json:"schema_version"`
+	LastSync         time.Time                  `json:"last_sync,omitempty"`
+	Installed        map[string]InstalledSkill  `json:"installed"`
+	Migrations       map[string]bool            `json:"migrations,omitempty"`
+	RegistryFailures map[string]RegistryFailure `json:"registry_failures,omitempty"`
+}
+
+type RegistryFailure struct {
+	Consecutive int       `json:"consecutive"`
+	Muted       bool      `json:"muted,omitempty"`
+	LastError   string    `json:"last_error,omitempty"`
+	LastFailure time.Time `json:"last_failure,omitempty"`
 }
 
 // Origin describes how a skill was acquired.
@@ -31,6 +40,8 @@ const (
 	OriginRegistry Origin = ""
 	// OriginLocal means the skill was adopted or hand-written locally.
 	OriginLocal Origin = "local"
+	// OriginBootstrap means the skill was installed from the embedded scribe bootstrap.
+	OriginBootstrap Origin = "bootstrap"
 )
 
 // ToolsMode controls how the Tools field is interpreted at sync time.
@@ -166,13 +177,13 @@ func Load() (*State, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill), Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill)}, nil
+		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill), Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}}, nil
 	}
 	return parseAndMigrate(data)
 }
@@ -192,8 +203,10 @@ func parseAndMigrate(data []byte) (*State, error) {
 	}
 
 	s := &State{
-		SchemaVersion: legacy.SchemaVersion,
-		Installed:     make(map[string]InstalledSkill, len(legacy.Installed)),
+		SchemaVersion:    legacy.SchemaVersion,
+		Installed:        make(map[string]InstalledSkill, len(legacy.Installed)),
+		Migrations:       map[string]bool{},
+		RegistryFailures: map[string]RegistryFailure{},
 	}
 
 	// Migration 1: Promote team.last_sync to top-level.
@@ -375,6 +388,48 @@ func (s *State) RecordInstall(name string, skill InstalledSkill) {
 // Remove deletes a skill from state (does not touch disk files).
 func (s *State) Remove(name string) {
 	delete(s.Installed, name)
+}
+
+func (s *State) HasMigration(name string) bool {
+	return s.Migrations != nil && s.Migrations[name]
+}
+
+func (s *State) MarkMigration(name string) {
+	if s.Migrations == nil {
+		s.Migrations = map[string]bool{}
+	}
+	s.Migrations[name] = true
+}
+
+func (s *State) RecordRegistryFailure(repo string, err error, muteAfter int) RegistryFailure {
+	if s.RegistryFailures == nil {
+		s.RegistryFailures = map[string]RegistryFailure{}
+	}
+	failure := s.RegistryFailures[repo]
+	failure.Consecutive++
+	failure.LastFailure = time.Now().UTC()
+	if err != nil {
+		failure.LastError = err.Error()
+	}
+	if muteAfter > 0 && failure.Consecutive >= muteAfter {
+		failure.Muted = true
+	}
+	s.RegistryFailures[repo] = failure
+	return failure
+}
+
+func (s *State) ClearRegistryFailure(repo string) {
+	if s.RegistryFailures == nil {
+		return
+	}
+	delete(s.RegistryFailures, repo)
+}
+
+func (s *State) RegistryFailure(repo string) RegistryFailure {
+	if s.RegistryFailures == nil {
+		return RegistryFailure{}
+	}
+	return s.RegistryFailures[repo]
 }
 
 // legacyToSkill converts a legacyInstalledSkill to an InstalledSkill,

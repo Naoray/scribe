@@ -142,3 +142,24 @@ func TestWriteStatusStyled(t *testing.T) {
 		t.Errorf("expected '1 installed', got: %s", out)
 	}
 }
+
+func TestWriteStatusShowsNoToolHintForBootstrapOnlyState(t *testing.T) {
+	cfg := &config.Config{}
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{
+			"scribe-agent": {Origin: state.OriginBootstrap, Tools: nil},
+		},
+	}
+
+	var plain bytes.Buffer
+	writeStatusPlain(&plain, cfg, st)
+	if !strings.Contains(plain.String(), "no AI tool detected") {
+		t.Fatalf("plain status missing no-tool hint:\n%s", plain.String())
+	}
+
+	var styled bytes.Buffer
+	writeStatusStyled(&styled, cfg, st)
+	if !strings.Contains(styled.String(), "no AI tool detected") {
+		t.Fatalf("styled status missing no-tool hint:\n%s", styled.String())
+	}
+}

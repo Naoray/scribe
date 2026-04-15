@@ -23,7 +23,7 @@ func TestParseOwnerRepo(t *testing.T) {
 		{"", "", "", true},
 		{"/repo", "", "", true},
 		{"owner/", "", "", true},
-		{"a/b/c", "a", "b/c", false},     // SplitN(s, "/", 2) keeps remainder
+		{"a/b/c", "a", "b/c", false},                         // SplitN(s, "/", 2) keeps remainder
 		{"my.org/my_repo.go", "my.org", "my_repo.go", false}, // dots and underscores allowed
 	}
 
