@@ -626,15 +626,14 @@ func TestApply_RealDirectoryAdoption(t *testing.T) {
 		t.Errorf("expected symlink at %s, got mode %v", claudeLink, info.Mode())
 	}
 
-	// The symlink must point into the canonical store.
+	// The symlink must point into the canonical store directory.
 	target, err := os.Readlink(claudeLink)
 	if err != nil {
 		t.Fatalf("readlink: %v", err)
 	}
 	storeSkillDir := filepath.Join(home, ".scribe", "skills", "commit")
-	wantTarget := filepath.Join(storeSkillDir, "SKILL.md")
-	if target != wantTarget {
-		t.Errorf("symlink target = %q, want %q", target, wantTarget)
+	if target != storeSkillDir {
+		t.Errorf("symlink target = %q, want %q", target, storeSkillDir)
 	}
 
 	// Canonical store must have SKILL.md.
