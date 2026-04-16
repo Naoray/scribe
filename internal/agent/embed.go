@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 )
 
-//go:embed scribe_agent/SKILL.md
-var EmbeddedSkillMD []byte
+const embeddedRendererFormatVersion = "v1"
+
+//go:embed scribe_agent/SKILL.md.tmpl
+var EmbeddedSkillTemplate []byte
 
 var EmbeddedVersion = func() string {
-	sum := sha256.Sum256(EmbeddedSkillMD)
+	sum := sha256.Sum256(append([]byte(embeddedRendererFormatVersion+"\n"), EmbeddedSkillTemplate...))
 	return hex.EncodeToString(sum[:])
 }()

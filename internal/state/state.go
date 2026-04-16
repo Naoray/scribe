@@ -17,11 +17,16 @@ import (
 
 // State is the contents of ~/.scribe/state.json.
 type State struct {
-	SchemaVersion    int                        `json:"schema_version"`
-	LastSync         time.Time                  `json:"last_sync,omitempty"`
-	Installed        map[string]InstalledSkill  `json:"installed"`
-	Migrations       map[string]bool            `json:"migrations,omitempty"`
-	RegistryFailures map[string]RegistryFailure `json:"registry_failures,omitempty"`
+	SchemaVersion      int                          `json:"schema_version"`
+	LastSync           time.Time                    `json:"last_sync,omitempty"`
+	Installed          map[string]InstalledSkill    `json:"installed"`
+	Migrations         map[string]bool              `json:"migrations,omitempty"`
+	RegistryFailures   map[string]RegistryFailure   `json:"registry_failures,omitempty"`
+	BinaryUpdateChecks map[string]BinaryUpdateCheck `json:"binary_update_checks,omitempty"`
+}
+
+type BinaryUpdateCheck struct {
+	LastSucceededAt time.Time `json:"last_succeeded_at,omitempty"`
 }
 
 type RegistryFailure struct {
@@ -99,10 +104,11 @@ type ProjectionConflict struct {
 
 // Legacy structs for migration from older state formats.
 type legacyState struct {
-	SchemaVersion int                        `json:"schema_version,omitempty"`
-	Team          *legacyTeamState           `json:"team,omitempty"`
-	LastSync      *time.Time                 `json:"last_sync,omitempty"`
-	Installed     map[string]json.RawMessage `json:"installed"`
+	SchemaVersion      int                          `json:"schema_version,omitempty"`
+	Team               *legacyTeamState             `json:"team,omitempty"`
+	LastSync           *time.Time                   `json:"last_sync,omitempty"`
+	Installed          map[string]json.RawMessage   `json:"installed"`
+	BinaryUpdateChecks map[string]BinaryUpdateCheck `json:"binary_update_checks,omitempty"`
 }
 
 type legacyTeamState struct {
@@ -177,13 +183,13 @@ func Load() (*State, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill), Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}}, nil
+		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill), Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}, BinaryUpdateChecks: map[string]BinaryUpdateCheck{}}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill), Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}}, nil
+		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill), Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}, BinaryUpdateChecks: map[string]BinaryUpdateCheck{}}, nil
 	}
 	return parseAndMigrate(data)
 }
@@ -203,10 +209,14 @@ func parseAndMigrate(data []byte) (*State, error) {
 	}
 
 	s := &State{
-		SchemaVersion:    legacy.SchemaVersion,
-		Installed:        make(map[string]InstalledSkill, len(legacy.Installed)),
-		Migrations:       map[string]bool{},
-		RegistryFailures: map[string]RegistryFailure{},
+		SchemaVersion:      legacy.SchemaVersion,
+		Installed:          make(map[string]InstalledSkill, len(legacy.Installed)),
+		Migrations:         map[string]bool{},
+		RegistryFailures:   map[string]RegistryFailure{},
+		BinaryUpdateChecks: map[string]BinaryUpdateCheck{},
+	}
+	if len(legacy.BinaryUpdateChecks) > 0 {
+		s.BinaryUpdateChecks = legacy.BinaryUpdateChecks
 	}
 
 	// Migration 1: Promote team.last_sync to top-level.
@@ -434,6 +444,39 @@ func (s *State) RegistryFailure(repo string) RegistryFailure {
 		return RegistryFailure{}
 	}
 	return s.RegistryFailures[repo]
+}
+
+const scribeBinaryUpdateCheckKey = "scribe"
+
+// ScribeBinaryUpdateCheck returns the cached upgrade-check entry for scribe.
+func (s *State) ScribeBinaryUpdateCheck() BinaryUpdateCheck {
+	if s == nil || s.BinaryUpdateChecks == nil {
+		return BinaryUpdateCheck{}
+	}
+	return s.BinaryUpdateChecks[scribeBinaryUpdateCheckKey]
+}
+
+// ScribeBinaryUpdateCooldownFresh reports whether the last successful scribe
+// binary check is still within the 24-hour cooldown window.
+func (s *State) ScribeBinaryUpdateCooldownFresh(now time.Time) bool {
+	check := s.ScribeBinaryUpdateCheck()
+	if check.LastSucceededAt.IsZero() {
+		return false
+	}
+	return now.Sub(check.LastSucceededAt) < 24*time.Hour
+}
+
+// RecordScribeBinaryUpdateSuccess records a successful scribe binary check using UTC now.
+func (s *State) RecordScribeBinaryUpdateSuccess() {
+	s.RecordScribeBinaryUpdateSuccessAt(time.Now().UTC())
+}
+
+// RecordScribeBinaryUpdateSuccessAt records a successful scribe binary check at a specific time.
+func (s *State) RecordScribeBinaryUpdateSuccessAt(at time.Time) {
+	if s.BinaryUpdateChecks == nil {
+		s.BinaryUpdateChecks = map[string]BinaryUpdateCheck{}
+	}
+	s.BinaryUpdateChecks[scribeBinaryUpdateCheckKey] = BinaryUpdateCheck{LastSucceededAt: at.UTC()}
 }
 
 // legacyToSkill converts a legacyInstalledSkill to an InstalledSkill,

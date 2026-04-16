@@ -27,6 +27,12 @@ func TestLoadMissing(t *testing.T) {
 	if s.SchemaVersion != 4 {
 		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
 	}
+	if s.BinaryUpdateChecks == nil {
+		t.Fatal("expected BinaryUpdateChecks to be initialized")
+	}
+	if len(s.BinaryUpdateChecks) != 0 {
+		t.Fatalf("expected empty BinaryUpdateChecks, got %d entries", len(s.BinaryUpdateChecks))
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -76,6 +82,51 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if skill.InstalledAt.IsZero() {
 		t.Error("expected InstalledAt to be set")
+	}
+}
+
+func TestBinaryUpdateChecksRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	expected := time.Date(2026, 4, 16, 10, 30, 0, 0, time.UTC)
+	st.RecordScribeBinaryUpdateSuccessAt(expected)
+
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+
+	got := loaded.ScribeBinaryUpdateCheck()
+	if !got.LastSucceededAt.Equal(expected) {
+		t.Fatalf("LastSucceededAt: got %v, want %v", got.LastSucceededAt, expected)
+	}
+}
+
+func TestBinaryUpdateCooldownFreshness(t *testing.T) {
+	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
+	st := &state.State{BinaryUpdateChecks: map[string]state.BinaryUpdateCheck{}}
+
+	if st.ScribeBinaryUpdateCooldownFresh(now) {
+		t.Fatal("expected missing entry to be treated as not fresh")
+	}
+
+	st.RecordScribeBinaryUpdateSuccessAt(now.Add(-23 * time.Hour))
+	if !st.ScribeBinaryUpdateCooldownFresh(now) {
+		t.Fatal("expected 23h-old success to be fresh")
+	}
+
+	st.RecordScribeBinaryUpdateSuccessAt(now.Add(-24 * time.Hour))
+	if st.ScribeBinaryUpdateCooldownFresh(now) {
+		t.Fatal("expected 24h-old success to be expired")
 	}
 }
 

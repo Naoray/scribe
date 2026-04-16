@@ -19,7 +19,11 @@ func EnsureScribeAgent(store string, st *state.State, cfg *config.Config) (bool,
 	if cfg != nil && !cfg.ScribeAgent.Enabled {
 		return false, nil
 	}
-	return InstallScribeAgent(store, st, EmbeddedSkillMD, EmbeddedVersion)
+	content, _, err := renderScribeAgentForStore(store, st)
+	if err != nil {
+		return false, err
+	}
+	return InstallScribeAgent(store, st, content, EmbeddedVersion)
 }
 
 // InstallScribeAgent validates and installs a scribe-agent skill payload into
@@ -34,9 +38,11 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 	basePath := filepath.Join(skillDir, ".scribe-base.md")
 
 	if existingContent, err := os.ReadFile(skillPath); err == nil && skillMatches(existingContent, content) {
-		if installed, ok := st.Installed["scribe-agent"]; ok && installed.Origin == state.OriginBootstrap {
-			if len(installed.Sources) > 0 && installed.Sources[0].Ref == version {
-				return false, nil
+		if existingBaseContent, err := os.ReadFile(basePath); err == nil && skillMatches(existingBaseContent, content) {
+			if installed, ok := st.Installed["scribe-agent"]; ok && installed.Origin == state.OriginBootstrap {
+				if len(installed.Sources) > 0 && installed.Sources[0].Ref == version {
+					return false, nil
+				}
 			}
 		}
 	}
@@ -55,7 +61,7 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 	revision := existing.Revision
 	if revision == 0 {
 		revision = 1
-	} else {
+	} else if !sameEmbeddedVersion(existing, version) {
 		revision++
 	}
 	installedAt := existing.InstalledAt
@@ -83,8 +89,16 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 
 	return true, nil
 }
+
 func skillMatches(content, want []byte) bool {
 	return isync.ComputeFileHash(content) == isync.ComputeFileHash(want)
+}
+
+func sameEmbeddedVersion(installed state.InstalledSkill, version string) bool {
+	if installed.Origin != state.OriginBootstrap || len(installed.Sources) == 0 {
+		return false
+	}
+	return installed.Sources[0].Ref == version
 }
 
 func shortRef(ref string) string {
