@@ -154,7 +154,7 @@ func runCreateRegistry(cmd *cobra.Command, args []string) error {
 		Factory:  factory,
 		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
 	}
-	if err := workflow.Run(ctx, workflow.ConnectTail(), bag); err != nil {
+	if err := workflow.Run(ctx, workflow.ConnectAndSyncTail(), bag); err != nil {
 		fmt.Fprintf(os.Stderr, "\nRepo %s was created but connecting failed: %v\n", repoSlug, err)
 		fmt.Fprintf(os.Stderr, "Run `scribe connect %s` to retry.\n", repoSlug)
 		return err

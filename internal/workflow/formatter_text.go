@@ -157,6 +157,10 @@ func (f *textFormatter) OnConnectSyncWarning(repo string, err error) {
 	fmt.Fprintf(f.errOut, "run `scribe sync` to retry\n")
 }
 
+func (f *textFormatter) OnConnectAvailable(_ string, count int) {
+	fmt.Fprintf(f.out, "%d skills available — run `scribe add` to install\n", count)
+}
+
 func (f *textFormatter) OnLegacyFormat(repo string) {
 	fmt.Fprintf(f.errOut, "note: %s uses legacy scribe.toml — consider migrating to scribe.yaml\n", repo)
 }
