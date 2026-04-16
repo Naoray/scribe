@@ -19,7 +19,7 @@ func newSkillCommand() *cobra.Command {
 		Short: "Inspect or modify individual installed skills",
 		Long:  `Per-skill management for choosing tools and repairing managed drift.`,
 	}
-	cmd.AddCommand(newSkillEditCommand(), newSkillRepairCommand())
+	cmd.AddCommand(newSkillEditCommand(), newSkillToolsCommand(), newSkillRepairCommand())
 	return cmd
 }
 
