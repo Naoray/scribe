@@ -66,3 +66,15 @@ func TestResolveRepoNoArgNonTTY(t *testing.T) {
 		t.Error("expected error when no arg and non-TTY stdin")
 	}
 }
+
+func TestNewConnectCommand_InstallAllFlag(t *testing.T) {
+	cmd := newConnectCommand()
+
+	flag := cmd.Flags().Lookup("install-all")
+	if flag == nil {
+		t.Fatal("expected install-all flag to be registered")
+	}
+	if flag.DefValue != "false" {
+		t.Errorf("install-all default = %q, want false", flag.DefValue)
+	}
+}

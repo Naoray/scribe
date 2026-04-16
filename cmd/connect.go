@@ -13,7 +13,7 @@ import (
 )
 
 func newConnectCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "connect [owner/repo]",
 		Short: "Connect to a skill registry",
 		Long: `Connect to a skill registry so Scribe can sync skills from it.
@@ -23,10 +23,13 @@ The repo must contain a scribe.yaml or scribe.toml with a [team] section.
 Examples:
   scribe connect ArtistfyHQ/team-skills
   scribe connect mattpocock/skills
+  scribe connect mattpocock/skills --install-all
   scribe connect                          # interactive prompt`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runConnect,
 	}
+	cmd.Flags().Bool("install-all", false, "Install every discovered skill from the connected registry")
+	return cmd
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
@@ -34,12 +37,18 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	installAll, _ := cmd.Flags().GetBool("install-all")
 
 	bag := &workflow.Bag{
-		RepoArg: repo,
-		Factory: newCommandFactory(),
+		RepoArg:        repo,
+		InstallAllFlag: installAll,
+		Factory:        newCommandFactory(),
 	}
-	if err := workflow.Run(cmd.Context(), workflow.ConnectSteps(), bag); err != nil {
+	steps := workflow.ConnectSteps()
+	if installAll {
+		steps = workflow.ConnectInstallAllSteps()
+	}
+	if err := workflow.Run(cmd.Context(), steps, bag); err != nil {
 		return err
 	}
 	return saveWorkflowState(bag)

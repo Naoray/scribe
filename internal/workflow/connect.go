@@ -16,33 +16,46 @@ import (
 // It saves the registry config and shows available skills — it does NOT
 // auto-install anything. Users install skills explicitly with `scribe add`.
 func ConnectSteps() []Step {
-	return []Step{
-		{"LoadConfig", StepLoadConfig},
-		{"ResolveFormatter", StepResolveFormatter},
-		{"DedupCheck", StepDedupCheck},
-		{"FetchManifest", StepFetchManifest},
-		{"ValidateManifest", StepValidateManifest},
-		{"InferRegistryType", StepInferRegistryType},
-		{"SaveConfig", StepSaveConfig},
-		{"ShowAvailable", StepShowAvailableSkills},
-	}
+	steps := append([]Step{}, connectBaseSteps(true)...)
+	return append(steps, Step{Name: "ShowAvailable", Fn: StepShowAvailableSkills})
 }
 
-// ConnectAndSyncTail returns connect + sync steps starting from
-// ResolveFormatter, for use by create-registry where the user just
-// authored the skills and wants them installed immediately.
-func ConnectAndSyncTail() []Step {
+// ConnectInstallAllSteps returns the connect path that immediately installs
+// every discovered skill from the just-connected registry.
+func ConnectInstallAllSteps() []Step {
+	steps := append([]Step{}, connectBaseSteps(true)...)
+	return append(steps, connectInstallAllTail()...)
+}
+
+// ConnectInstallAllTail returns the connect + install-all path starting at
+// ResolveFormatter, for callers that already loaded config/client state.
+func ConnectInstallAllTail() []Step {
+	steps := append([]Step{}, connectBaseSteps(false)...)
+	return append(steps, connectInstallAllTail()...)
+}
+
+func connectBaseSteps(loadConfig bool) []Step {
+	steps := make([]Step, 0, 7)
+	if loadConfig {
+		steps = append(steps, Step{Name: "LoadConfig", Fn: StepLoadConfig})
+	}
+	steps = append(steps,
+		Step{Name: "ResolveFormatter", Fn: StepResolveFormatter},
+		Step{Name: "DedupCheck", Fn: StepDedupCheck},
+		Step{Name: "FetchManifest", Fn: StepFetchManifest},
+		Step{Name: "ValidateManifest", Fn: StepValidateManifest},
+		Step{Name: "InferRegistryType", Fn: StepInferRegistryType},
+		Step{Name: "SaveConfig", Fn: StepSaveConfig},
+	)
+	return steps
+}
+
+func connectInstallAllTail() []Step {
 	return []Step{
-		{"ResolveFormatter", StepResolveFormatter},
-		{"DedupCheck", StepDedupCheck},
-		{"FetchManifest", StepFetchManifest},
-		{"ValidateManifest", StepValidateManifest},
-		{"InferRegistryType", StepInferRegistryType},
-		{"SaveConfig", StepSaveConfig},
-		{"LoadState", StepLoadState},
-		{"SetSingleRepo", StepSetSingleRepo},
-		{"ResolveTools", StepResolveTools},
-		{"SyncSkills", StepConnectSyncError},
+		{Name: "LoadState", Fn: StepLoadState},
+		{Name: "SetSingleRepo", Fn: StepSetSingleRepo},
+		{Name: "ResolveTools", Fn: StepResolveTools},
+		{Name: "SyncSkills", Fn: StepConnectSyncError},
 	}
 }
 
@@ -119,7 +132,7 @@ func StepSaveConfig(_ context.Context, b *Bag) error {
 }
 
 // StepSetSingleRepo sets Repos to just the newly connected repo for the sync tail.
-// Used by ConnectAndSyncTail (create-registry path).
+// Used by the connect install-all path.
 func StepSetSingleRepo(_ context.Context, b *Bag) error {
 	b.Repos = []string{b.RepoArg}
 	b.Formatter.OnConnectSyncing()

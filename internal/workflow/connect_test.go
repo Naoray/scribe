@@ -39,20 +39,31 @@ func TestConnectSteps_DoesNotContainSyncSkills(t *testing.T) {
 	}
 }
 
-func TestConnectAndSyncTail_SkipsLoadConfig(t *testing.T) {
-	tail := workflow.ConnectAndSyncTail()
-	if tail[0].Name == "LoadConfig" {
-		t.Error("ConnectAndSyncTail should not start with LoadConfig")
+func TestConnectInstallAllSteps_ContainsSyncSkills(t *testing.T) {
+	steps := workflow.ConnectInstallAllSteps()
+	last := steps[len(steps)-1]
+	if last.Name != "SyncSkills" {
+		t.Errorf("expected ConnectInstallAllSteps last step SyncSkills, got %s", last.Name)
 	}
-	if tail[0].Name != "ResolveFormatter" {
-		t.Errorf("expected ConnectAndSyncTail to start with ResolveFormatter, got %s", tail[0].Name)
+	if steps[0].Name != "LoadConfig" {
+		t.Errorf("expected ConnectInstallAllSteps to start with LoadConfig, got %s", steps[0].Name)
 	}
 }
 
-func TestConnectAndSyncTail_EndsWithSyncSkills(t *testing.T) {
-	tail := workflow.ConnectAndSyncTail()
+func TestConnectInstallAllTail_SkipsLoadConfig(t *testing.T) {
+	tail := workflow.ConnectInstallAllTail()
+	if tail[0].Name == "LoadConfig" {
+		t.Error("ConnectInstallAllTail should not start with LoadConfig")
+	}
+	if tail[0].Name != "ResolveFormatter" {
+		t.Errorf("expected ConnectInstallAllTail to start with ResolveFormatter, got %s", tail[0].Name)
+	}
+}
+
+func TestConnectInstallAllTail_EndsWithSyncSkills(t *testing.T) {
+	tail := workflow.ConnectInstallAllTail()
 	last := tail[len(tail)-1]
 	if last.Name != "SyncSkills" {
-		t.Errorf("expected ConnectAndSyncTail last step SyncSkills, got %s", last.Name)
+		t.Errorf("expected ConnectInstallAllTail last step SyncSkills, got %s", last.Name)
 	}
 }
