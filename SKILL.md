@@ -35,7 +35,14 @@ curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_a
 # Linux arm64 binary
 curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
 
-# Windows amd64 (PowerShell) — downloads to $env:USERPROFILE\bin and adds it to your PATH
+# Go toolchain — LAST RESORT: installs to $(go env GOBIN) or ~/go/bin, which is
+# often not on PATH. Only use if none of the above work.
+go install github.com/Naoray/scribe/cmd/scribe@latest
+```
+
+**Windows (PowerShell):** Run this instead — downloads to `$env:USERPROFILE\bin` and adds it to your user PATH (use `scribe_windows_arm64.zip` on ARM64 machines):
+
+```powershell
 powershell -Command "
   \$dest = \"\$env:USERPROFILE\bin\";
   New-Item -ItemType Directory -Force -Path \$dest | Out-Null;
@@ -46,11 +53,9 @@ powershell -Command "
     [Environment]::SetEnvironmentVariable('PATH', \"\$dest;\$current\", 'User')
   }
 "
-
-# Go toolchain — LAST RESORT: installs to $(go env GOBIN) or ~/go/bin, which is
-# often not on PATH. Only use if none of the above work.
-go install github.com/Naoray/scribe/cmd/scribe@latest
 ```
+
+After running, open a new terminal for PATH to take effect.
 
 After install, verify `scribe` is reachable via PATH:
 
