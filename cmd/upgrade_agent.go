@@ -70,14 +70,19 @@ func runUpgradeAgentWithDeps(
 		return fmt.Errorf("latest release Naoray/scribe: missing tag")
 	}
 
-	content, err := client.FetchFile(ctx, "Naoray", "scribe", "SKILL.md", tag)
+	tmpl, err := client.FetchFile(ctx, "Naoray", "scribe", "SKILL.md.tmpl", tag)
 	if err != nil {
-		return fmt.Errorf("fetch scribe-agent at %s: %w", tag, err)
+		return fmt.Errorf("fetch scribe-agent template at %s: %w", tag, err)
 	}
 
 	storeDir, err := tools.StoreDir()
 	if err != nil {
 		return fmt.Errorf("resolve store dir: %w", err)
+	}
+
+	content, err := agent.RenderSkillTemplate(tmpl, storeDir, st)
+	if err != nil {
+		return fmt.Errorf("render scribe-agent template: %w", err)
 	}
 
 	changed, err := agent.InstallScribeAgent(storeDir, st, content, tag)
