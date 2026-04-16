@@ -262,11 +262,16 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	resolved := map[string]sync.SkillStatus{}
 
 	syncer := &sync.Syncer{
-		Client:   sync.WrapGitHubClient(b.Client),
-		Provider: b.Provider,
-		Tools:    b.Tools,
-		Executor: &sync.ShellExecutor{},
-		TrustAll: b.TrustAllFlag,
+		Client:      sync.WrapGitHubClient(b.Client),
+		Provider:    b.Provider,
+		Tools:       b.Tools,
+		Executor:    &sync.ShellExecutor{},
+		TrustAll:    b.TrustAllFlag,
+		SkillFilter: b.SkillFilter,
+		// Skip missing skills when no explicit filter/--all: scribe sync only updates
+		// what's already installed. scribe install sets SkillFilter or InstallAllFlag
+		// to opt-in to installing new skills.
+		SkipMissing: !b.InstallAllFlag && len(b.SkillFilter) == 0,
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:
@@ -280,6 +285,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 				b.Formatter.OnSkillInstalled(m.Name, m.Updated)
 			case sync.SkillErrorMsg:
 				b.Formatter.OnSkillError(m.Name, m.Err)
+			case sync.SkillAdoptionNeededMsg:
+				// Handled implicitly by the SkillErrorMsg that follows it.
 			case sync.LegacyFormatMsg:
 				b.Formatter.OnLegacyFormat(m.Repo)
 			case sync.SyncCompleteMsg:

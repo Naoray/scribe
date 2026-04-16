@@ -13,11 +13,26 @@ import (
 )
 
 // ConnectSteps returns the step list for the connect command.
-// The tail reuses sync steps for the auto-sync after connecting,
-// with error recovery (sync failures during connect are warnings in TTY mode).
+// It saves the registry config and shows available skills — it does NOT
+// auto-install anything. Users install skills explicitly with `scribe add`.
 func ConnectSteps() []Step {
 	return []Step{
 		{"LoadConfig", StepLoadConfig},
+		{"ResolveFormatter", StepResolveFormatter},
+		{"DedupCheck", StepDedupCheck},
+		{"FetchManifest", StepFetchManifest},
+		{"ValidateManifest", StepValidateManifest},
+		{"InferRegistryType", StepInferRegistryType},
+		{"SaveConfig", StepSaveConfig},
+		{"ShowAvailable", StepShowAvailableSkills},
+	}
+}
+
+// ConnectAndSyncTail returns connect + sync steps starting from
+// ResolveFormatter, for use by create-registry where the user just
+// authored the skills and wants them installed immediately.
+func ConnectAndSyncTail() []Step {
+	return []Step{
 		{"ResolveFormatter", StepResolveFormatter},
 		{"DedupCheck", StepDedupCheck},
 		{"FetchManifest", StepFetchManifest},
@@ -29,12 +44,6 @@ func ConnectSteps() []Step {
 		{"ResolveTools", StepResolveTools},
 		{"SyncSkills", StepConnectSyncError},
 	}
-}
-
-// ConnectTail returns the connect steps starting from ResolveFormatter — for use
-// by create-registry when Config and Client are already populated.
-func ConnectTail() []Step {
-	return ConnectSteps()[1:] // skip LoadConfig
 }
 
 func StepDedupCheck(_ context.Context, b *Bag) error {
@@ -110,9 +119,21 @@ func StepSaveConfig(_ context.Context, b *Bag) error {
 }
 
 // StepSetSingleRepo sets Repos to just the newly connected repo for the sync tail.
+// Used by ConnectAndSyncTail (create-registry path).
 func StepSetSingleRepo(_ context.Context, b *Bag) error {
 	b.Repos = []string{b.RepoArg}
 	b.Formatter.OnConnectSyncing()
+	return nil
+}
+
+// StepShowAvailableSkills prints how many skills the registry offers and
+// tells the user how to install them. Used by the plain connect path.
+func StepShowAvailableSkills(_ context.Context, b *Bag) error {
+	count := 0
+	if b.manifest != nil {
+		count = len(b.manifest.Catalog)
+	}
+	b.Formatter.OnConnectAvailable(b.RepoArg, count)
 	return nil
 }
 

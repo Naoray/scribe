@@ -122,8 +122,19 @@ func (m listModel) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	text := typedText(msg)
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		if m.searchMode || m.search != "" {
+			m = m.resetSearch()
+			return m, nil
+		}
+		m.quitting = true
+		return m, tea.Quit
+	case "q":
+		if m.searchMode {
+			m = m.appendSearch("q")
+			return m, nil
+		}
+		if m.search != "" {
 			m = m.resetSearch()
 			return m, nil
 		}
@@ -194,7 +205,16 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	switch key {
-	case "ctrl+c", "q":
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "q":
+		if m.searchMode {
+			if m.focus == focusList {
+				m = m.appendSearch("q")
+			}
+			return m, nil
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case "esc", "escape":

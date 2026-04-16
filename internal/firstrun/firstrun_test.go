@@ -1,6 +1,7 @@
 package firstrun_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -72,20 +73,24 @@ func TestApplyBuiltins_FirstRunAddsAllAndMarksVersion(t *testing.T) {
 	if !firstRun {
 		t.Error("first run should report firstRun=true")
 	}
-	if len(added) != 2 {
-		t.Errorf("first run should add 2 builtins, got %d: %v", len(added), added)
+	if len(added) != 3 {
+		t.Errorf("first run should add 3 builtins, got %d: %v", len(added), added)
 	}
 	if cfg.FindRegistry("Naoray/scribe") != nil {
 		t.Error("Naoray/scribe must not be added as a builtin (scribe-agent is binary-managed)")
+	}
+	if cfg.FindRegistry("mattpocock/skills") == nil {
+		t.Error("mattpocock/skills should be a builtin")
 	}
 	if cfg.BuiltinsVersion == 0 {
 		t.Error("BuiltinsVersion must be set after first ApplyBuiltins call")
 	}
 }
 
-func TestApplyBuiltins_ExistingUserV3DoesNotGainNewBuiltins(t *testing.T) {
-	// A user who was on builtins v3 already has anthropics/skills and expo/skills.
-	// ApplyBuiltins should just bump the version without adding anything new.
+func TestApplyBuiltins_ExistingUserV3GainsMattpocock(t *testing.T) {
+	// A user on v3 has Naoray/scribe + anthropics/skills + expo/skills.
+	// ApplyBuiltins should add mattpocock/skills (the new v5 entry).
+	// Naoray/scribe stays in config until RemoveNaorayScribeRegistry runs separately.
 	cfg := &config.Config{
 		BuiltinsVersion: 3,
 		Registries: []config.RegistryConfig{
@@ -96,11 +101,42 @@ func TestApplyBuiltins_ExistingUserV3DoesNotGainNewBuiltins(t *testing.T) {
 	}
 	added, firstRun := firstrun.ApplyBuiltins(cfg)
 
-	if len(added) != 0 {
-		t.Errorf("no new builtins should be added for v3 user, got %v", added)
+	if len(added) != 1 || added[0] != "mattpocock/skills" {
+		t.Errorf("only mattpocock/skills should be backfilled, got %v", added)
 	}
 	if firstRun {
 		t.Error("existing user should report firstRun=false")
+	}
+	if cfg.FindRegistry("mattpocock/skills") == nil {
+		t.Error("mattpocock/skills not in config after backfill")
+	}
+}
+
+func TestApplyBuiltins_ManuallyConnectedNotDuplicated(t *testing.T) {
+	// User already ran `scribe registry connect mattpocock/skills` before it became a builtin.
+	cfg := &config.Config{
+		BuiltinsVersion: 3, // pre-mattpocock version
+		Registries: []config.RegistryConfig{
+			{Repo: "Naoray/scribe", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "anthropics/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "expo/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "mattpocock/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: false},
+		},
+	}
+	added, _ := firstrun.ApplyBuiltins(cfg)
+
+	if len(added) != 0 {
+		t.Errorf("expected nothing added (already connected manually), got %v", added)
+	}
+
+	count := 0
+	for _, r := range cfg.Registries {
+		if strings.EqualFold(r.Repo, "mattpocock/skills") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("mattpocock/skills appears %d times in config, want exactly 1", count)
 	}
 }
 

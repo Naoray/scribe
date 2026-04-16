@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,6 +41,18 @@ type Syncer struct {
 	// ModifiedStrategy controls what to do when an outdated skill also has
 	// unsynced local edits on disk.
 	ModifiedStrategy ModifiedStrategy
+
+	// SkillFilter, if non-nil, restricts the sync to only the named skills.
+	// Skills not in the list are skipped entirely (not even resolved/emitted).
+	// Used by `scribe install` to install specific skills.
+	SkillFilter []string
+
+	// SkipMissing prevents installing skills that are not yet locally installed.
+	// When true, StatusMissing skills are silently skipped — only updates and
+	// removals are processed. Set by `scribe sync` to implement the opt-in
+	// model: new skills from a registry are not auto-installed; the user must
+	// explicitly run `scribe add <skill>` or `scribe install` to install them.
+	SkipMissing bool
 
 	// TrustAll skips approval prompts for packages (--trust-all flag).
 	TrustAll bool
@@ -218,6 +231,19 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	if err != nil {
 		return fmt.Errorf("sync %s: %w", teamRepo, err)
 	}
+	if len(s.SkillFilter) > 0 {
+		allowed := make(map[string]bool, len(s.SkillFilter))
+		for _, n := range s.SkillFilter {
+			allowed[n] = true
+		}
+		filtered := statuses[:0]
+		for _, sk := range statuses {
+			if allowed[sk.Name] {
+				filtered = append(filtered, sk)
+			}
+		}
+		statuses = filtered
+	}
 	return s.apply(ctx, teamRepo, statuses, st)
 }
 
@@ -236,6 +262,11 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			summary.Skipped++
 
 		case StatusMissing, StatusOutdated:
+			if sk.Status == StatusMissing && s.SkipMissing {
+				s.emit(SkillSkippedMsg{Name: sk.Name})
+				summary.Skipped++
+				continue
+			}
 			if sk.IsPackage {
 				s.applyPackage(ctx, sk, teamRepo, st, &summary)
 				continue
@@ -387,7 +418,19 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			for _, t := range effectiveTools {
 				links, err := t.Install(sk.Name, canonicalDir)
 				if err != nil {
-					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+					if errors.Is(err, tools.ErrRealDirectoryExists) {
+						existing, pathErr := t.SkillPath(sk.Name)
+						if pathErr != nil {
+							s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+						} else {
+							s.emit(SkillErrorMsg{
+								Name: sk.Name,
+								Err:  fmt.Errorf("link to %s: real directory at %s: run `scribe adopt %s` first", t.Name(), existing, sk.Name),
+							})
+						}
+					} else {
+						s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+					}
 					summary.Failed++
 					toolFailed = true
 					break

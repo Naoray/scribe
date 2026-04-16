@@ -131,6 +131,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(
 		newListCommand(),
 		newBrowseCommand(),
+		newInstallCommand(),
 		newAddCommand(),
 		newRemoveCommand(),
 		newSyncCommand(),
@@ -149,6 +150,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(
 		newCreateCommand(),
 		newExplainCommand(),
+		newDoctorCommand(),
 		newUpgradeCommand(),
 		newUpgradeAgentCommand(),
 	)

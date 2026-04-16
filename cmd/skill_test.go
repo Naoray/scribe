@@ -273,3 +273,136 @@ func TestSkillRepair_ToolWins(t *testing.T) {
 		t.Fatalf("canonical SKILL.md = %q, want generated codex frontmatter", content)
 	}
 }
+
+func TestSkillTools_ShowState(t *testing.T) {
+	seedSkillEnv(t)
+
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+}
+
+func TestSkillTools_Enable(t *testing.T) {
+	seedSkillEnv(t)
+
+	// First pin to claude only.
+	pin := newSkillEditCommand()
+	pin.SetArgs([]string{"commit", "--tools", "claude", "--json"})
+	if err := pin.Execute(); err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+
+	// Now enable codex via skill tools.
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit", "--enable", "codex"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	st, _ := state.Load()
+	got := st.Installed["commit"]
+	if got.ToolsMode != state.ToolsModePinned {
+		t.Errorf("ToolsMode = %q, want pinned", got.ToolsMode)
+	}
+	for _, tool := range got.Tools {
+		if tool == "codex" {
+			return
+		}
+	}
+	t.Errorf("codex not in tools: %v", got.Tools)
+}
+
+func TestSkillTools_Disable(t *testing.T) {
+	seedSkillEnv(t)
+
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit", "--disable", "cursor"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	st, _ := state.Load()
+	got := st.Installed["commit"]
+	for _, tool := range got.Tools {
+		if tool == "cursor" {
+			t.Errorf("cursor still present after --disable: %v", got.Tools)
+		}
+	}
+}
+
+func TestSkillTools_DisableLastTool_ReturnsError(t *testing.T) {
+	seedSkillEnv(t)
+
+	// Pin to a single tool first.
+	pin := newSkillEditCommand()
+	pin.SetArgs([]string{"commit", "--tools", "claude", "--json"})
+	if err := pin.Execute(); err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit", "--disable", "claude"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when disabling last tool")
+	}
+	if !strings.Contains(err.Error(), "--reset") {
+		t.Errorf("error should mention --reset, got: %v", err)
+	}
+}
+
+func TestSkillTools_Reset(t *testing.T) {
+	seedSkillEnv(t)
+
+	// Pin first.
+	pin := newSkillEditCommand()
+	pin.SetArgs([]string{"commit", "--tools", "claude", "--json"})
+	if err := pin.Execute(); err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit", "--reset"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	st, _ := state.Load()
+	got := st.Installed["commit"]
+	if got.ToolsMode != state.ToolsModeInherit {
+		t.Errorf("ToolsMode = %q, want inherit after --reset", got.ToolsMode)
+	}
+}
+
+func TestSkillTools_RejectsPackage(t *testing.T) {
+	seedSkillEnv(t)
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill := st.Installed["commit"]
+	skill.Type = "package"
+	st.Installed["commit"] = skill
+	if err := st.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit", "--enable", "claude"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for package skill")
+	}
+}
+
+func TestSkillTools_JSONOutput(t *testing.T) {
+	seedSkillEnv(t)
+
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+}
