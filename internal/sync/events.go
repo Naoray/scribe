@@ -52,14 +52,37 @@ type SkillStatus struct {
 }
 
 // DisplayVersion returns the best human-readable version for this skill.
+// Prefers semver tags as-is, else a short SHA when the ref is a branch/HEAD,
+// else the installed revision counter.
 func (sk SkillStatus) DisplayVersion() string {
 	if sk.LoadoutRef != "" {
-		return sk.LoadoutRef
+		if isVersionTag(sk.LoadoutRef) {
+			return sk.LoadoutRef
+		}
+		if sk.LatestSHA != "" {
+			return ShortSHA(sk.LatestSHA)
+		}
+		if sk.LoadoutRef != "HEAD" {
+			return sk.LoadoutRef
+		}
 	}
 	if sk.Installed != nil {
 		return sk.Installed.DisplayVersion()
 	}
 	return ""
+}
+
+// isVersionTag reports whether a ref looks like a semver tag (v1.2.3).
+func isVersionTag(ref string) bool {
+	return strings.HasPrefix(ref, "v") && strings.ContainsRune(ref, '.')
+}
+
+// ShortSHA truncates a commit SHA to 7 characters for display.
+func ShortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // DisplayAuthor returns the author or "—" if unknown.

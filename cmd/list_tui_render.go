@@ -149,11 +149,13 @@ func (m listModel) viewSplit() string {
 		} else {
 			b.WriteString(ltDimStyle.Render("↑↓ browse skills · →/enter actions · esc close · q quit") + "\n")
 		}
+	case m.focus == focusPreview:
+		b.WriteString(ltDimStyle.Render("↑↓ scroll preview · ←/tab actions · esc close") + "\n")
 	default:
 		if m.isBrowseMode() {
 			b.WriteString(ltDimStyle.Render("↑↓ choose install · enter run · ←/tab back to list · esc close") + "\n")
 		} else {
-			b.WriteString(ltDimStyle.Render("↑↓ pick action · enter run · ←/tab back to list · esc close") + "\n")
+			b.WriteString(ltDimStyle.Render("↑↓ pick action · ↓ preview · enter run · ←/tab back · esc close") + "\n")
 		}
 	}
 	return b.String()
@@ -449,39 +451,7 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	}
 	b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
 
-	type kv struct{ key, value string }
-	var pairs []kv
-
-	if row.HasStatus {
-		pairs = append(pairs, kv{"Status", row.Status.Display().Label})
-	}
-	if row.Local != nil && !row.Managed {
-		pairs = append(pairs, kv{"Managed", "no"})
-	}
-	if row.Version != "" {
-		pairs = append(pairs, kv{"Version", row.Version})
-	}
-	if row.Author != "" {
-		pairs = append(pairs, kv{"Author", row.Author})
-	}
-	if row.Group != "" {
-		pairs = append(pairs, kv{"Registry", row.Group})
-	}
-	if row.Origin == state.OriginLocal {
-		pairs = append(pairs, kv{"Source", "(local)"})
-	}
-	if len(row.Targets) > 0 {
-		pairs = append(pairs, kv{"Tools", strings.Join(row.Targets, ", ")})
-	}
-	if row.Local != nil && row.Local.LocalPath != "" {
-		path := row.Local.LocalPath
-		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home) {
-			path = "~" + strings.TrimPrefix(path, home)
-		}
-		pairs = append(pairs, kv{"Path", path})
-	}
-
-	for _, p := range pairs {
+	for _, p := range m.metadataPairsForRow(row) {
 		b.WriteString(ltMetaKeyStyle.Render(p.key) + ltMetaValStyle.Render(p.value) + "\n")
 	}
 
@@ -541,10 +511,111 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	}
 
 	if row.Excerpt != "" {
-		b.WriteString(ltDivStyle.Render(strings.Repeat("─", width-2)) + "\n")
-		b.WriteString(renderExcerptPreview(row.Excerpt, width-2) + "\n")
+		b.WriteString(m.renderPreviewSection(row, width-2) + "\n")
 	}
 	return b.String()
+}
+
+func (m listModel) renderPreviewSection(row listRow, width int) string {
+	lines := buildExcerptLines(row.Excerpt, width)
+	focused := m.focus == focusPreview
+
+	heading := "preview"
+	headingStyle := ltDimStyle
+	if focused {
+		heading = "▸ preview"
+		headingStyle = ltCursorStyle
+	}
+
+	var out strings.Builder
+	out.WriteString(ltDivStyle.Render(strings.Repeat("─", width)) + "\n")
+	out.WriteString(headingStyle.Render(heading))
+	if len(lines) > 0 && focused {
+		out.WriteString(" " + ltDimStyle.Render(fmt.Sprintf("%d/%d", m.clampedExcerptOffset(lines)+1, len(lines))))
+	}
+	out.WriteString("\n")
+
+	if len(lines) == 0 {
+		out.WriteString(ltDimStyle.Render("(empty)"))
+		return out.String()
+	}
+
+	offset := m.clampedExcerptOffset(lines)
+	if offset > 0 {
+		out.WriteString(ltDimStyle.Render(fmt.Sprintf("↑ %d more above", offset)) + "\n")
+	}
+	out.WriteString(strings.Join(lines[offset:], "\n"))
+	return out.String()
+}
+
+func (m listModel) clampedExcerptOffset(lines []string) int {
+	if m.excerptOffset < 0 {
+		return 0
+	}
+	if len(lines) == 0 {
+		return 0
+	}
+	if m.excerptOffset > len(lines)-1 {
+		return len(lines) - 1
+	}
+	return m.excerptOffset
+}
+
+type metaPair struct{ key, value string }
+
+// metadataPairsForRow collects the Status/Version/Author/... key-value pairs
+// shown in the detail pane header. Declarative table — each row is a single
+// call; empty values are dropped by the closure so conditions live at the
+// call site as expressions, not nested if-blocks.
+func (m listModel) metadataPairsForRow(row listRow) []metaPair {
+	pairs := make([]metaPair, 0, 8)
+	add := func(key, value string) {
+		if value != "" {
+			pairs = append(pairs, metaPair{key, value})
+		}
+	}
+
+	add("Status", statusLabel(row))
+	add("Managed", managedLabel(row))
+	add("Version", row.Version)
+	add("Author", row.Author)
+	add("Registry", row.Group)
+	add("Source", originLabel(row.Origin))
+	add("Tools", strings.Join(row.Targets, ", "))
+	add("Path", skillPathLabel(row))
+	return pairs
+}
+
+func statusLabel(row listRow) string {
+	if !row.HasStatus {
+		return ""
+	}
+	return row.Status.Display().Label
+}
+
+func managedLabel(row listRow) string {
+	if row.Local == nil || row.Managed {
+		return ""
+	}
+	return "no"
+}
+
+func originLabel(o state.Origin) string {
+	if o == state.OriginLocal {
+		return "(local)"
+	}
+	return ""
+}
+
+func skillPathLabel(row listRow) string {
+	if row.Local == nil || row.Local.LocalPath == "" {
+		return ""
+	}
+	path := row.Local.LocalPath
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home) {
+		path = "~" + strings.TrimPrefix(path, home)
+	}
+	return path
 }
 
 func (m listModel) renderToolsEditor(width int) string {
@@ -610,7 +681,9 @@ func (m listModel) renderToolsEditor(width int) string {
 	return lipgloss.NewStyle().Width(width - 2).Render(strings.TrimRight(b.String(), "\n"))
 }
 
-func renderExcerptPreview(excerpt string, width int) string {
+// buildExcerptLines parses the raw SKILL.md excerpt into styled, width-wrapped
+// display lines. Each slice entry is one visual line suitable for scrolling.
+func buildExcerptLines(excerpt string, width int) []string {
 	var lines []string
 	prevWasHeading := false
 	for _, raw := range strings.Split(excerpt, "\n") {
@@ -652,7 +725,9 @@ func renderExcerptPreview(excerpt string, width int) string {
 		if text == "" {
 			continue
 		}
-		lines = append(lines, renderInlineCode(style, text))
+		for _, wrapped := range wrapExcerptLine(text, width) {
+			lines = append(lines, renderInlineCode(style, wrapped))
+		}
 		if isHeading {
 			lines = append(lines, "")
 		} else if prevWasHeading {
@@ -664,7 +739,33 @@ func renderExcerptPreview(excerpt string, width int) string {
 	for len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
-	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+	return lines
+}
+
+// wrapExcerptLine splits a single plain-text line into visual lines that fit
+// within the supplied cell width. Keeps plain text so style wrappers apply to
+// each piece uniformly.
+func wrapExcerptLine(text string, width int) []string {
+	if width <= 0 || runewidth.StringWidth(text) <= width {
+		return []string{text}
+	}
+	var out []string
+	remaining := text
+	for runewidth.StringWidth(remaining) > width {
+		cut := len(remaining)
+		for cut > 0 && runewidth.StringWidth(remaining[:cut]) > width {
+			cut--
+		}
+		if cut <= 0 {
+			cut = 1
+		}
+		out = append(out, remaining[:cut])
+		remaining = remaining[cut:]
+	}
+	if remaining != "" {
+		out = append(out, remaining)
+	}
+	return out
 }
 
 func renderInlineCode(base lipgloss.Style, text string) string {

@@ -42,6 +42,7 @@ type detailFocus int
 const (
 	focusList detailFocus = iota
 	focusActions
+	focusPreview
 )
 
 type listRow = workflow.ListRow
@@ -62,6 +63,7 @@ type listModel struct {
 	selected       bool
 	focus          detailFocus
 	actionCursor   int
+	excerptOffset  int
 	substate       listSubstate
 	toolCursor     int
 	toolStatuses   []tools.Status
