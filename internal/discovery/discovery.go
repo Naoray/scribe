@@ -112,7 +112,17 @@ func OnDisk(st *state.State) ([]Skill, error) {
 		skills = append(skills, found...)
 	}
 
-	// 3. Include state-tracked skills not found on disk (orphans).
+	// 3. Scan Claude Code plugin cache. Plugin-installed skills live under
+	// ~/.claude/plugins/cache/<plugin>/<name>/<hash>/.../SKILL.md with a
+	// layout that varies per plugin. Walk the tree, identify skills by
+	// frontmatter name, dedup against names we've already seen.
+	pluginFound, pluginErr := scanPluginCache(filepath.Join(home, ".claude", "plugins", "cache"), seen, st, scribeSkills)
+	if pluginErr != nil {
+		return nil, pluginErr
+	}
+	skills = append(skills, pluginFound...)
+
+	// 4. Include state-tracked skills not found on disk (orphans).
 	for name, installed := range st.Installed {
 		if seen[name] {
 			continue
@@ -142,6 +152,92 @@ func OnDisk(st *state.State) ([]Skill, error) {
 
 	return skills, nil
 }
+
+// pluginCacheMaxDepth caps WalkDir recursion. Real plugin layouts top out
+// around 6-7 segments below the cache root; deeper trees are noise (vendored
+// node_modules, nested git checkouts) and not worth scanning.
+const pluginCacheMaxDepth = 8
+
+// scanPluginCache walks ~/.claude/plugins/cache/ for SKILL.md files. The
+// directory layout under each plugin is plugin-defined and inconsistent
+// (some put SKILL.md at the plugin root, others under skills/<name>/, others
+// under plugins/<name>/skills/<name>/), so a fixed-glob scan misses cases.
+// We walk, parse the frontmatter `name`, and dedup against `seen` so a skill
+// already found in ~/.scribe/skills/ or a tool dir wins.
+func scanPluginCache(cacheDir string, seen map[string]bool, st *state.State, scribeSkills string) ([]Skill, error) {
+	info, err := os.Stat(cacheDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat %s: %w", cacheDir, err)
+	}
+	if !info.IsDir() {
+		return nil, nil
+	}
+
+	var skills []Skill
+	walkErr := filepath.WalkDir(cacheDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			// Permission errors on a subtree shouldn't break discovery.
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		// Bound recursion depth relative to cacheDir.
+		rel, _ := filepath.Rel(cacheDir, path)
+		depth := 0
+		if rel != "." {
+			depth = strings.Count(rel, string(filepath.Separator)) + 1
+		}
+
+		if d.IsDir() {
+			name := d.Name()
+			// Stale staging dirs left by Claude Code's plugin installer.
+			if strings.HasPrefix(name, "temp_git_") {
+				return fs.SkipDir
+			}
+			if reservedNames[name] {
+				return fs.SkipDir
+			}
+			if depth > pluginCacheMaxDepth {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		if d.Name() != "SKILL.md" {
+			return nil
+		}
+
+		skillDir := filepath.Dir(path)
+		meta := readSkillMetadata(skillDir)
+		skillName := meta.Name
+		if skillName == "" {
+			skillName = filepath.Base(skillDir)
+		}
+		if !validSkillName.MatchString(skillName) || reservedNames[skillName] {
+			return nil
+		}
+		if seen[skillName] {
+			return nil
+		}
+
+		seen[skillName] = true
+		skills = append(skills, buildSkill(skillName, skillDir, filepath.Dir(skillDir), toolClaude, st, scribeSkills))
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk %s: %w", cacheDir, walkErr)
+	}
+	return skills, nil
+}
+
+// toolClaude is the install-target identifier for Claude Code. Mirrors
+// internal/tools.toolClaude — duplicated to avoid an import cycle.
+const toolClaude = "claude"
 
 func scanToolSkills(dir, target string, seen map[string]bool, st *state.State, scribeSkills string) ([]Skill, error) {
 	entries, err := os.ReadDir(dir)

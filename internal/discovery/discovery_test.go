@@ -431,6 +431,138 @@ func TestOnDiskManagedField(t *testing.T) {
 	})
 }
 
+func TestOnDiskPluginCache(t *testing.T) {
+	t.Run("discovers skill from claude plugin cache", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		// Mimic the Claude Code plugin layout for caveman:
+		// ~/.claude/plugins/cache/<plugin>/<name>/<hash>/skills/<skill>/SKILL.md
+		pluginSkill := filepath.Join(home, ".claude", "plugins", "cache", "caveman", "caveman", "abc123", "skills", "caveman")
+		if err := os.MkdirAll(pluginSkill, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nname: caveman\ndescription: Ultra-compressed mode\n---\n\n# Caveman\n"
+		if err := os.WriteFile(filepath.Join(pluginSkill, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		// State tracks caveman as a plugin-installed package with no symlinks.
+		st := &state.State{Installed: map[string]state.InstalledSkill{
+			"caveman": {Type: "package", Revision: 1},
+		}}
+
+		skills, err := OnDisk(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var found *Skill
+		for i := range skills {
+			if skills[i].Name == "caveman" {
+				found = &skills[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("caveman not discovered from plugin cache; got %+v", skills)
+		}
+		if found.LocalPath != pluginSkill {
+			t.Errorf("LocalPath: got %q, want %q", found.LocalPath, pluginSkill)
+		}
+	})
+
+	t.Run("dedups by frontmatter name across alternate plugin layouts", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		base := filepath.Join(home, ".claude", "plugins", "cache", "caveman", "caveman", "abc123")
+		// Three real layouts caveman ships at the same time.
+		for _, sub := range []string{
+			filepath.Join("caveman"),
+			filepath.Join("skills", "caveman"),
+			filepath.Join("plugins", "caveman", "skills", "caveman"),
+		} {
+			dir := filepath.Join(base, sub)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			content := "---\nname: caveman\ndescription: dup\n---\n"
+			if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		st := &state.State{Installed: map[string]state.InstalledSkill{}}
+		skills, err := OnDisk(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		count := 0
+		for _, sk := range skills {
+			if sk.Name == "caveman" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("expected 1 caveman entry, got %d", count)
+		}
+	})
+
+	t.Run("scribe store wins over plugin cache", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		storeDir := filepath.Join(home, ".scribe", "skills", "caveman")
+		os.MkdirAll(storeDir, 0o755)
+		os.WriteFile(filepath.Join(storeDir, "SKILL.md"), []byte("---\nname: caveman\n---\n# from store\n"), 0o644)
+
+		pluginDir := filepath.Join(home, ".claude", "plugins", "cache", "caveman", "caveman", "abc", "skills", "caveman")
+		os.MkdirAll(pluginDir, 0o755)
+		os.WriteFile(filepath.Join(pluginDir, "SKILL.md"), []byte("---\nname: caveman\n---\n# from plugin\n"), 0o644)
+
+		st := &state.State{Installed: map[string]state.InstalledSkill{}}
+		skills, err := OnDisk(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found *Skill
+		for i := range skills {
+			if skills[i].Name == "caveman" {
+				found = &skills[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatal("caveman not found")
+		}
+		if found.LocalPath != storeDir {
+			t.Errorf("expected scribe store to win; LocalPath=%q want=%q", found.LocalPath, storeDir)
+		}
+	})
+
+	t.Run("skips temp_git staging dirs", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		stale := filepath.Join(home, ".claude", "plugins", "cache", "temp_git_999", "skills", "ghost")
+		os.MkdirAll(stale, 0o755)
+		os.WriteFile(filepath.Join(stale, "SKILL.md"), []byte("---\nname: ghost\n---\n"), 0o644)
+
+		st := &state.State{Installed: map[string]state.InstalledSkill{}}
+		skills, err := OnDisk(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sk := range skills {
+			if sk.Name == "ghost" {
+				t.Fatalf("ghost from temp_git_* dir should be skipped, got %+v", sk)
+			}
+		}
+	})
+}
+
 func TestHasConflictMarkers(t *testing.T) {
 	tests := []struct {
 		name    string
