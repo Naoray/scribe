@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/state"
