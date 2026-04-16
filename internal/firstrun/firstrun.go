@@ -2,12 +2,15 @@ package firstrun
 
 import (
 	"bufio"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/Naoray/scribe/internal/adopt"
 	"github.com/Naoray/scribe/internal/config"
@@ -19,25 +22,36 @@ import (
 const removeOpenAICodexMigration = "remove_openai_codex_v1"
 const renameBuiltinReposMigration = "rename_builtin_repos_v1"
 
-// builtinRepos are well-known public registries auto-added during first run.
-var builtinRepos = []string{
-	"Naoray/scribe",
-	"anthropics/skills",
-	"expo/skills",
-	"mattpocock/skills",
+//go:embed default_registries.yaml
+var defaultRegistriesYAML []byte
+
+// defaultRegistriesConfig is the shape of default_registries.yaml.
+type defaultRegistriesConfig struct {
+	Version    int `yaml:"version"`
+	Registries []struct {
+		Repo string `yaml:"repo"`
+		Type string `yaml:"type"`
+	} `yaml:"registries"`
 }
 
-// currentBuiltinsVersion bumps whenever builtinRepos changes.
-const currentBuiltinsVersion = 4
+// parsedDefaults is populated once at init from the embedded YAML.
+var parsedDefaults = func() defaultRegistriesConfig {
+	var cfg defaultRegistriesConfig
+	if err := yaml.Unmarshal(defaultRegistriesYAML, &cfg); err != nil {
+		panic(fmt.Sprintf("firstrun: parse default_registries.yaml: %v", err))
+	}
+	return cfg
+}()
 
-// BuiltinRegistries returns RegistryConfig entries for built-in registries.
+// BuiltinRegistries returns RegistryConfig entries for built-in registries
+// as declared in default_registries.yaml.
 func BuiltinRegistries() []config.RegistryConfig {
-	registries := make([]config.RegistryConfig, len(builtinRepos))
-	for i, repo := range builtinRepos {
+	registries := make([]config.RegistryConfig, len(parsedDefaults.Registries))
+	for i, r := range parsedDefaults.Registries {
 		registries[i] = config.RegistryConfig{
-			Repo:    repo,
+			Repo:    r.Repo,
 			Enabled: true,
-			Type:    config.RegistryTypeCommunity,
+			Type:    r.Type,
 			Builtin: true,
 		}
 	}
@@ -133,7 +147,7 @@ func promptYN(in io.Reader, out io.Writer, question string, defaultYes bool) boo
 // firstRun is true only when the config had no prior builtins version.
 func ApplyBuiltins(cfg *config.Config) ([]string, bool) {
 	firstRun := cfg.BuiltinsVersion == 0
-	if cfg.BuiltinsVersion >= currentBuiltinsVersion {
+	if cfg.BuiltinsVersion >= parsedDefaults.Version {
 		return nil, false
 	}
 
@@ -144,7 +158,7 @@ func ApplyBuiltins(cfg *config.Config) ([]string, bool) {
 			added = append(added, builtin.Repo)
 		}
 	}
-	cfg.BuiltinsVersion = currentBuiltinsVersion
+	cfg.BuiltinsVersion = parsedDefaults.Version
 	return added, firstRun
 }
 
