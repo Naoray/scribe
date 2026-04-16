@@ -743,27 +743,27 @@ func buildExcerptLines(excerpt string, width int) []string {
 }
 
 // wrapExcerptLine splits a single plain-text line into visual lines that fit
-// within the supplied cell width. Keeps plain text so style wrappers apply to
-// each piece uniformly.
+// within the supplied cell width. Cuts on rune boundaries so multi-byte
+// characters (emoji, CJK, accents) stay intact.
 func wrapExcerptLine(text string, width int) []string {
 	if width <= 0 || runewidth.StringWidth(text) <= width {
 		return []string{text}
 	}
 	var out []string
-	remaining := text
-	for runewidth.StringWidth(remaining) > width {
-		cut := len(remaining)
-		for cut > 0 && runewidth.StringWidth(remaining[:cut]) > width {
-			cut--
+	var segment strings.Builder
+	segWidth := 0
+	for _, r := range text {
+		rw := runewidth.RuneWidth(r)
+		if segWidth+rw > width && segment.Len() > 0 {
+			out = append(out, segment.String())
+			segment.Reset()
+			segWidth = 0
 		}
-		if cut <= 0 {
-			cut = 1
-		}
-		out = append(out, remaining[:cut])
-		remaining = remaining[cut:]
+		segment.WriteRune(r)
+		segWidth += rw
 	}
-	if remaining != "" {
-		out = append(out, remaining)
+	if segment.Len() > 0 {
+		out = append(out, segment.String())
 	}
 	return out
 }

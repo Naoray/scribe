@@ -385,8 +385,8 @@ func (m listModel) updatePreviewFocus(row listRow, key string) listModel {
 }
 
 // previewMaxOffset returns the largest valid scroll offset for the excerpt.
-// Keeping a small tail visible at the bottom feels nicer than letting the
-// last line scroll off entirely.
+// At max offset the final line sits at the top of the pane; we stop there
+// rather than letting it scroll off entirely.
 func previewMaxOffset(excerpt string) int {
 	total := strings.Count(excerpt, "\n") + 1
 	if total <= 1 {
