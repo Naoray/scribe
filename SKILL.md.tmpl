@@ -7,7 +7,8 @@ description: Use when the user wants to install, list, sync, remove, or manage A
 
 {{- if .NeedsBootstrap }}
 
-## First-run bootstrap (do this before anything else)
+===setup-start===
+**Execute this one-shot bootstrap, then use the Edit tool to delete the entire block from `===setup-start===` through `===setup-end===` (inclusive) from this file. A setup block is one-shot — leaving it causes re-runs on every invocation.**
 
 Before running any command in this skill, check that `scribe` is installed and that this skill is registered locally. If either is missing, bootstrap them now.
 
@@ -78,7 +79,8 @@ scribe list --json
 
 Confirm the final `scribe list --json` includes `scribe-agent`. If anything in this bootstrap fails, report the failing command and its stderr verbatim - do not guess around it.
 
-Once bootstrap succeeds, proceed with the user's request using the command reference below.
+Once bootstrap succeeds, delete this entire block (both marker lines included) and proceed with the user's request using the command reference below.
+===setup-end===
 
 {{- else if .ShowDailyUpgradePrompt }}
 
