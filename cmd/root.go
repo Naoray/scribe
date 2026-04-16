@@ -7,6 +7,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/Naoray/scribe/internal/agent"
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/firstrun"
 	"github.com/Naoray/scribe/internal/storemigrate"
@@ -95,9 +96,23 @@ func newRootCmd() *cobra.Command {
 					return err
 				}
 			}
-			if builtinsFirstRun || removedRan || renamedRan || naorayRan {
+			agentStateDirty := builtinsFirstRun || removedRan || renamedRan || naorayRan
+			if agentStateDirty {
 				if err := st.Save(); err != nil {
 					return err
+				}
+			}
+
+			// Auto-install or refresh the embedded scribe-agent skill on every run.
+			// EnsureScribeAgent is idempotent — it skips the write when the content
+			// matches the embedded version, so there is no meaningful overhead.
+			if storeDir, sdErr := tools.StoreDir(); sdErr == nil {
+				if changed, ensureErr := agent.EnsureScribeAgent(storeDir, st, cfg); ensureErr != nil {
+					fmt.Fprintf(c.ErrOrStderr(), "scribe: scribe-agent bootstrap warning: %v\n", ensureErr)
+				} else if changed {
+					if err := st.Save(); err != nil {
+						fmt.Fprintf(c.ErrOrStderr(), "scribe: scribe-agent state save warning: %v\n", err)
+					}
 				}
 			}
 

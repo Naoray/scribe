@@ -19,6 +19,23 @@ func EnsureScribeAgent(store string, st *state.State, cfg *config.Config) (bool,
 	if cfg != nil && !cfg.ScribeAgent.Enabled {
 		return false, nil
 	}
+	// Fast path: same binary version already on disk and files intact — skip render.
+	// renderScribeAgentForStore uses time.Now() (for ShowDailyUpgradePrompt), so
+	// checking the version first prevents spurious writes every 24 h when the
+	// cooldown window flips and the rendered content no longer hash-matches.
+	// We still verify both files exist and the base file passes frontmatter
+	// validation so that corruption or manual edits are repaired.
+	if installed, ok := st.Installed["scribe-agent"]; ok &&
+		installed.Origin == state.OriginBootstrap &&
+		len(installed.Sources) > 0 &&
+		installed.Sources[0].Ref == EmbeddedVersion {
+		skillDir := filepath.Join(store, "scribe-agent")
+		_, skillErr := os.Stat(filepath.Join(skillDir, "SKILL.md"))
+		baseContent, baseErr := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
+		if skillErr == nil && baseErr == nil && validateSkillContent(baseContent) == nil {
+			return false, nil
+		}
+	}
 	content, _, err := renderScribeAgentForStore(store, st)
 	if err != nil {
 		return false, err
