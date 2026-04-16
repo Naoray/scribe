@@ -23,9 +23,6 @@ Step 2 — install scribe. Pick the first option that fits the machine; stop on 
 # macOS Homebrew (preferred on macOS)
 brew install Naoray/tap/scribe
 
-# Go toolchain (works anywhere Go is installed)
-go install github.com/Naoray/scribe/cmd/scribe@latest
-
 # macOS Apple Silicon binary
 curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
 
@@ -34,7 +31,30 @@ curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_
 
 # Linux amd64 binary
 curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_amd64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
+
+# Linux arm64 binary
+curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/
+
+# Go toolchain (works anywhere Go is installed — last resort)
+go install github.com/Naoray/scribe/cmd/scribe@latest
 ```
+
+**Windows (PowerShell):** Run this instead — downloads to `$env:USERPROFILE\bin` and adds it to your user PATH:
+
+```powershell
+powershell -Command "
+  \$dest = \"\$env:USERPROFILE\bin\";
+  New-Item -ItemType Directory -Force -Path \$dest | Out-Null;
+  Invoke-WebRequest -Uri 'https://github.com/Naoray/scribe/releases/latest/download/scribe_windows_amd64.zip' -OutFile \"\$env:TEMP\scribe.zip\";
+  Expand-Archive -Path \"\$env:TEMP\scribe.zip\" -DestinationPath \$dest -Force;
+  \$current = [Environment]::GetEnvironmentVariable('PATH','User');
+  if (\$current -notlike \"*\$dest*\") {
+    [Environment]::SetEnvironmentVariable('PATH', \"\$dest;\$current\", 'User')
+  }
+"
+```
+
+After running the Windows command, open a new terminal for PATH to take effect.
 
 Re-run `scribe --version` to confirm. If all options fail, stop and tell the user which one errored and why.
 
