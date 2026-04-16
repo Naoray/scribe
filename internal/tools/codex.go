@@ -1,13 +1,15 @@
 package tools
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+
+	"github.com/Naoray/scribe/internal/skillmd"
 )
 
 const toolCodex = "codex"
@@ -84,28 +86,12 @@ func ensureCodexCompatibleSkillMD(skillName, canonicalDir string) error {
 	if err != nil {
 		return fmt.Errorf("read codex skill %q: %w", skillName, err)
 	}
-	if strings.HasPrefix(string(content), "---\n") {
-		return nil
+	_, normalized, err := skillmd.Normalize(skillName, content)
+	if err != nil {
+		return err
 	}
-
-	description := firstBodyParagraph(content)
-	if description == "" {
-		description = skillName
-	}
-	normalized := []byte(fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s", skillName, description, strings.TrimLeft(string(content), "\n")))
-	if err := WriteCanonicalSkill(canonicalDir, normalized); err != nil {
-		return fmt.Errorf("normalize codex skill %q: %w", skillName, err)
+	if !bytes.Equal(content, normalized) {
+		return WriteCanonicalSkill(canonicalDir, normalized)
 	}
 	return nil
-}
-
-func firstBodyParagraph(content []byte) string {
-	for _, line := range strings.Split(string(content), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		return trimmed
-	}
-	return ""
 }

@@ -11,14 +11,13 @@ import (
 )
 
 func TestCountSkillsPerRegistry(t *testing.T) {
-	// Keys are namespaced: slugified-registry/skill. CountSkillsPerRegistry matches
-	// the slugified registry prefix against each repo.
+	// Skills record their registry in Sources[].Registry.
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"ArtistfyHQ-skills/browse": {},
-			"ArtistfyHQ-skills/deploy": {},
-			"Naoray-my-skills/lint":    {},
-			"local/orphan":             {},
+			"browse": {Sources: []state.SkillSource{{Registry: "ArtistfyHQ/skills"}}},
+			"deploy": {Sources: []state.SkillSource{{Registry: "ArtistfyHQ/skills"}}},
+			"lint":   {Sources: []state.SkillSource{{Registry: "Naoray/my-skills"}}},
+			"orphan": {}, // no sources — not from any registry
 		},
 	}
 
@@ -62,8 +61,8 @@ func TestPrintRegistryJSON_Shape(t *testing.T) {
 	st := &state.State{
 		LastSync: syncTime,
 		Installed: map[string]state.InstalledSkill{
-			"Foo-bar/browse": {},
-			"Foo-bar/deploy": {},
+			"browse": {Sources: []state.SkillSource{{Registry: "Foo/bar"}}},
+			"deploy": {Sources: []state.SkillSource{{Registry: "Foo/bar"}}},
 		},
 	}
 

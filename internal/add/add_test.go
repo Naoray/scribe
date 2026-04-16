@@ -116,12 +116,68 @@ func TestDiscoverLocalSkills(t *testing.T) {
 	if !ok {
 		t.Fatal("missing candidate: deploy")
 	}
-	// Local discovery no longer populates Source — local candidates always need upload.
-	if deploy.Source != "" {
-		t.Errorf("deploy source: got %q, want empty", deploy.Source)
+	// State records registry origin — source should be populated so no upload is needed.
+	if deploy.Source != "github:owner/repo@v1.0.0" {
+		t.Errorf("deploy source: got %q, want github:owner/repo@v1.0.0", deploy.Source)
 	}
-	if !deploy.NeedsUpload() {
-		t.Error("deploy should need upload (local candidate)")
+	if deploy.NeedsUpload() {
+		t.Error("deploy should not need upload — has registry source from state")
+	}
+}
+
+func TestDiscoverLocal_SourceFromState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// grill-me: synced from mattpocock/skills — should get source, no upload.
+	grillDir := filepath.Join(home, ".scribe", "skills", "grill-me")
+	if err := os.MkdirAll(grillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(grillDir, "SKILL.md"), []byte("# Grill Me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// local-only: no state entry — should need upload.
+	localDir := filepath.Join(home, ".scribe", "skills", "my-tool")
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "SKILL.md"), []byte("# My Tool"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{
+			"grill-me": {Sources: []state.SkillSource{{Registry: "mattpocock/skills", Ref: "main"}}},
+		},
+	}
+
+	adder := &add.Adder{}
+	candidates, err := adder.DiscoverLocal(st)
+	if err != nil {
+		t.Fatalf("DiscoverLocal: %v", err)
+	}
+
+	byName := map[string]add.Candidate{}
+	for _, c := range candidates {
+		byName[c.Name] = c
+	}
+
+	grill := byName["grill-me"]
+	if grill.Source != "github:mattpocock/skills@main" {
+		t.Errorf("grill-me source: got %q, want github:mattpocock/skills@main", grill.Source)
+	}
+	if grill.NeedsUpload() {
+		t.Error("grill-me should not need upload — source known from state")
+	}
+
+	myTool := byName["my-tool"]
+	if myTool.Source != "" {
+		t.Errorf("my-tool source: got %q, want empty (no state entry)", myTool.Source)
+	}
+	if !myTool.NeedsUpload() {
+		t.Error("my-tool should need upload — no registry origin")
 	}
 }
 

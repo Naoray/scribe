@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -18,6 +20,88 @@ func TestClaudeSkillPath(t *testing.T) {
 	want := filepath.Join(home, ".claude", "skills", "commit")
 	if got != want {
 		t.Errorf("SkillPath = %q, want %q", got, want)
+	}
+}
+
+func TestClaudeInstall_ReplacesExistingSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+
+	// Create an old canonical dir and install it first.
+	oldCanonical := filepath.Join(home, ".scribe", "skills", "qa-old")
+	if err := os.MkdirAll(oldCanonical, 0o755); err != nil {
+		t.Fatalf("mkdir old canonical: %v", err)
+	}
+
+	tool := ClaudeTool{}
+	if _, err := tool.Install("qa", oldCanonical); err != nil {
+		t.Fatalf("first Install: %v", err)
+	}
+
+	// Now install with a new canonical dir — should replace the symlink.
+	newCanonical := filepath.Join(home, ".scribe", "skills", "qa-new")
+	if err := os.MkdirAll(newCanonical, 0o755); err != nil {
+		t.Fatalf("mkdir new canonical: %v", err)
+	}
+	if _, err := tool.Install("qa", newCanonical); err != nil {
+		t.Fatalf("second Install: %v", err)
+	}
+
+	link := filepath.Join(home, ".claude", "skills", "qa")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != newCanonical {
+		t.Errorf("symlink target = %q, want %q", target, newCanonical)
+	}
+}
+
+func TestClaudeInstall_FailsOnRealDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+
+	// Create a real (non-symlink) directory at the skill path — simulates a
+	// skill installed by another tool or manually.
+	skillsDir := filepath.Join(home, ".claude", "skills")
+	realDir := filepath.Join(skillsDir, "qa")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("mkdir real dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "SKILL.md"), []byte("# qa"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	canonical := filepath.Join(home, ".scribe", "skills", "qa")
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatalf("mkdir canonical: %v", err)
+	}
+
+	tool := ClaudeTool{}
+	_, err := tool.Install("qa", canonical)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRealDirectoryExists) {
+		t.Errorf("expected ErrRealDirectoryExists, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), realDir) {
+		t.Errorf("error should contain offending path %q, got: %v", realDir, err)
+	}
+
+	// Real directory must be preserved.
+	if _, statErr := os.Stat(filepath.Join(realDir, "SKILL.md")); statErr != nil {
+		t.Errorf("real directory was destroyed: %v", statErr)
 	}
 }
 

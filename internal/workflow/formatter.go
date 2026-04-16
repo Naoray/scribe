@@ -28,6 +28,7 @@ type Formatter interface {
 	OnConnectSaved(repo string)
 	OnConnectSyncing()
 	OnConnectSyncWarning(repo string, err error)
+	OnConnectAvailable(repo string, count int)
 
 	// Package lifecycle
 	OnPackageInstallPrompt(name, command, source string)
