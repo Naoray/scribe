@@ -16,6 +16,10 @@ import (
 	"github.com/Naoray/scribe/internal/tools"
 )
 
+// excerptLineBudget caps how many SKILL.md content lines we buffer for preview.
+// Large enough for meaningful scroll, small enough to avoid holding big files.
+const excerptLineBudget = 200
+
 // ListRow is the UI-agnostic row shape used by list surfaces.
 type ListRow struct {
 	Name      string
@@ -113,7 +117,7 @@ func BuildRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
 				row.Targets = ss.Installed.Tools
 			}
 			if local != nil && local.LocalPath != "" {
-				row.Excerpt = readExcerpt(local.LocalPath, 8)
+				row.Excerpt = readExcerpt(local.LocalPath, excerptLineBudget)
 			}
 			rows = append(rows, row)
 		}
@@ -143,7 +147,7 @@ func BuildLocalRows(skills []discovery.Skill, st *state.State) []ListRow {
 			}
 		}
 		if sk.LocalPath != "" {
-			row.Excerpt = readExcerpt(sk.LocalPath, 8)
+			row.Excerpt = readExcerpt(sk.LocalPath, excerptLineBudget)
 		}
 		if row.Managed {
 			managedRows = append(managedRows, row)

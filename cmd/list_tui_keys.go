@@ -221,22 +221,43 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.selected = false
 		m.focus = focusList
 		m.actionCursor = 0
+		m.excerptOffset = 0
 		m.statusMsg = ""
 		return m, nil
 	case "tab":
-		if m.focus == focusList {
+		row := m.filtered[m.cursor]
+		switch m.focus {
+		case focusList:
 			m.focus = focusActions
 			m.actionCursor = 0
-		} else {
+		case focusActions:
+			if rowHasPreview(row) {
+				m.focus = focusPreview
+				m.excerptOffset = 0
+			} else {
+				m.focus = focusList
+			}
+		default:
 			m.focus = focusList
+			m.excerptOffset = 0
 		}
 		return m, nil
 	case "shift+tab":
-		if m.focus == focusActions {
+		row := m.filtered[m.cursor]
+		switch m.focus {
+		case focusList:
+			if rowHasPreview(row) {
+				m.focus = focusPreview
+				m.excerptOffset = 0
+			} else {
+				m.focus = focusActions
+				m.actionCursor = 0
+			}
+		case focusActions:
 			m.focus = focusList
-		} else {
+		default:
 			m.focus = focusActions
-			m.actionCursor = 0
+			m.excerptOffset = 0
 		}
 		return m, nil
 	}
@@ -252,6 +273,7 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.cursor--
 				m = m.ensureCursorVisible()
 				m.actionCursor = 0
+				m.excerptOffset = 0
 				m.statusMsg = ""
 			}
 		case "down", "j":
@@ -259,6 +281,7 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.cursor++
 				m = m.ensureCursorVisible()
 				m.actionCursor = 0
+				m.excerptOffset = 0
 				m.statusMsg = ""
 			}
 		case "right", "l", "enter":
@@ -267,6 +290,7 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "backspace":
 			m = m.backspaceSearch()
 			m.actionCursor = 0
+			m.excerptOffset = 0
 			m.statusMsg = ""
 			if !m.selected {
 				m.focus = focusList
@@ -294,7 +318,12 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	actions := m.actionsForRow(m.filtered[m.cursor])
+	row := m.filtered[m.cursor]
+	if m.focus == focusPreview {
+		return m.updatePreviewFocus(row, key), nil
+	}
+
+	actions := m.actionsForRow(row)
 	switch key {
 	case "up", "k":
 		if m.actionCursor > 0 {
@@ -303,6 +332,9 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		if m.actionCursor < len(actions)-1 {
 			m.actionCursor++
+		} else if rowHasPreview(row) {
+			m.focus = focusPreview
+			m.excerptOffset = 0
 		}
 	case "left", "h":
 		m.focus = focusList
@@ -314,6 +346,53 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.executeAction(action.key)
 	}
 	return m, nil
+}
+
+// rowHasPreview reports whether a skill row exposes any excerpt content.
+func rowHasPreview(row listRow) bool {
+	return strings.TrimSpace(row.Excerpt) != ""
+}
+
+func (m listModel) updatePreviewFocus(row listRow, key string) listModel {
+	maxOffset := previewMaxOffset(row.Excerpt)
+	switch key {
+	case "up", "k":
+		if m.excerptOffset > 0 {
+			m.excerptOffset--
+			return m
+		}
+		m.focus = focusActions
+		actions := m.actionsForRow(row)
+		if len(actions) > 0 {
+			m.actionCursor = len(actions) - 1
+		}
+	case "down", "j":
+		if m.excerptOffset < maxOffset {
+			m.excerptOffset++
+		}
+	case "left", "h":
+		m.focus = focusActions
+		actions := m.actionsForRow(row)
+		if len(actions) > 0 {
+			m.actionCursor = len(actions) - 1
+		}
+	case "home":
+		m.excerptOffset = 0
+	case "end":
+		m.excerptOffset = maxOffset
+	}
+	return m
+}
+
+// previewMaxOffset returns the largest valid scroll offset for the excerpt.
+// At max offset the final line sits at the top of the pane; we stop there
+// rather than letting it scroll off entirely.
+func previewMaxOffset(excerpt string) int {
+	total := strings.Count(excerpt, "\n") + 1
+	if total <= 1 {
+		return 0
+	}
+	return total - 1
 }
 
 func (m listModel) updateCommandMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
