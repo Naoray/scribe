@@ -16,15 +16,21 @@ import (
 // Each step reads/writes only its relevant fields.
 type Bag struct {
 	// Inputs (set by cmd/ before Run)
-	Args         []string
-	JSONFlag     bool
-	RepoFlag     string // --registry filter
-	RemoteFlag   bool   // --remote: show available skills from registries
-	BrowseFlag   bool   // browse mode: remote catalog UI with install-first actions
-	InitialQuery string // initial search/filter text for TUI surfaces
-	TrustAllFlag bool   // --trust-all: approve all package commands without prompting
-	LazyGitHub   bool   // skip eager GitHub client/provider setup for local-only flows
-	Factory      *app.Factory
+	Args           []string
+	JSONFlag       bool
+	RepoFlag       string // --registry filter
+	RemoteFlag     bool   // --remote: show available skills from registries
+	BrowseFlag     bool   // browse mode: remote catalog UI with install-first actions
+	InitialQuery   string // initial search/filter text for TUI surfaces
+	TrustAllFlag   bool   // --trust-all: approve all package commands without prompting
+	InstallAllFlag bool   // --all: install all available skills without prompting
+	LazyGitHub     bool   // skip eager GitHub client/provider setup for local-only flows
+	Factory        *app.Factory
+
+	// SkillFilter is populated by StepSelectSkills with the names the user chose.
+	// If non-empty, StepSyncSkills passes it to the Syncer so only those skills
+	// are installed. Nil means no filter (all eligible skills processed).
+	SkillFilter []string
 
 	// Populated by steps
 	Config     *config.Config

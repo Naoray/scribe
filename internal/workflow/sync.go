@@ -267,7 +267,11 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		Tools:       b.Tools,
 		Executor:    &sync.ShellExecutor{},
 		TrustAll:    b.TrustAllFlag,
-		SkipMissing: true,
+		SkillFilter: b.SkillFilter,
+		// Skip missing skills when no explicit filter/--all: scribe sync only updates
+		// what's already installed. scribe install sets SkillFilter or InstallAllFlag
+		// to opt-in to installing new skills.
+		SkipMissing: !b.InstallAllFlag && len(b.SkillFilter) == 0,
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:
