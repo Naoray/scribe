@@ -10,14 +10,14 @@ The embedded `scribe-agent` skill is currently shipped as one static `SKILL.md` 
 1. The skill always carries a large first-run bootstrap block, even after `scribe` and `scribe-agent` are already installed. This wastes tokens on the steady-state path.
 2. The skill cannot adapt its instructions based on local state, so it cannot nudge the agent to keep the `scribe` binary up to date.
 
-We want the embedded skill to render from a template at install/refresh time. On first install it should include the bootstrap instructions. After bootstrap succeeds, it should omit that section and instead teach the agent to check for `scribe` binary updates at most once per day, ask the user for permission, and run `scribe upgrade` on approval.
+We want the embedded skill to render from a template at install/refresh time. On first install it should include the bootstrap instructions. After bootstrap succeeds, it should omit that section and instead teach the agent to ask once per day for permission to run `scribe upgrade`, then run it on approval.
 
 ## Goals
 
 1. Replace the static embedded `scribe-agent` markdown payload with a templated render step.
 2. Include the one-time bootstrap section only when `scribe` is missing or `scribe-agent` is not yet installed locally.
-3. Add a daily-throttled `scribe` binary update check policy to the rendered skill.
-4. When a newer `scribe` version is known, render instructions that tell the agent to ask for permission and run `scribe upgrade` itself on approval.
+3. Add a daily-throttled `scribe upgrade` prompt policy to the rendered skill.
+4. Render instructions that tell the agent to ask for permission and run `scribe upgrade` itself on approval.
 5. Keep `scribe upgrade` as the only binary self-update implementation.
 
 ## Non-goals
@@ -52,11 +52,8 @@ type SkillTemplateData struct {
     HasScribeBinary       bool
     HasScribeAgentInstalled bool
 
-    CurrentVersion        string
-    LastCheckedAt         time.Time
+    LastSucceededAt       time.Time
     ShouldCheckForUpdates bool
-    LatestVersion         string
-    UpdateAvailable       bool
 }
 ```
 
@@ -65,14 +62,15 @@ Rendering rules:
 - `NeedsBootstrap` is true when either the `scribe` binary is missing from `PATH` or the local canonical store/state does not yet contain `scribe-agent`.
 - The bootstrap block is rendered only when `NeedsBootstrap` is true.
 - The daily update-nudge block is rendered only when `NeedsBootstrap` is false.
-- The "update available" wording appears only when `UpdateAvailable` is true.
-- When no recent check result exists or the last check failed, the steady-state section should tell the agent to perform the daily version check before normal `scribe` operations when the 24h TTL has expired.
+- The steady-state section tells the agent to ask once per 24 hours for permission to run `scribe upgrade`.
+- A successful `scribe upgrade` run, including a no-op "Already up to date" outcome, resets the 24h TTL.
+- A failed `scribe upgrade` run does not reset the TTL.
 
 Important: the rendered markdown is guidance for the external agent. It is not executable policy inside `scribe`. The CLI only persists enough local state to let the markdown stay short and accurate.
 
-### 3. Persist update-check cache in state
+### 3. Persist upgrade cooldown in state
 
-Persist the `scribe` binary update-check cache in `~/.scribe/state.json`, not in `config.yaml`.
+Persist the `scribe` binary upgrade cooldown in `~/.scribe/state.json`, not in `config.yaml`.
 
 Reasoning:
 
@@ -84,9 +82,7 @@ Add a top-level field to `state.State`:
 
 ```go
 type BinaryUpdateCheck struct {
-    CurrentVersion string    `json:"current_version,omitempty"`
-    LatestVersion  string    `json:"latest_version,omitempty"`
-    CheckedAt      time.Time `json:"checked_at,omitempty"`
+    LastSucceededAt time.Time `json:"last_succeeded_at,omitempty"`
 }
 ```
 
@@ -97,31 +93,30 @@ type State struct {
 }
 ```
 
-Use key `"scribe"` for this feature. A map keeps the schema extensible without forcing another migration if similar first-party binary nudges are added later.
+Use key `"scribe"` for this feature. A map keeps the schema extensible without forcing another migration if similar first-party tool nudges are added later.
 
 Behavior:
 
-- If no entry exists, the rendered skill behaves as "check allowed now".
-- If `CheckedAt` is less than 24 hours old, `ShouldCheckForUpdates` is false.
-- If `CheckedAt` is 24 hours old or older, `ShouldCheckForUpdates` is true.
-- Failed checks do not block normal skill use. They simply do not update the cached entry.
+- If no entry exists, the rendered skill behaves as "ask allowed now".
+- If `LastSucceededAt` is less than 24 hours old, `ShouldCheckForUpdates` is false.
+- If `LastSucceededAt` is 24 hours old or older, `ShouldCheckForUpdates` is true.
+- Failed `scribe upgrade` runs do not update the cached entry.
 
-### 4. How version data is obtained
+### 4. How the daily prompt works
 
-Bootstrap/render code should compute template data using two sources:
+Bootstrap/render code should not fetch GitHub release data.
 
-1. Local binary version:
-   - Use the running `cmd.Version` string when available in command paths that already know it.
-   - Fall back to `"dev"` or empty as "do not suggest upgrade" for development builds.
+Instead:
 
-2. Latest released version:
-   - Reuse the existing GitHub release lookup path already exercised by `scribe upgrade`.
-   - Compare via `internal/upgrade.NeedsUpgrade`.
+1. Determine whether the 24-hour cooldown has expired by reading `state.BinaryUpdateChecks["scribe"]`.
+2. If expired, render instructions telling the external agent to ask for permission to run `scribe upgrade`.
+3. The agent then runs `scribe upgrade`, and that command remains the single source of truth for "is there actually an update?"
 
-Design constraint:
+Design constraints:
 
-- The bootstrap refresh path must remain safe when GitHub is unavailable.
-- If the release check fails, preserve the previous cached result and render the steady-state instructions without an "update available" nudge.
+- The bootstrap/render path remains local-only.
+- The skill does not duplicate release-resolution logic in markdown.
+- Future human-facing TUI paths may still warm cache or show separate update notices, but that is outside the bootstrap renderer's responsibility.
 
 ### 5. Template content changes
 
@@ -147,16 +142,14 @@ Rendered only when `NeedsBootstrap` is false.
 
 Replace the bootstrap block with a compact rule set:
 
-- At most once per 24 hours, check whether a newer `scribe` release exists.
-- If a newer version exists, ask the user for permission to update.
+- At most once per 24 hours, ask the user for permission to run `scribe upgrade`.
 - If the user approves, run `scribe upgrade`.
-- If the check fails, continue with the user's actual request and do not guess.
-
-When `UpdateAvailable` is already known from cached or freshly-computed data, the rendered text should mention the current and latest versions so the agent can ask a concrete permission question.
+- If `scribe upgrade` succeeds, even if it reports "Already up to date", treat the daily prompt as satisfied.
+- If `scribe upgrade` fails, continue with the user's actual request and allow asking again next invocation.
 
 Example tone:
 
-> `scribe` update available (`vX -> vY`). Before proceeding, ask whether to run `scribe upgrade`. If the user says yes, run it, then continue.
+> If you have not run `scribe upgrade` successfully in the last 24 hours, ask whether to run it before proceeding. If the user says yes, run it, then continue.
 
 This replaces the current `refresh bootstrap skill` emphasis with the more important binary update path.
 
@@ -168,7 +161,7 @@ Current behavior:
 
 New behavior:
 
-- `EnsureScribeAgent` gathers render inputs.
+- `EnsureScribeAgent` gathers local render inputs.
 - It renders `SKILL.md.tmpl` into concrete markdown.
 - It writes the rendered bytes to the canonical store and `.scribe-base.md`.
 
@@ -188,16 +181,17 @@ Versioning rule:
 - `EmbeddedVersion` should hash the template bytes plus a renderer format version string, not just the raw template file.
 - This ensures template or renderer changes can trigger a refresh even if the rendered output happens to match on one machine.
 
-### 7. Upgrade-check execution seam
+### 7. Upgrade execution seam
 
-Do not add network I/O to every command path.
+Do not add release-checking network I/O to `EnsureScribeAgent`.
 
 Instead:
 
-- Commands that already call `EnsureScribeAgent` may opportunistically refresh the cached `"scribe"` binary update entry when the TTL is expired and GitHub is reachable.
-- The refresh must be best-effort. On error, skip silently and keep going.
+- `EnsureScribeAgent` consumes only local state to decide whether the daily `scribe upgrade` prompt should be rendered.
+- The external agent, following the rendered skill, runs `scribe upgrade` when the user approves.
+- After a successful `scribe upgrade` invocation, `scribe` should update `state.BinaryUpdateChecks["scribe"].LastSucceededAt`.
 
-This preserves the current "bootstrap is scoped, not root-global" design while keeping the skill content fresh enough to guide the agent.
+This preserves the current "bootstrap is scoped, not root-global" design and keeps upgrade resolution inside the existing `scribe upgrade` command.
 
 ### 8. Testing
 
@@ -208,15 +202,15 @@ Add focused tests around rendering and caching.
 - `TestRenderBootstrapWhenBinaryMissing`
 - `TestRenderBootstrapWhenScribeAgentMissing`
 - `TestRenderSteadyStateWhenInstalled`
-- `TestRenderShowsUpdateAvailableMessage`
-- `TestRenderOmitsUpdateMessageForFreshCurrentVersion`
+- `TestRenderShowsDailyUpgradePromptWhenCooldownExpired`
+- `TestRenderOmitsDailyUpgradePromptWhenCooldownFresh`
 
 #### `internal/agent/bootstrap_test.go`
 
 - Replace byte-equality assertions against `EmbeddedSkillMD` with assertions about rendered content sections.
 - Verify a steady-state install writes the non-bootstrap version.
-- Verify stale TTL causes a best-effort check and state cache update when a newer version is returned.
-- Verify failed release lookup leaves the cached value unchanged and still installs the skill.
+- Verify expired cooldown writes the daily-upgrade wording.
+- Verify fresh cooldown writes the non-prompt steady-state wording.
 
 #### `internal/state/state_test.go`
 
@@ -227,13 +221,17 @@ Add focused tests around rendering and caching.
 The user chose:
 
 - update target: the `scribe` binary itself
-- frequency: once per day
+- frequency: once per day, on the first skill invocation after 24 hours
 - action on approval: run the upgrade from inside the skill flow via `scribe upgrade`
+- success semantics: a successful no-op `scribe upgrade` still resets the cooldown
+- failure semantics: a failed `scribe upgrade` does not reset the cooldown
+- bootstrap semantics: the bootstrap section remains until both the `scribe` binary exists and `scribe-agent` is installed locally
 
 ## Recommended implementation order
 
 1. Add template file and render helper with pure unit tests.
-2. Extend state schema with binary update cache.
-3. Wire best-effort daily update refresh into `EnsureScribeAgent`.
+2. Extend state schema with the successful-upgrade cooldown cache.
+3. Wire cooldown-based rendering into `EnsureScribeAgent`.
 4. Rewrite bootstrap tests around rendered sections instead of static bytes.
-5. Update the embedded `scribe-agent` copy to use the new compact steady-state wording.
+5. Update `scribe upgrade` to record a successful run in state.
+6. Update the embedded `scribe-agent` copy to use the new compact steady-state wording.
