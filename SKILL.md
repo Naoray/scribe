@@ -95,6 +95,8 @@ Use it for installs, updates, removal, adoption of unmanaged local skills, and s
 | actually adopt them | `scribe adopt --yes --json` |
 | explain what X does | `scribe explain X --json` |
 | show scribe status | `scribe status --json` |
+| audit managed skill health | `scribe doctor --json` |
+| repair managed skill metadata/projections | `scribe doctor --skill <name> --fix` |
 | connect a registry | `scribe registry add owner/repo` |
 
 ## Non-negotiable rules
@@ -171,6 +173,12 @@ This command only works for installed skills on disk.
 Top level: object with `version`, `registries`, and `installed_count`.
 Optional field: `last_sync`.
 
+### `scribe doctor --json`
+
+Top level: object with `issues`.
+Optional fields: `skill` and `fix`.
+Each issue may include `skill`, `tool`, `kind`, `status`, and `message`.
+
 ## Recommended flows
 
 Install a known skill:
@@ -198,6 +206,18 @@ Reconcile connected registries:
 ```bash
 scribe sync --json
 ```
+
+Audit and repair managed skill health:
+
+```bash
+scribe doctor --json
+scribe doctor --fix
+scribe doctor --skill recap --fix
+```
+
+`scribe doctor` audits managed skills and projection health.
+`scribe doctor --fix` applies safe metadata normalization and then repairs affected tool projections.
+`scribe doctor` v1 does not attempt to rewrite mixed package layouts for Codex; it focuses on canonical metadata health plus projection repair.
 
 Adopt unmanaged local skills:
 
