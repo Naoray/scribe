@@ -136,6 +136,8 @@ func renderSkillTools(name string, skill state.InstalledSkill, useJSON bool) err
 	fmt.Printf("  mode:  %s\n", mode)
 	if len(skill.Tools) > 0 {
 		fmt.Printf("  tools: %s\n", strings.Join(skill.Tools, ", "))
+	} else if mode == "inherit" {
+		fmt.Printf("  tools: (inherits global settings)\n")
 	} else {
 		fmt.Printf("  tools: (none)\n")
 	}
