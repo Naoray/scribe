@@ -6,19 +6,11 @@ import (
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
-func TestConnectSteps_EndsWithSyncSkills(t *testing.T) {
-	connect := workflow.ConnectSteps()
-
-	// Connect should end with ResolveTools → SyncSkills (the sync execution
-	// steps). ResolveFormatter is promoted earlier in connect so the formatter
-	// is available for connect-specific output before sync begins.
-	last := connect[len(connect)-1]
-	if last.Name != "SyncSkills" {
-		t.Errorf("expected last step SyncSkills, got %s", last.Name)
-	}
-	secondLast := connect[len(connect)-2]
-	if secondLast.Name != "ResolveTools" {
-		t.Errorf("expected second-to-last step ResolveTools, got %s", secondLast.Name)
+func TestConnectSteps_EndsWithShowAvailable(t *testing.T) {
+	steps := workflow.ConnectSteps()
+	last := steps[len(steps)-1]
+	if last.Name != "ShowAvailable" {
+		t.Errorf("expected last step ShowAvailable, got %s (connect must not auto-install)", last.Name)
 	}
 }
 
@@ -29,26 +21,38 @@ func TestConnectSteps_StartsWithLoadConfig(t *testing.T) {
 	}
 }
 
-func TestConnectTail_SkipsLoadConfig(t *testing.T) {
-	tail := workflow.ConnectTail()
-	if tail[0].Name == "LoadConfig" {
-		t.Error("ConnectTail should not start with LoadConfig")
+func TestConnectSteps_ContainsDedupCheck(t *testing.T) {
+	steps := workflow.ConnectSteps()
+	for _, s := range steps {
+		if s.Name == "DedupCheck" {
+			return
+		}
 	}
-	if tail[0].Name != "ResolveFormatter" {
-		t.Errorf("expected ConnectTail to start with ResolveFormatter, got %s", tail[0].Name)
+	t.Error("ConnectSteps missing DedupCheck step")
+}
+
+func TestConnectSteps_DoesNotContainSyncSkills(t *testing.T) {
+	for _, s := range workflow.ConnectSteps() {
+		if s.Name == "SyncSkills" {
+			t.Error("ConnectSteps must not contain SyncSkills — connect is opt-in, not auto-install")
+		}
 	}
 }
 
-func TestConnectSteps_ContainsDedupCheck(t *testing.T) {
-	steps := workflow.ConnectSteps()
-	found := false
-	for _, s := range steps {
-		if s.Name == "DedupCheck" {
-			found = true
-			break
-		}
+func TestConnectAndSyncTail_SkipsLoadConfig(t *testing.T) {
+	tail := workflow.ConnectAndSyncTail()
+	if tail[0].Name == "LoadConfig" {
+		t.Error("ConnectAndSyncTail should not start with LoadConfig")
 	}
-	if !found {
-		t.Error("ConnectSteps missing DedupCheck step")
+	if tail[0].Name != "ResolveFormatter" {
+		t.Errorf("expected ConnectAndSyncTail to start with ResolveFormatter, got %s", tail[0].Name)
+	}
+}
+
+func TestConnectAndSyncTail_EndsWithSyncSkills(t *testing.T) {
+	tail := workflow.ConnectAndSyncTail()
+	last := tail[len(tail)-1]
+	if last.Name != "SyncSkills" {
+		t.Errorf("expected ConnectAndSyncTail last step SyncSkills, got %s", last.Name)
 	}
 }

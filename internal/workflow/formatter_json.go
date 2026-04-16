@@ -245,6 +245,10 @@ func (f *jsonFormatter) OnConnectSyncWarning(_ string, _ error) {
 	// JSON mode: sync warnings are not emitted as JSON yet.
 }
 
+func (f *jsonFormatter) OnConnectAvailable(_ string, _ int) {
+	// JSON mode: available skill count is not emitted.
+}
+
 func (f *jsonFormatter) OnLegacyFormat(_ string) {}
 
 func (f *jsonFormatter) Flush() error {

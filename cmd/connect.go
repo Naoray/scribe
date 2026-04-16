@@ -18,8 +18,7 @@ func newConnectCommand() *cobra.Command {
 		Short: "Connect to a skill registry",
 		Long: `Connect to a skill registry so Scribe can sync skills from it.
 
-Works with any GitHub repo containing skills — team registries (scribe.yaml)
-and community registries (bare skill files) are both supported.
+The repo must contain a scribe.yaml or scribe.toml with a [team] section.
 
 Examples:
   scribe connect ArtistfyHQ/team-skills

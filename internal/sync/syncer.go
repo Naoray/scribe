@@ -42,6 +42,13 @@ type Syncer struct {
 	// unsynced local edits on disk.
 	ModifiedStrategy ModifiedStrategy
 
+	// SkipMissing prevents installing skills that are not yet locally installed.
+	// When true, StatusMissing skills are silently skipped — only updates and
+	// removals are processed. Set by `scribe sync` to implement the opt-in
+	// model: new skills from a registry are not auto-installed; the user must
+	// explicitly run `scribe add <skill>` to install them.
+	SkipMissing bool
+
 	// TrustAll skips approval prompts for packages (--trust-all flag).
 	TrustAll bool
 
@@ -237,6 +244,11 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			summary.Skipped++
 
 		case StatusMissing, StatusOutdated:
+			if sk.Status == StatusMissing && s.SkipMissing {
+				s.emit(SkillSkippedMsg{Name: sk.Name})
+				summary.Skipped++
+				continue
+			}
 			if sk.IsPackage {
 				s.applyPackage(ctx, sk, teamRepo, st, &summary)
 				continue
