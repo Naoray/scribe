@@ -18,7 +18,7 @@ func newConnectCommand() *cobra.Command {
 		Short: "Connect to a team skills repo",
 		Long: `Connect to a team skills repo so Scribe can sync your local skills.
 
-The repo must contain a scribe.toml with a [team] section.
+The repo must contain a scribe.yaml or scribe.toml with a [team] section.
 
 Examples:
   scribe connect ArtistfyHQ/team-skills
