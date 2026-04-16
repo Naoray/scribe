@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -359,5 +360,76 @@ func TestApply_PackageOutdated_NoUpdateCmd(t *testing.T) {
 
 	if len(executor.commands) != 0 {
 		t.Errorf("expected 0 commands, got %d", len(executor.commands))
+	}
+}
+
+// TestApply_RealDirectoryAtProjectionPath verifies that sync emits an actionable
+// SkillErrorMsg and preserves the real directory when a non-scribe directory
+// exists at the tool projection path.
+func TestApply_RealDirectoryAtProjectionPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create a real (non-symlink) directory at ~/.claude/skills/qa to simulate
+	// a skill installed by another tool or manually.
+	realSkillPath := filepath.Join(home, ".claude", "skills", "qa")
+	if err := os.MkdirAll(realSkillPath, 0o755); err != nil {
+		t.Fatalf("mkdir real skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realSkillPath, "SKILL.md"), []byte("# manual qa skill\n"), 0o644); err != nil {
+		t.Fatalf("write existing SKILL.md: %v", err)
+	}
+
+	var events []any
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{
+				{Path: "SKILL.md", Content: []byte("# qa from registry\n")},
+			},
+		},
+		Tools: []tools.Tool{tools.ClaudeTool{}},
+		Emit:  func(msg any) { events = append(events, msg) },
+	}
+
+	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
+	statuses := []sync.SkillStatus{{
+		Name:   "qa",
+		Status: sync.StatusMissing,
+		Entry: &manifest.Entry{
+			Name:   "qa",
+			Source: "github:acme/skills@main",
+		},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	// Expect a SkillErrorMsg with adoption guidance.
+	var errMsg *sync.SkillErrorMsg
+	for _, ev := range events {
+		if e, ok := ev.(sync.SkillErrorMsg); ok {
+			errMsg = &e
+			break
+		}
+	}
+	if errMsg == nil {
+		t.Fatal("expected SkillErrorMsg, none emitted")
+	}
+	if !strings.Contains(errMsg.Err.Error(), "real directory") {
+		t.Errorf("error should mention 'real directory', got: %v", errMsg.Err)
+	}
+	if !strings.Contains(errMsg.Err.Error(), "scribe adopt qa") {
+		t.Errorf("error should mention 'scribe adopt qa', got: %v", errMsg.Err)
+	}
+
+	// Real directory must be preserved.
+	if _, err := os.Stat(filepath.Join(realSkillPath, "SKILL.md")); err != nil {
+		t.Errorf("real directory was destroyed: %v", err)
+	}
+
+	// Skill must not be recorded as installed in state.
+	if _, ok := st.Installed["qa"]; ok {
+		t.Error("skill should not be in state when install failed")
 	}
 }

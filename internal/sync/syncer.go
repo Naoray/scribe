@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -387,7 +388,19 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			for _, t := range effectiveTools {
 				links, err := t.Install(sk.Name, canonicalDir)
 				if err != nil {
-					s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+					if errors.Is(err, tools.ErrRealDirectoryExists) {
+						existing, pathErr := t.SkillPath(sk.Name)
+						if pathErr != nil {
+							s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+						} else {
+							s.emit(SkillErrorMsg{
+								Name: sk.Name,
+								Err:  fmt.Errorf("link to %s: real directory at %s: run `scribe adopt %s` first", t.Name(), existing, sk.Name),
+							})
+						}
+					} else {
+						s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+					}
 					summary.Failed++
 					toolFailed = true
 					break
