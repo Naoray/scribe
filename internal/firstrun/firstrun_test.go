@@ -73,35 +73,39 @@ func TestApplyBuiltins_FirstRunAddsAllAndMarksVersion(t *testing.T) {
 	if !firstRun {
 		t.Error("first run should report firstRun=true")
 	}
-	if len(added) != 4 {
-		t.Errorf("first run should add 4 builtins, got %d: %v", len(added), added)
+	if len(added) != 3 {
+		t.Errorf("first run should add 3 builtins, got %d: %v", len(added), added)
 	}
-	if added[0] != "Naoray/scribe" {
-		t.Errorf("Naoray/scribe must be first in builtin order, got %q", added[0])
+	if cfg.FindRegistry("Naoray/scribe") != nil {
+		t.Error("Naoray/scribe must not be added as a builtin (scribe-agent is binary-managed)")
+	}
+	if cfg.FindRegistry("mattpocock/skills") == nil {
+		t.Error("mattpocock/skills should be a builtin")
 	}
 	if cfg.BuiltinsVersion == 0 {
 		t.Error("BuiltinsVersion must be set after first ApplyBuiltins call")
 	}
 }
 
-func TestApplyBuiltins_ExistingUserGetsNaorayScribeBackfilled(t *testing.T) {
+func TestApplyBuiltins_ExistingUserV3GainsMattpocock(t *testing.T) {
+	// A user on v3 has Naoray/scribe + anthropics/skills + expo/skills.
+	// ApplyBuiltins should add mattpocock/skills (the new v5 entry).
+	// Naoray/scribe stays in config until RemoveNaorayScribeRegistry runs separately.
 	cfg := &config.Config{
-		BuiltinsVersion: 1,
+		BuiltinsVersion: 3,
 		Registries: []config.RegistryConfig{
+			{Repo: "Naoray/scribe", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
 			{Repo: "anthropics/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
 			{Repo: "expo/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
 		},
 	}
 	added, firstRun := firstrun.ApplyBuiltins(cfg)
 
-	if len(added) != 2 {
-		t.Errorf("Naoray/scribe and mattpocock/skills should be backfilled, got %v", added)
+	if len(added) != 1 || added[0] != "mattpocock/skills" {
+		t.Errorf("only mattpocock/skills should be backfilled, got %v", added)
 	}
 	if firstRun {
 		t.Error("existing user should report firstRun=false")
-	}
-	if cfg.FindRegistry("Naoray/scribe") == nil {
-		t.Error("Naoray/scribe not in config after backfill")
 	}
 	if cfg.FindRegistry("mattpocock/skills") == nil {
 		t.Error("mattpocock/skills not in config after backfill")
@@ -215,5 +219,69 @@ func TestApplyBuiltinsRename_ReplacesAnthropicSkillsOnce(t *testing.T) {
 	}
 	if ran {
 		t.Fatal("second rename ran = true, want false")
+	}
+}
+
+func TestRemoveNaorayScribeRegistry_RemovesBuiltinEntry(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "Naoray/scribe", Enabled: true, Builtin: true, Type: config.RegistryTypeCommunity},
+			{Repo: "anthropics/skills", Enabled: true, Builtin: true, Type: config.RegistryTypeCommunity},
+		},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}, Migrations: map[string]bool{}}
+
+	pruned, ran := firstrun.RemoveNaorayScribeRegistry(cfg, st)
+	if len(pruned) != 1 || pruned[0] != "Naoray/scribe" {
+		t.Fatalf("pruned = %v, want [Naoray/scribe]", pruned)
+	}
+	if !ran {
+		t.Fatal("ran = false, want true")
+	}
+	if cfg.FindRegistry("Naoray/scribe") != nil {
+		t.Fatal("Naoray/scribe should be removed from config")
+	}
+	if cfg.FindRegistry("anthropics/skills") == nil {
+		t.Fatal("anthropics/skills should remain")
+	}
+}
+
+func TestRemoveNaorayScribeRegistry_IdempotentOnSecondCall(t *testing.T) {
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "Naoray/scribe", Enabled: true, Builtin: true, Type: config.RegistryTypeCommunity},
+		},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}, Migrations: map[string]bool{}}
+
+	firstrun.RemoveNaorayScribeRegistry(cfg, st)
+
+	pruned, ran := firstrun.RemoveNaorayScribeRegistry(cfg, st)
+	if len(pruned) != 0 {
+		t.Fatalf("second call should be a no-op, got %v", pruned)
+	}
+	if ran {
+		t.Fatal("second call ran = true, want false")
+	}
+}
+
+func TestRemoveNaorayScribeRegistry_KeepsUserAddedEntry(t *testing.T) {
+	// A user who manually added Naoray/scribe (Builtin: false) should not have it removed.
+	cfg := &config.Config{
+		Registries: []config.RegistryConfig{
+			{Repo: "Naoray/scribe", Enabled: true, Builtin: false, Type: config.RegistryTypeCommunity},
+		},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}, Migrations: map[string]bool{}}
+
+	pruned, ran := firstrun.RemoveNaorayScribeRegistry(cfg, st)
+	if len(pruned) != 0 {
+		t.Fatalf("user-added registry should not be removed, got %v", pruned)
+	}
+	if !ran {
+		t.Fatal("migration should still be marked as run even when nothing was pruned")
+	}
+	if cfg.FindRegistry("Naoray/scribe") == nil {
+		t.Fatal("user-added Naoray/scribe should remain in config")
 	}
 }

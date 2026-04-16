@@ -5,11 +5,13 @@ description: Use when the user wants to install, list, sync, remove, or manage A
 
 # scribe-agent
 
+{{- if .NeedsBootstrap }}
+
 ## First-run bootstrap (do this before anything else)
 
 Before running any command in this skill, check that `scribe` is installed and that this skill is registered locally. If either is missing, bootstrap them now.
 
-Step 1 — check for the binary:
+Step 1 - check for the binary:
 
 ```bash
 scribe --version
@@ -17,7 +19,7 @@ scribe --version
 
 If the command succeeds, skip to Step 3. If it fails with "command not found" (or similar), run Step 2.
 
-Step 2 — install scribe. Pick the first option that fits the machine; stop on the first success:
+Step 2 - install scribe. Pick the first option that fits the machine; stop on the first success:
 
 ```bash
 # macOS Homebrew (preferred on macOS)
@@ -58,13 +60,13 @@ After running the Windows command, open a new terminal for PATH to take effect.
 
 Re-run `scribe --version` to confirm. If all options fail, stop and tell the user which one errored and why.
 
-Step 3 — make sure this skill is registered locally so it survives future sessions:
+Step 3 - make sure this skill is registered locally so it survives future sessions:
 
 ```bash
 scribe list --json
 ```
 
-If the output already contains an entry with `"name": "scribe-agent"`, you're done — continue with the user's actual request.
+If the output already contains an entry with `"name": "scribe-agent"`, you're done - continue with the user's actual request.
 
 If it does not, install this skill now. First trigger first-run so the `Naoray/scribe` built-in registry is wired up, then install:
 
@@ -74,9 +76,17 @@ scribe add Naoray/scribe:scribe-agent --yes --json
 scribe list --json
 ```
 
-Confirm the final `scribe list --json` includes `scribe-agent`. If anything in this bootstrap fails, report the failing command and its stderr verbatim — do not guess around it.
+Confirm the final `scribe list --json` includes `scribe-agent`. If anything in this bootstrap fails, report the failing command and its stderr verbatim - do not guess around it.
 
 Once bootstrap succeeds, proceed with the user's request using the command reference below.
+
+{{- else if .ShowDailyUpgradePrompt }}
+
+## Keep `scribe` current
+
+Run `scribe upgrade --check` to see if a new version is available. If the output contains "New version available", ask the user whether to upgrade. If they approve, run `scribe upgrade`, then continue with their request. If already up to date, continue without asking.
+
+{{- end }}
 
 ## What scribe does
 
@@ -226,9 +236,9 @@ scribe adopt --yes --json
 ## Anti-patterns
 
 - Bare `scribe add` in automation.
-- Using `scribe list` when you mean “show installable remote skills”.
+- Using `scribe list` when you mean "show installable remote skills".
 - Parsing styled terminal output instead of `--json`.
-- Using `scribe sync` when you mean “install one skill”.
+- Using `scribe sync` when you mean "install one skill".
 - Removing files by hand from tool directories.
 - Editing `~/.scribe/state.json` directly.
 - Assuming every failure returns JSON.

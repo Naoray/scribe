@@ -2,14 +2,18 @@ package agent
 
 import (
 	"crypto/sha256"
-	_ "embed"
 	"encoding/hex"
+
+	scribe "github.com/Naoray/scribe"
 )
 
-//go:embed scribe_agent/SKILL.md
-var EmbeddedSkillMD []byte
+const embeddedRendererFormatVersion = "v1"
+
+// EmbeddedSkillTemplate is the scribe-agent SKILL.md template. It lives at the
+// repo root (SKILL.md.tmpl) and is embedded via the root package.
+var EmbeddedSkillTemplate = scribe.AgentSkillTemplate
 
 var EmbeddedVersion = func() string {
-	sum := sha256.Sum256(EmbeddedSkillMD)
+	sum := sha256.Sum256(append([]byte(embeddedRendererFormatVersion+"\n"), EmbeddedSkillTemplate...))
 	return hex.EncodeToString(sum[:])
 }()

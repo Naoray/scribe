@@ -62,6 +62,7 @@ func newRootCmd() *cobra.Command {
 			added, builtinsFirstRun := firstrun.ApplyBuiltins(cfg)
 			removed, removedRan := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
 			renamed, renamedRan := firstrun.ApplyBuiltinsRename(cfg, st, map[string]string{"anthropic/skills": "anthropics/skills"})
+			naorayRemoved, naorayRan := firstrun.RemoveNaorayScribeRegistry(cfg, st)
 			if len(added) > 0 {
 				out := c.ErrOrStderr()
 				if builtinsFirstRun {
@@ -83,12 +84,18 @@ func newRootCmd() *cobra.Command {
 					return err
 				}
 			}
-			if len(renamed) > 0 && len(added) == 0 && len(removed) == 0 {
+			if len(naorayRemoved) > 0 {
+				fmt.Fprintf(c.ErrOrStderr(), "scribe: removed Naoray/scribe from connected registries (scribe-agent is now managed by the binary)\n")
 				if err := cfg.Save(); err != nil {
 					return err
 				}
 			}
-			if builtinsFirstRun || removedRan || renamedRan {
+			if len(renamed) > 0 && len(added) == 0 && len(removed) == 0 && len(naorayRemoved) == 0 {
+				if err := cfg.Save(); err != nil {
+					return err
+				}
+			}
+			if builtinsFirstRun || removedRan || renamedRan || naorayRan {
 				if err := st.Save(); err != nil {
 					return err
 				}

@@ -10,17 +10,28 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/upgrade"
 )
 
+type upgradeClient interface {
+	LatestRelease(ctx context.Context, owner, repo string) (*gogithub.RepositoryRelease, error)
+}
+
+type upgradeRunner func(ctx context.Context, method upgrade.Method, release *gogithub.RepositoryRelease, isTTY bool) error
+
+var upgradeCheck bool
+
 func newUpgradeCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "upgrade",
 		Short: "Upgrade scribe to the latest version",
 		Long:  "Detects how scribe was installed and upgrades using the appropriate method.",
 		Args:  cobra.NoArgs,
 		RunE:  runUpgrade,
 	}
+	cmd.Flags().BoolVar(&upgradeCheck, "check", false, "check if a new version is available without upgrading")
+	return cmd
 }
 
 func runUpgrade(cmd *cobra.Command, _ []string) error {
@@ -34,20 +45,45 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Detect install method.
-	method := upgrade.DetectMethod()
-	fmt.Printf("Installed via: %s\n", method)
-
-	// Fetch latest release.
-	_, err := factory.Config()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
 	client, err := factory.Client()
 	if err != nil {
 		return fmt.Errorf("load github client: %w", err)
 	}
+
+	if upgradeCheck {
+		return runUpgradeCheckWithDeps(ctx, client)
+	}
+
+	// Detect install method.
+	method := upgrade.DetectMethod()
+	fmt.Printf("Installed via: %s\n", method)
+
+	st, err := factory.State()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	isTTY := isatty.IsTerminal(os.Stdout.Fd())
+	return runUpgradeWithDeps(ctx, st, client, method, func(ctx context.Context, method upgrade.Method, release *gogithub.RepositoryRelease, isTTY bool) error {
+		return doUpgrade(ctx, method, release, client, isTTY)
+	}, isTTY)
+}
+
+func runUpgradeCheckWithDeps(ctx context.Context, client upgradeClient) error {
+	release, err := client.LatestRelease(ctx, "Naoray", "scribe")
+	if err != nil {
+		return fmt.Errorf("check latest version: %w", err)
+	}
+	latestTag := release.GetTagName()
+	_, needsUpgrade := upgrade.NeedsUpgrade(Version, latestTag)
+	if needsUpgrade {
+		fmt.Printf("New version available: %s (current: %s)\n", latestTag, Version)
+	} else {
+		fmt.Printf("Already up to date (%s)\n", latestTag)
+	}
+	return nil
+}
+
+func runUpgradeWithDeps(ctx context.Context, st *state.State, client upgradeClient, method upgrade.Method, runner upgradeRunner, isTTY bool) error {
 	release, err := client.LatestRelease(ctx, "Naoray", "scribe")
 	if err != nil {
 		return fmt.Errorf("check latest version: %w", err)
@@ -57,13 +93,24 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	_, needsUpgrade := upgrade.NeedsUpgrade(Version, latestTag)
 	if !needsUpgrade {
 		fmt.Printf("Already up to date (%s)\n", latestTag)
+		st.RecordScribeBinaryUpdateSuccess()
+		if err := st.Save(); err != nil {
+			return fmt.Errorf("save state: %w", err)
+		}
 		return nil
 	}
 
 	fmt.Printf("Upgrading v%s → %s...\n", Version, latestTag)
 
-	isTTY := isatty.IsTerminal(os.Stdout.Fd())
-	return doUpgrade(ctx, method, release, client, isTTY)
+	if err := runner(ctx, method, release, isTTY); err != nil {
+		return err
+	}
+
+	st.RecordScribeBinaryUpdateSuccess()
+	if err := st.Save(); err != nil {
+		return fmt.Errorf("save state: %w", err)
+	}
+	return nil
 }
 
 func doUpgrade(ctx context.Context, method upgrade.Method, release *gogithub.RepositoryRelease, client *github.Client, isTTY bool) error {

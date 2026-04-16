@@ -21,6 +21,7 @@ import (
 
 const removeOpenAICodexMigration = "remove_openai_codex_v1"
 const renameBuiltinReposMigration = "rename_builtin_repos_v1"
+const removeNaorayScribeMigration = "remove_naoray_scribe_v1"
 
 //go:embed default_registries.yaml
 var defaultRegistriesYAML []byte
@@ -185,6 +186,39 @@ func ApplyBuiltinsRemove(cfg *config.Config, st *state.State, removed []string) 
 
 	if st != nil {
 		st.MarkMigration(removeOpenAICodexMigration)
+		for _, repo := range pruned {
+			st.ClearRegistryFailure(repo)
+		}
+	}
+
+	return pruned, true
+}
+
+// RemoveNaorayScribeRegistry removes the Naoray/scribe built-in registry from the
+// config on a one-shot migration. The entry is only removed if it carries
+// Builtin: true — registries the user added manually are left untouched.
+//
+// Background: scribe-agent is now managed by the embedded binary
+// (EnsureScribeAgent) rather than a registry sync, so the source repo no
+// longer needs to be a connected registry.
+func RemoveNaorayScribeRegistry(cfg *config.Config, st *state.State) ([]string, bool) {
+	if st != nil && st.HasMigration(removeNaorayScribeMigration) {
+		return nil, false
+	}
+
+	kept := cfg.Registries[:0]
+	var pruned []string
+	for _, rc := range cfg.Registries {
+		if strings.EqualFold(rc.Repo, "Naoray/scribe") && rc.Builtin {
+			pruned = append(pruned, rc.Repo)
+			continue
+		}
+		kept = append(kept, rc)
+	}
+	cfg.Registries = kept
+
+	if st != nil {
+		st.MarkMigration(removeNaorayScribeMigration)
 		for _, repo := range pruned {
 			st.ClearRegistryFailure(repo)
 		}
