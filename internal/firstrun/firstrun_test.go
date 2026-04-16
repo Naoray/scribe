@@ -1,6 +1,7 @@
 package firstrun_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -104,6 +105,34 @@ func TestApplyBuiltins_ExistingUserGetsNaorayScribeBackfilled(t *testing.T) {
 	}
 	if cfg.FindRegistry("mattpocock/skills") == nil {
 		t.Error("mattpocock/skills not in config after backfill")
+	}
+}
+
+func TestApplyBuiltins_ManuallyConnectedNotDuplicated(t *testing.T) {
+	// User already ran `scribe registry connect mattpocock/skills` before it became a builtin.
+	cfg := &config.Config{
+		BuiltinsVersion: 3, // pre-mattpocock version
+		Registries: []config.RegistryConfig{
+			{Repo: "Naoray/scribe", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "anthropics/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "expo/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "mattpocock/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: false},
+		},
+	}
+	added, _ := firstrun.ApplyBuiltins(cfg)
+
+	if len(added) != 0 {
+		t.Errorf("expected nothing added (already connected manually), got %v", added)
+	}
+
+	count := 0
+	for _, r := range cfg.Registries {
+		if strings.EqualFold(r.Repo, "mattpocock/skills") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("mattpocock/skills appears %d times in config, want exactly 1", count)
 	}
 }
 
