@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -45,6 +46,11 @@ func repairSkillProjections(cfg *config.Config, st *state.State, name string) (s
 			return skillProjectionRepairResult{}, err
 		}
 		_ = tool.Uninstall(name)
+		if path, err := tool.SkillPath(name); err == nil {
+			if err := os.RemoveAll(path); err != nil {
+				return skillProjectionRepairResult{}, fmt.Errorf("clear %s/%s: %w", toolName, name, err)
+			}
+		}
 		links, err := tool.Install(name, canonicalDir)
 		if err != nil {
 			return skillProjectionRepairResult{}, fmt.Errorf("repair %s/%s: %w", toolName, name, err)
@@ -60,8 +66,18 @@ func repairSkillProjections(cfg *config.Config, st *state.State, name string) (s
 	}
 	sort.Strings(managedPaths)
 
+	effectiveSet := setOf(effective)
+	filteredConflicts := make([]state.ProjectionConflict, 0, len(installed.Conflicts))
+	for _, conflict := range installed.Conflicts {
+		if effectiveSet[conflict.Tool] {
+			continue
+		}
+		filteredConflicts = append(filteredConflicts, conflict)
+	}
+
 	installed.ManagedPaths = managedPaths
 	installed.Paths = append([]string(nil), managedPaths...)
+	installed.Conflicts = filteredConflicts
 	st.Installed[name] = installed
 	if err := st.Save(); err != nil {
 		return skillProjectionRepairResult{}, err

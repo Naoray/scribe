@@ -154,6 +154,9 @@ ArtistfyHQ/team-skills/
 | `scribe adopt [name]` | Import hand-rolled skills from `~/.claude/skills` etc. into the store |
 | `scribe remove <skill>` | Remove a skill from this machine |
 | `scribe sync` | Reconcile local skill state, tool installs, and connected registries |
+| `scribe doctor` | Inspect managed skills and projections for repairable issues |
+| `scribe doctor --fix` | Normalize canonical skill metadata and repair affected projections |
+| `scribe doctor --skill recap --fix` | Repair a single managed skill and its projections |
 | `scribe skill repair <skill> --tool <tool>` | Resolve preserved managed drift when a tool-local copy differs from the canonical store |
 | `scribe status` | Show connected registries, installed count, and last sync |
 | `scribe tools` | List detected AI tools, enable/disable |
@@ -218,6 +221,20 @@ If sync finds divergent content in a managed tool path, it preserves that conten
 conflict: recap in codex differs from managed copy
 run `scribe skill repair recap --tool codex` to resolve
 ```
+
+### `scribe doctor` v1 scope
+
+```bash
+scribe doctor
+scribe doctor --fix
+scribe doctor --skill recap --fix
+```
+
+`scribe doctor` audits managed skills for canonical `SKILL.md` metadata issues and projection drift.
+`scribe doctor --fix` applies safe metadata normalization and then repairs affected tool projections.
+
+`scribe doctor` v1 does not attempt to rewrite mixed package layouts for Codex.
+It focuses on canonical metadata health plus projection repair.
 
 ## Adoption — claim skills you already have
 
