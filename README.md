@@ -1,14 +1,13 @@
 # scribe
 
-Your team's AI coding skills, always in sync. One manifest, one command.
-
-```bash
-brew install Naoray/tap/scribe
-scribe registry connect ArtistfyHQ/team-skills
-scribe sync
+```
+ ___  ___ ___ ___ ___ ___
+/ __|/ __| _ \_ _| _ ) __|
+\__ \ (__|   /| || _ \ _|
+|___/\___|_|_\___|___/___|
 ```
 
----
+Your team's AI coding skills, always in sync. One manifest, one command.
 
 AI coding agents like Claude Code, Cursor, and Codex work better when you teach them how your team works — code review style, deployment checklists, Laravel patterns. These "skills" are markdown instruction files that live in `~/.claude/skills/` and similar dirs.
 
@@ -16,7 +15,30 @@ The problem: once you've built them, sharing means Slack links and manual copyin
 
 Scribe fixes this. Put your team's skills in a GitHub repo with a `scribe.yaml` manifest. Teammates run `scribe registry connect`. Then `scribe sync` keeps every machine current — canonical store, tool-facing installs, and adoption of any hand-rolled skills already on the machine. One manifest works across Claude Code, Codex, and Cursor.
 
-## Install
+## Install with your agent
+
+Paste this into any agent with shell access (Claude Code, Cursor, Codex, etc.) to install Scribe on the machine without touching a terminal yourself:
+
+```
+I want to use Scribe to manage my AI coding-agent skills on this machine.
+Repo: https://github.com/Naoray/scribe  (setup steps: /blob/main/SKILL.md)
+
+Please set it up for me:
+  1. If `scribe --version` fails, install it. Prefer methods that land the binary on PATH:
+       a. Homebrew: `brew install Naoray/tap/scribe`
+       b. Release binary to /usr/local/bin, e.g. Apple Silicon:
+          `curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/`
+          (swap the asset for your OS/arch — see https://github.com/Naoray/scribe/releases/latest)
+       c. Last resort: `go install github.com/Naoray/scribe/cmd/scribe@latest`
+          (lands in ~/go/bin which is often NOT on PATH — only use if a and b aren't available,
+          and add the go bin dir to PATH afterwards)
+  2. Register Scribe's own agent-facing skill locally so future sessions pick it up from
+     `~/.scribe/skills/scribe-agent/`:
+        scribe add Naoray/scribe:scribe-agent --yes --json
+  3. Show me `scribe list --json` to confirm.
+```
+
+## Install manually
 
 **Homebrew (recommended):**
 
@@ -110,29 +132,6 @@ ArtistfyHQ/team-skills/
 ```
 
 4. Share the repo name — teammates run `scribe registry connect ArtistfyHQ/team-skills`
-
-## Let your agent set it up
-
-Paste this into any agent with shell access (Claude Code, Cursor, Codex, etc.) to install Scribe on the machine without touching a terminal yourself:
-
-```
-I want to use Scribe to manage my AI coding-agent skills on this machine.
-Repo: https://github.com/Naoray/scribe  (setup steps: /blob/main/SKILL.md)
-
-Please set it up for me:
-  1. If `scribe --version` fails, install it. Prefer methods that land the binary on PATH:
-       a. Homebrew: `brew install Naoray/tap/scribe`
-       b. Release binary to /usr/local/bin, e.g. Apple Silicon:
-          `curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_darwin_arm64.tar.gz | tar xz && sudo mv scribe /usr/local/bin/`
-          (swap the asset for your OS/arch — see https://github.com/Naoray/scribe/releases/latest)
-       c. Last resort: `go install github.com/Naoray/scribe/cmd/scribe@latest`
-          (lands in ~/go/bin which is often NOT on PATH — only use if a and b aren't available,
-          and add the go bin dir to PATH afterwards)
-  2. Register Scribe's own agent-facing skill locally so future sessions pick it up from
-     `~/.scribe/skills/scribe-agent/`:
-        scribe add Naoray/scribe:scribe-agent --yes --json
-  3. Show me `scribe list --json` to confirm.
-```
 
 ## Commands
 
