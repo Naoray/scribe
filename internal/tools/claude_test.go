@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,9 @@ func TestClaudeInstall_FailsOnRealDirectory(t *testing.T) {
 	}
 	if !errors.Is(err, ErrRealDirectoryExists) {
 		t.Errorf("expected ErrRealDirectoryExists, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), realDir) {
+		t.Errorf("error should contain offending path %q, got: %v", realDir, err)
 	}
 
 	// Real directory must be preserved.

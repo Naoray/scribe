@@ -389,12 +389,15 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				links, err := t.Install(sk.Name, canonicalDir)
 				if err != nil {
 					if errors.Is(err, tools.ErrRealDirectoryExists) {
-						existing, _ := t.SkillPath(sk.Name)
-						s.emit(SkillAdoptionNeededMsg{Name: sk.Name, Tool: t.Name(), Path: existing})
-						s.emit(SkillErrorMsg{
-							Name: sk.Name,
-							Err:  fmt.Errorf("link to %s: real directory at %s — run `scribe adopt %s` first", t.Name(), existing, sk.Name),
-						})
+						existing, pathErr := t.SkillPath(sk.Name)
+						if pathErr != nil {
+							s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+						} else {
+							s.emit(SkillErrorMsg{
+								Name: sk.Name,
+								Err:  fmt.Errorf("link to %s: real directory at %s: run `scribe adopt %s` first", t.Name(), existing, sk.Name),
+							})
+						}
 					} else {
 						s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
 					}

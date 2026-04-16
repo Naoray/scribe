@@ -129,15 +129,6 @@ type SkillErrorMsg struct {
 	Err  error
 }
 
-// SkillAdoptionNeededMsg is sent when install refused to overwrite a real
-// (non-Scribe) directory at a tool projection path. Run `scribe adopt <name>`
-// to import the existing content, then re-sync.
-type SkillAdoptionNeededMsg struct {
-	Name string
-	Tool string
-	Path string
-}
-
 // MergeConflictMsg is sent when a 3-way merge produces conflict markers.
 type MergeConflictMsg struct {
 	Name string
