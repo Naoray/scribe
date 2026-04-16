@@ -15,13 +15,14 @@ import (
 func newConnectCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "connect [owner/repo]",
-		Short: "Connect to a team skills repo",
-		Long: `Connect to a team skills repo so Scribe can sync your local skills.
+		Short: "Connect to a skill registry",
+		Long: `Connect to a skill registry so Scribe can sync skills from it.
 
 The repo must contain a scribe.yaml or scribe.toml with a [team] section.
 
 Examples:
   scribe connect ArtistfyHQ/team-skills
+  scribe connect mattpocock/skills
   scribe connect                          # interactive prompt`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runConnect,
@@ -56,7 +57,7 @@ func resolveRepo(args []string) (string, error) {
 
 	var repo string
 	err := huh.NewInput().
-		Title("Team skills repo").
+		Title("Skill registry repo").
 		Placeholder("owner/repo").
 		Validate(func(s string) error {
 			_, _, err := manifest.ParseOwnerRepo(s)

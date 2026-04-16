@@ -1,6 +1,7 @@
 package firstrun_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -72,8 +73,8 @@ func TestApplyBuiltins_FirstRunAddsAllAndMarksVersion(t *testing.T) {
 	if !firstRun {
 		t.Error("first run should report firstRun=true")
 	}
-	if len(added) != 3 {
-		t.Errorf("first run should add 3 builtins, got %d: %v", len(added), added)
+	if len(added) != 4 {
+		t.Errorf("first run should add 4 builtins, got %d: %v", len(added), added)
 	}
 	if added[0] != "Naoray/scribe" {
 		t.Errorf("Naoray/scribe must be first in builtin order, got %q", added[0])
@@ -93,14 +94,45 @@ func TestApplyBuiltins_ExistingUserGetsNaorayScribeBackfilled(t *testing.T) {
 	}
 	added, firstRun := firstrun.ApplyBuiltins(cfg)
 
-	if len(added) != 1 || added[0] != "Naoray/scribe" {
-		t.Errorf("only Naoray/scribe should be backfilled, got %v", added)
+	if len(added) != 2 {
+		t.Errorf("Naoray/scribe and mattpocock/skills should be backfilled, got %v", added)
 	}
 	if firstRun {
 		t.Error("existing user should report firstRun=false")
 	}
 	if cfg.FindRegistry("Naoray/scribe") == nil {
 		t.Error("Naoray/scribe not in config after backfill")
+	}
+	if cfg.FindRegistry("mattpocock/skills") == nil {
+		t.Error("mattpocock/skills not in config after backfill")
+	}
+}
+
+func TestApplyBuiltins_ManuallyConnectedNotDuplicated(t *testing.T) {
+	// User already ran `scribe registry connect mattpocock/skills` before it became a builtin.
+	cfg := &config.Config{
+		BuiltinsVersion: 3, // pre-mattpocock version
+		Registries: []config.RegistryConfig{
+			{Repo: "Naoray/scribe", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "anthropics/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "expo/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: true},
+			{Repo: "mattpocock/skills", Enabled: true, Type: config.RegistryTypeCommunity, Builtin: false},
+		},
+	}
+	added, _ := firstrun.ApplyBuiltins(cfg)
+
+	if len(added) != 0 {
+		t.Errorf("expected nothing added (already connected manually), got %v", added)
+	}
+
+	count := 0
+	for _, r := range cfg.Registries {
+		if strings.EqualFold(r.Repo, "mattpocock/skills") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("mattpocock/skills appears %d times in config, want exactly 1", count)
 	}
 }
 

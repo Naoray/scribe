@@ -7,7 +7,7 @@ import (
 )
 
 func TestApplyBuiltins_AlreadyCurrentIsNoop(t *testing.T) {
-	cfg := &config.Config{BuiltinsVersion: currentBuiltinsVersion}
+	cfg := &config.Config{BuiltinsVersion: parsedDefaults.Version}
 	added, firstRun := ApplyBuiltins(cfg)
 
 	if len(added) != 0 {

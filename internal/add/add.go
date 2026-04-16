@@ -58,16 +58,36 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 
 	candidates := make([]Candidate, 0, len(skills))
 	for _, sk := range skills {
+		source := sourceFromState(st, sk.Name)
 		candidates = append(candidates, Candidate{
 			Name:        sk.Name,
 			Description: sk.Description,
 			Origin:      "local",
 			Package:     sk.Package,
 			LocalPath:   sk.LocalPath,
+			Source:      source,
 		})
 	}
 
 	return candidates, nil
+}
+
+// sourceFromState returns the "github:owner/repo@ref" string for a skill if
+// state records a registry origin for it. Empty string means local-only.
+func sourceFromState(st *state.State, name string) string {
+	if st == nil {
+		return ""
+	}
+	installed, ok := st.Installed[name]
+	if !ok || len(installed.Sources) == 0 {
+		return ""
+	}
+	src := installed.Sources[0]
+	ref := src.Ref
+	if ref == "" {
+		ref = "main"
+	}
+	return fmt.Sprintf("github:%s@%s", src.Registry, ref)
 }
 
 // DiscoverRemote finds skills in other registries that are not in the target registry.

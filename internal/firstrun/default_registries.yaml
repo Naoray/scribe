@@ -1,0 +1,13 @@
+# Default registries bundled with scribe.
+# Bump version whenever the list changes — ApplyBuiltins uses this to backfill
+# existing users who were on an older version.
+version: 4
+registries:
+  - repo: Naoray/scribe
+    type: community
+  - repo: anthropics/skills
+    type: community
+  - repo: expo/skills
+    type: community
+  - repo: mattpocock/skills
+    type: community
