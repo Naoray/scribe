@@ -20,14 +20,18 @@ type upgradeClient interface {
 
 type upgradeRunner func(ctx context.Context, method upgrade.Method, release *gogithub.RepositoryRelease, isTTY bool) error
 
+var upgradeCheck bool
+
 func newUpgradeCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "upgrade",
 		Short: "Upgrade scribe to the latest version",
 		Long:  "Detects how scribe was installed and upgrades using the appropriate method.",
 		Args:  cobra.NoArgs,
 		RunE:  runUpgrade,
 	}
+	cmd.Flags().BoolVar(&upgradeCheck, "check", false, "check if a new version is available without upgrading")
+	return cmd
 }
 
 func runUpgrade(cmd *cobra.Command, _ []string) error {
@@ -41,14 +45,19 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Detect install method.
-	method := upgrade.DetectMethod()
-	fmt.Printf("Installed via: %s\n", method)
-
 	client, err := factory.Client()
 	if err != nil {
 		return fmt.Errorf("load github client: %w", err)
 	}
+
+	if upgradeCheck {
+		return runUpgradeCheckWithDeps(ctx, client)
+	}
+
+	// Detect install method.
+	method := upgrade.DetectMethod()
+	fmt.Printf("Installed via: %s\n", method)
+
 	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
@@ -57,6 +66,21 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	return runUpgradeWithDeps(ctx, st, client, method, func(ctx context.Context, method upgrade.Method, release *gogithub.RepositoryRelease, isTTY bool) error {
 		return doUpgrade(ctx, method, release, client, isTTY)
 	}, isTTY)
+}
+
+func runUpgradeCheckWithDeps(ctx context.Context, client upgradeClient) error {
+	release, err := client.LatestRelease(ctx, "Naoray", "scribe")
+	if err != nil {
+		return fmt.Errorf("check latest version: %w", err)
+	}
+	latestTag := release.GetTagName()
+	_, needsUpgrade := upgrade.NeedsUpgrade(Version, latestTag)
+	if needsUpgrade {
+		fmt.Printf("New version available: %s (current: %s)\n", latestTag, Version)
+	} else {
+		fmt.Printf("Already up to date (%s)\n", latestTag)
+	}
+	return nil
 }
 
 func runUpgradeWithDeps(ctx context.Context, st *state.State, client upgradeClient, method upgrade.Method, runner upgradeRunner, isTTY bool) error {

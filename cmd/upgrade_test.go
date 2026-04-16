@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,5 +149,88 @@ func TestRunUpgradeWithDepsAllowsUnauthenticatedReleaseChecks(t *testing.T) {
 	}, false)
 	if err != nil {
 		t.Fatalf("runUpgradeWithDeps() error = %v, want nil for public release checks", err)
+	}
+}
+
+func TestRunUpgradeCheckReportsUpToDate(t *testing.T) {
+	origVersion := Version
+	Version = "1.2.3"
+	t.Cleanup(func() { Version = origVersion })
+
+	var buf strings.Builder
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runUpgradeCheckWithDeps(context.Background(), fakeUpgradeClient{tag: "v1.2.3"})
+
+	w.Close()
+	os.Stdout = origStdout
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("runUpgradeCheckWithDeps() error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "Already up to date") {
+		t.Fatalf("expected 'Already up to date', got %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "New version available") {
+		t.Fatal("should not report new version when already current")
+	}
+}
+
+func TestRunUpgradeCheckReportsNewVersion(t *testing.T) {
+	origVersion := Version
+	Version = "1.2.3"
+	t.Cleanup(func() { Version = origVersion })
+
+	var buf strings.Builder
+	r, w, _ := os.Pipe()
+	origStdout := os.Stdout
+	os.Stdout = w
+
+	err := runUpgradeCheckWithDeps(context.Background(), fakeUpgradeClient{tag: "v1.2.4"})
+
+	w.Close()
+	os.Stdout = origStdout
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("runUpgradeCheckWithDeps() error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "New version available") {
+		t.Fatalf("expected 'New version available', got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "v1.2.4") {
+		t.Fatalf("expected latest tag in output, got %q", buf.String())
+	}
+}
+
+func TestRunUpgradeCheckDoesNotModifyState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	origVersion := Version
+	Version = "1.2.3"
+	t.Cleanup(func() { Version = origVersion })
+
+	r, w, _ := os.Pipe()
+	origStdout := os.Stdout
+	os.Stdout = w
+
+	err := runUpgradeCheckWithDeps(context.Background(), fakeUpgradeClient{tag: "v1.2.4"})
+
+	w.Close()
+	os.Stdout = origStdout
+	r.Close()
+
+	if err != nil {
+		t.Fatalf("runUpgradeCheckWithDeps() error = %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.ScribeBinaryUpdateCooldownFresh(time.Now().UTC()) {
+		t.Fatal("--check should not update the upgrade cooldown in state")
 	}
 }

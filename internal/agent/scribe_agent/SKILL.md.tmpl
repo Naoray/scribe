@@ -64,7 +64,7 @@ Once bootstrap succeeds, proceed with the user's request using the command refer
 
 ## Keep `scribe` current
 
-If you are already bootstrapped, ask the user once per day whether to run `scribe upgrade` before proceeding. If the user approves, run `scribe upgrade` yourself, then continue with the user's request.
+Run `scribe upgrade --check` to see if a new version is available. If the output contains "New version available", ask the user whether to upgrade. If they approve, run `scribe upgrade`, then continue with their request. If already up to date, continue without asking.
 
 {{- end }}
 
