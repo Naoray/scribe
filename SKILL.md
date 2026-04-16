@@ -40,6 +40,23 @@ curl -L https://github.com/Naoray/scribe/releases/latest/download/scribe_linux_a
 go install github.com/Naoray/scribe/cmd/scribe@latest
 ```
 
+**Windows (PowerShell):** Run this instead — downloads to `$env:USERPROFILE\bin` and adds it to your user PATH (use `scribe_windows_arm64.zip` on ARM64 machines):
+
+```powershell
+powershell -Command "
+  \$dest = \"\$env:USERPROFILE\bin\";
+  New-Item -ItemType Directory -Force -Path \$dest | Out-Null;
+  Invoke-WebRequest -Uri 'https://github.com/Naoray/scribe/releases/latest/download/scribe_windows_amd64.zip' -OutFile \"\$env:TEMP\scribe.zip\";
+  Expand-Archive -Path \"\$env:TEMP\scribe.zip\" -DestinationPath \$dest -Force;
+  \$current = [Environment]::GetEnvironmentVariable('PATH','User');
+  if (\$current -notlike \"*\$dest*\") {
+    [Environment]::SetEnvironmentVariable('PATH', \"\$dest;\$current\", 'User')
+  }
+"
+```
+
+After running, open a new terminal for PATH to take effect.
+
 After install, verify `scribe` is reachable via PATH:
 
 ```bash
