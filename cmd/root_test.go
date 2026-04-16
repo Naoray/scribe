@@ -54,8 +54,12 @@ func TestRoot_JSONFlag_StdoutIsCleanJSON_EvenDuringBuiltinsBackfill(t *testing.T
 	if !strings.Contains(stderr, "Welcome to Scribe") {
 		t.Errorf("expected first-run banner on stderr, got: %q", stderr)
 	}
-	if !strings.Contains(stderr, "Naoray/scribe") {
-		t.Errorf("expected Naoray/scribe to appear in banner, got: %q", stderr)
+	// Naoray/scribe is no longer a builtin — scribe-agent is managed by the binary.
+	if strings.Contains(stderr, "Naoray/scribe") {
+		t.Errorf("Naoray/scribe must not appear in first-run banner, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "anthropics/skills") {
+		t.Errorf("expected anthropics/skills in first-run banner, got: %q", stderr)
 	}
 }
 

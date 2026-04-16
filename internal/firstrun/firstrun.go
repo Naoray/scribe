@@ -18,16 +18,19 @@ import (
 
 const removeOpenAICodexMigration = "remove_openai_codex_v1"
 const renameBuiltinReposMigration = "rename_builtin_repos_v1"
+const removeNaorayScribeMigration = "remove_naoray_scribe_v1"
 
 // builtinRepos are well-known public registries auto-added during first run.
+// Naoray/scribe is intentionally absent: scribe-agent is now managed by the
+// embedded binary rather than a registry sync, so there is no reason to add
+// the source repo as a built-in registry on new installs.
 var builtinRepos = []string{
-	"Naoray/scribe",
 	"anthropics/skills",
 	"expo/skills",
 }
 
 // currentBuiltinsVersion bumps whenever builtinRepos changes.
-const currentBuiltinsVersion = 3
+const currentBuiltinsVersion = 4
 
 // BuiltinRegistries returns RegistryConfig entries for built-in registries.
 func BuiltinRegistries() []config.RegistryConfig {
@@ -170,6 +173,39 @@ func ApplyBuiltinsRemove(cfg *config.Config, st *state.State, removed []string) 
 
 	if st != nil {
 		st.MarkMigration(removeOpenAICodexMigration)
+		for _, repo := range pruned {
+			st.ClearRegistryFailure(repo)
+		}
+	}
+
+	return pruned, true
+}
+
+// RemoveNaorayScribeRegistry removes the Naoray/scribe built-in registry from the
+// config on a one-shot migration. The entry is only removed if it carries
+// Builtin: true — registries the user added manually are left untouched.
+//
+// Background: scribe-agent is now managed by the embedded binary
+// (EnsureScribeAgent) rather than a registry sync, so the source repo no
+// longer needs to be a connected registry.
+func RemoveNaorayScribeRegistry(cfg *config.Config, st *state.State) ([]string, bool) {
+	if st != nil && st.HasMigration(removeNaorayScribeMigration) {
+		return nil, false
+	}
+
+	kept := cfg.Registries[:0]
+	var pruned []string
+	for _, rc := range cfg.Registries {
+		if strings.EqualFold(rc.Repo, "Naoray/scribe") && rc.Builtin {
+			pruned = append(pruned, rc.Repo)
+			continue
+		}
+		kept = append(kept, rc)
+	}
+	cfg.Registries = kept
+
+	if st != nil {
+		st.MarkMigration(removeNaorayScribeMigration)
 		for _, repo := range pruned {
 			st.ClearRegistryFailure(repo)
 		}
