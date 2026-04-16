@@ -72,8 +72,8 @@ func TestApplyBuiltins_FirstRunAddsAllAndMarksVersion(t *testing.T) {
 	if !firstRun {
 		t.Error("first run should report firstRun=true")
 	}
-	if len(added) != 3 {
-		t.Errorf("first run should add 3 builtins, got %d: %v", len(added), added)
+	if len(added) != 4 {
+		t.Errorf("first run should add 4 builtins, got %d: %v", len(added), added)
 	}
 	if added[0] != "Naoray/scribe" {
 		t.Errorf("Naoray/scribe must be first in builtin order, got %q", added[0])
@@ -93,14 +93,17 @@ func TestApplyBuiltins_ExistingUserGetsNaorayScribeBackfilled(t *testing.T) {
 	}
 	added, firstRun := firstrun.ApplyBuiltins(cfg)
 
-	if len(added) != 1 || added[0] != "Naoray/scribe" {
-		t.Errorf("only Naoray/scribe should be backfilled, got %v", added)
+	if len(added) != 2 {
+		t.Errorf("Naoray/scribe and mattpocock/skills should be backfilled, got %v", added)
 	}
 	if firstRun {
 		t.Error("existing user should report firstRun=false")
 	}
 	if cfg.FindRegistry("Naoray/scribe") == nil {
 		t.Error("Naoray/scribe not in config after backfill")
+	}
+	if cfg.FindRegistry("mattpocock/skills") == nil {
+		t.Error("mattpocock/skills not in config after backfill")
 	}
 }
 

@@ -24,10 +24,11 @@ var builtinRepos = []string{
 	"Naoray/scribe",
 	"anthropics/skills",
 	"expo/skills",
+	"mattpocock/skills",
 }
 
 // currentBuiltinsVersion bumps whenever builtinRepos changes.
-const currentBuiltinsVersion = 3
+const currentBuiltinsVersion = 4
 
 // BuiltinRegistries returns RegistryConfig entries for built-in registries.
 func BuiltinRegistries() []config.RegistryConfig {
