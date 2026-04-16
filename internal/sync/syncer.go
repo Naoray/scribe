@@ -41,6 +41,11 @@ type Syncer struct {
 	// unsynced local edits on disk.
 	ModifiedStrategy ModifiedStrategy
 
+	// SkillFilter, if non-nil, restricts the sync to only the named skills.
+	// Skills not in the list are skipped entirely (not even resolved/emitted).
+	// Used by `scribe install` to install specific skills.
+	SkillFilter []string
+
 	// TrustAll skips approval prompts for packages (--trust-all flag).
 	TrustAll bool
 
@@ -217,6 +222,19 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	statuses, _, err := s.Diff(ctx, teamRepo, st)
 	if err != nil {
 		return fmt.Errorf("sync %s: %w", teamRepo, err)
+	}
+	if len(s.SkillFilter) > 0 {
+		allowed := make(map[string]bool, len(s.SkillFilter))
+		for _, n := range s.SkillFilter {
+			allowed[n] = true
+		}
+		filtered := statuses[:0]
+		for _, sk := range statuses {
+			if allowed[sk.Name] {
+				filtered = append(filtered, sk)
+			}
+		}
+		statuses = filtered
 	}
 	return s.apply(ctx, teamRepo, statuses, st)
 }
