@@ -44,7 +44,7 @@ func TestEnsureScribeAgentInstallsWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
 	}
-	if !strings.Contains(string(got), "## First-run bootstrap (do this before anything else)") {
+	if !strings.Contains(string(got), "===setup-start===") {
 		t.Fatal("bootstrap section missing from rendered skill")
 	}
 	if strings.Contains(string(got), "## Keep `scribe` current") {
@@ -242,7 +242,7 @@ func TestEnsureScribeAgentReinstallsOnVersionMismatch(t *testing.T) {
 	if !strings.Contains(string(got), "## Keep `scribe` current") {
 		t.Fatal("steady-state upgrade prompt missing from rendered skill")
 	}
-	if strings.Contains(string(got), "## First-run bootstrap (do this before anything else)") {
+	if strings.Contains(string(got), "===setup-start===") {
 		t.Fatal("bootstrap section should not be present in steady state")
 	}
 }
@@ -286,7 +286,7 @@ func TestRenderScribeAgentBootstrapWhenBinaryMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderScribeAgentMarkdown() error = %v", err)
 	}
-	if !strings.Contains(string(rendered), "## First-run bootstrap (do this before anything else)") {
+	if !strings.Contains(string(rendered), "===setup-start===") {
 		t.Fatal("bootstrap section missing when binary is absent")
 	}
 	if strings.Contains(string(rendered), "## Keep `scribe` current") {
@@ -306,7 +306,7 @@ func TestRenderScribeAgentSteadyStateWhenInstalled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderScribeAgentMarkdown() error = %v", err)
 	}
-	if strings.Contains(string(rendered), "## First-run bootstrap (do this before anything else)") {
+	if strings.Contains(string(rendered), "===setup-start===") {
 		t.Fatal("bootstrap section should not render in steady state")
 	}
 	if !strings.Contains(string(rendered), "## Keep `scribe` current") {
@@ -322,7 +322,7 @@ func TestRenderScribeAgentBootstrapWhenSkillMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderScribeAgentMarkdown() error = %v", err)
 	}
-	if !strings.Contains(string(rendered), "## First-run bootstrap (do this before anything else)") {
+	if !strings.Contains(string(rendered), "===setup-start===") {
 		t.Fatal("bootstrap section missing when skill is absent")
 	}
 	if strings.Contains(string(rendered), "## Keep `scribe` current") {
