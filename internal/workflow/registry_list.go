@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"strings"
-
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/state"
-	"github.com/Naoray/scribe/internal/tools"
 )
 
 // RegistryListSteps returns the step list for the registry list command.
@@ -22,16 +19,18 @@ func RegistryListSteps() []Step {
 	}
 }
 
-// CountSkillsPerRegistry counts installed skills per registry by matching
-// the slugified registry prefix in namespaced skill keys (e.g. "ArtistfyHQ-team-skills/deploy" matches "ArtistfyHQ/team-skills").
+// CountSkillsPerRegistry counts installed skills per registry by inspecting
+// the Sources field of each installed skill.
 func CountSkillsPerRegistry(repos []string, st *state.State) map[string]int {
 	counts := make(map[string]int, len(repos))
 	for _, repo := range repos {
 		counts[repo] = 0
-		slug := tools.SlugifyRegistry(repo)
-		for name := range st.Installed {
-			if strings.HasPrefix(name, slug+"/") {
-				counts[repo]++
+	}
+	for _, skill := range st.Installed {
+		for _, src := range skill.Sources {
+			if _, ok := counts[src.Registry]; ok {
+				counts[src.Registry]++
+				break
 			}
 		}
 	}
