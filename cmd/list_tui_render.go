@@ -527,12 +527,34 @@ func (m listModel) renderPreviewSection(row listRow, width int) string {
 		headingStyle = ltCursorStyle
 	}
 
+	offset := m.clampedExcerptOffset(lines)
+
+	// Build heading line with counter on the left and the "more above"
+	// indicator right-aligned to the pane width. Widths computed on the
+	// unstyled text since lipgloss adds zero-width ANSI escapes.
+	leftRaw := heading
+	styledLeft := headingStyle.Render(heading)
+	if len(lines) > 0 && focused {
+		counter := fmt.Sprintf("%d/%d", offset+1, len(lines))
+		leftRaw += " " + counter
+		styledLeft += " " + ltDimStyle.Render(counter)
+	}
+
 	var out strings.Builder
 	out.WriteString(ltDivStyle.Render(strings.Repeat("─", width)) + "\n")
-	out.WriteString(headingStyle.Render(heading))
-	if len(lines) > 0 && focused {
-		out.WriteString(" " + ltDimStyle.Render(fmt.Sprintf("%d/%d", m.clampedExcerptOffset(lines)+1, len(lines))))
+
+	if offset > 0 {
+		rightRaw := fmt.Sprintf("↑ %d more above", offset)
+		gap := width - runewidth.StringWidth(leftRaw) - runewidth.StringWidth(rightRaw)
+		if gap < 1 {
+			gap = 1
+		}
+		out.WriteString(styledLeft + strings.Repeat(" ", gap) + ltDimStyle.Render(rightRaw) + "\n")
+	} else {
+		out.WriteString(styledLeft + "\n")
 	}
+
+	// Blank spacer line directly under the preview heading.
 	out.WriteString("\n")
 
 	if len(lines) == 0 {
@@ -540,10 +562,6 @@ func (m listModel) renderPreviewSection(row listRow, width int) string {
 		return out.String()
 	}
 
-	offset := m.clampedExcerptOffset(lines)
-	if offset > 0 {
-		out.WriteString(ltDimStyle.Render(fmt.Sprintf("↑ %d more above", offset)) + "\n")
-	}
 	out.WriteString(strings.Join(lines[offset:], "\n"))
 	return out.String()
 }
