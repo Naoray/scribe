@@ -32,6 +32,19 @@ func StoreDir() (string, error) {
 	return filepath.Join(home, ".scribe", "skills"), nil
 }
 
+// PackagesDir returns the path to ~/.scribe/packages/.
+// Packages are self-installing multi-skill bundles that Scribe tracks but
+// never projects into tool skill dirs. They live alongside (not inside) the
+// canonical skill store so tools like Codex can walk ~/.codex/skills/ without
+// tripping on nested SKILL.md files from a package's inner skills.
+func PackagesDir() (string, error) {
+	home, err := homeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".scribe", "packages"), nil
+}
+
 // ConfigPath returns the path to ~/.scribe/config.toml.
 func ConfigPath() (string, error) {
 	home, err := homeDir()

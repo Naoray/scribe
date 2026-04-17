@@ -180,9 +180,14 @@ func TestPrintLocalJSON(t *testing.T) {
 			t.Fatalf("printLocalJSON error: %v", err)
 		}
 		var got []outputSkill
-		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		var wrapper struct {
+			Skills   []outputSkill `json:"skills"`
+			Packages []any         `json:"packages"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &wrapper); err != nil {
 			t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
 		}
+		got = wrapper.Skills
 		if len(got) != 1 {
 			t.Fatalf("expected 1 skill, got %d", len(got))
 		}
@@ -217,9 +222,14 @@ func TestPrintLocalJSON(t *testing.T) {
 			t.Fatalf("printLocalJSON error: %v", err)
 		}
 		var got []outputSkill
-		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		var wrapper struct {
+			Skills   []outputSkill `json:"skills"`
+			Packages []any         `json:"packages"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &wrapper); err != nil {
 			t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
 		}
+		got = wrapper.Skills
 		if len(got) != 1 {
 			t.Fatalf("expected 1 skill, got %d", len(got))
 		}
@@ -255,9 +265,14 @@ func TestPrintLocalJSON(t *testing.T) {
 			t.Fatalf("printLocalJSON error: %v", err)
 		}
 		var got []outputSkill
-		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		var wrapper struct {
+			Skills   []outputSkill `json:"skills"`
+			Packages []any         `json:"packages"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &wrapper); err != nil {
 			t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
 		}
+		got = wrapper.Skills
 		if len(got) != 1 {
 			t.Fatalf("expected 1 skill, got %d", len(got))
 		}
@@ -319,14 +334,62 @@ func TestPrintLocalJSON(t *testing.T) {
 			t.Fatalf("printLocalJSON error: %v", err)
 		}
 		var got []outputSkill
-		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		var wrapper struct {
+			Skills   []outputSkill `json:"skills"`
+			Packages []any         `json:"packages"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &wrapper); err != nil {
 			t.Fatalf("json.Unmarshal error: %v\nraw: %s", err, buf.String())
 		}
+		got = wrapper.Skills
 		if got[0].Targets == nil {
 			t.Error("targets should be [] not null")
 		}
 		if len(got[0].Targets) != 0 {
 			t.Errorf("targets = %v, want empty array", got[0].Targets)
+		}
+	})
+
+	t.Run("packages surface in dedicated section", func(t *testing.T) {
+		st := &state.State{Installed: map[string]state.InstalledSkill{
+			"gstack": {
+				Revision:   2,
+				Kind:       state.KindPackage,
+				InstallCmd: "./setup",
+				Sources:    []state.SkillSource{{Registry: "Naoray/gstack"}},
+			},
+			"plain": {Revision: 1},
+		}}
+		skills := []discovery.Skill{
+			{Name: "plain", ContentHash: "h", Targets: []string{"claude"}, Managed: true},
+			// gstack intentionally absent from discovery — packages live
+			// under ~/.scribe/packages/ which plain list_test doesn't stage.
+		}
+		var buf bytes.Buffer
+		if err := printLocalJSON(&buf, skills, st); err != nil {
+			t.Fatalf("printLocalJSON: %v", err)
+		}
+		var out struct {
+			Skills []struct {
+				Name string `json:"name"`
+			} `json:"skills"`
+			Packages []struct {
+				Name       string `json:"name"`
+				Revision   int    `json:"revision"`
+				InstallCmd string `json:"install_cmd"`
+			} `json:"packages"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+			t.Fatalf("unmarshal: %v\nraw: %s", err, buf.String())
+		}
+		if len(out.Skills) != 1 || out.Skills[0].Name != "plain" {
+			t.Errorf("skills = %+v, want just plain", out.Skills)
+		}
+		if len(out.Packages) != 1 || out.Packages[0].Name != "gstack" {
+			t.Fatalf("packages = %+v, want gstack", out.Packages)
+		}
+		if out.Packages[0].InstallCmd != "./setup" {
+			t.Errorf("install_cmd = %q", out.Packages[0].InstallCmd)
 		}
 	})
 }

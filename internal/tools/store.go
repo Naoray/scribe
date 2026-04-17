@@ -101,6 +101,69 @@ func StoreDir() (string, error) {
 	return paths.StoreDir()
 }
 
+// PackagesDir returns the ~/.scribe/packages/ directory path.
+func PackagesDir() (string, error) {
+	return paths.PackagesDir()
+}
+
+// WriteToPackageStore writes all package files to ~/.scribe/packages/<name>/.
+// Returns the canonical package directory. Like WriteToStore it does a clean
+// rewrite, but it preserves no merge-base copy and does NOT apply any tool
+// projection — packages are self-installing and Scribe never links them into
+// agent skill dirs.
+//
+// File-mode handling: scripts named setup / install.sh / install / bootstrap
+// at the package root are made executable so the install runner can invoke
+// them directly. Everything else is written 0644.
+func WriteToPackageStore(name string, files []SkillFile) (string, error) {
+	if reservedNames[name] {
+		return "", fmt.Errorf("invalid package name %q: reserved name", name)
+	}
+	if strings.Contains(name, "..") || filepath.IsAbs(name) {
+		return "", fmt.Errorf("invalid package name %q: contains path traversal", name)
+	}
+
+	base, err := PackagesDir()
+	if err != nil {
+		return "", err
+	}
+	pkgDir := filepath.Join(base, name)
+
+	// Clean slate on update.
+	if err := os.RemoveAll(pkgDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("clear package dir: %w", err)
+	}
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		return "", fmt.Errorf("create package dir: %w", err)
+	}
+
+	executableNames := map[string]bool{
+		"setup":      true,
+		"install.sh": true,
+		"install":    true,
+		"bootstrap":  true,
+	}
+
+	for _, f := range files {
+		dest := filepath.Join(pkgDir, f.Path)
+		if !strings.HasPrefix(filepath.Clean(dest), filepath.Clean(pkgDir)+string(filepath.Separator)) && filepath.Clean(dest) != filepath.Clean(pkgDir) {
+			return "", fmt.Errorf("invalid file path %q: escapes package directory", f.Path)
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return "", fmt.Errorf("create dir for %s: %w", f.Path, err)
+		}
+		mode := os.FileMode(0o644)
+		if !strings.Contains(filepath.ToSlash(f.Path), "/") && executableNames[filepath.Base(f.Path)] {
+			mode = 0o755
+		}
+		if err := os.WriteFile(dest, f.Content, mode); err != nil {
+			return "", fmt.Errorf("write %s: %w", f.Path, err)
+		}
+	}
+
+	return pkgDir, nil
+}
+
 // WriteCanonicalSkill rewrites the canonical SKILL.md content and refreshes the
 // stored merge base to match. Used by repair flows that promote a tool-local
 // single-file projection back into the canonical store.

@@ -62,7 +62,7 @@ func runSkillTools(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("skill %q is not installed — run `scribe list` to see managed skills", name)
 	}
-	if installed.Type == "package" {
+	if installed.IsPackage() {
 		return fmt.Errorf("skill %q is a package — per-skill tool assignment does not apply", name)
 	}
 

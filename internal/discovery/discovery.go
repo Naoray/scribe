@@ -55,6 +55,10 @@ type Skill struct {
 	Conflicted  bool     // SKILL.md contains unresolved merge conflict markers
 	Revision    int      // from state
 	Managed     bool     // tracked in state AND LocalPath is inside ~/.scribe/skills/
+	// IsPackage reports whether this row represents a ~/.scribe/packages/<name>/
+	// tree package rather than a regular skill. Packages self-install and
+	// don't get projected into tool skill dirs.
+	IsPackage bool
 }
 
 // OnDisk scans ~/.scribe/skills/ plus tool-facing install locations that are
@@ -122,16 +126,46 @@ func OnDisk(st *state.State) ([]Skill, error) {
 	}
 	skills = append(skills, pluginFound...)
 
-	// 4. Include state-tracked skills not found on disk (orphans).
+	// 4. Scan ~/.scribe/packages/ — these entries never appear in tool skill
+	// dirs, so surface them here directly from the packages store (and from
+	// state as a fallback) so the list view can show them.
+	packagesRoot := filepath.Join(home, ".scribe", "packages")
+	pkgEntries, err := os.ReadDir(packagesRoot)
+	if err == nil {
+		for _, entry := range pkgEntries {
+			if !entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if seen[name] {
+				continue
+			}
+			pkgDir := filepath.Join(packagesRoot, name)
+			sk := Skill{
+				Name:      name,
+				LocalPath: pkgDir,
+				Managed:   true,
+				IsPackage: true,
+			}
+			if installed, ok := st.Installed[name]; ok {
+				sk.Revision = installed.Revision
+			}
+			seen[name] = true
+			skills = append(skills, sk)
+		}
+	}
+
+	// 5. Include state-tracked skills not found on disk (orphans).
 	for name, installed := range st.Installed {
 		if seen[name] {
 			continue
 		}
 		skills = append(skills, Skill{
-			Name:     name,
-			Targets:  installed.Tools,
-			Revision: installed.Revision,
-			Managed:  true, // state-tracked → managed regardless of disk presence
+			Name:      name,
+			Targets:   installed.Tools,
+			Revision:  installed.Revision,
+			Managed:   true, // state-tracked → managed regardless of disk presence
+			IsPackage: installed.IsPackage(),
 		})
 	}
 

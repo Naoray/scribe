@@ -35,6 +35,7 @@ type ListRow struct {
 	Excerpt   string
 	Managed   bool
 	Origin    state.Origin
+	Kind      state.Kind
 }
 
 func BuildRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
@@ -112,6 +113,7 @@ func BuildRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
 			}
 			if installed, ok := bag.State.Installed[ss.Name]; ok {
 				row.Origin = installed.Origin
+				row.Kind = installed.Kind
 			}
 			if ss.Installed != nil {
 				row.Targets = ss.Installed.Tools
@@ -142,9 +144,13 @@ func BuildLocalRows(skills []discovery.Skill, st *state.State) []ListRow {
 		}
 		if installed, ok := st.Installed[sk.Name]; ok {
 			row.Origin = installed.Origin
+			row.Kind = installed.Kind
 			if len(installed.Sources) > 0 && installed.Sources[0].Registry != "" {
 				row.Group = installed.Sources[0].Registry
 			}
+		}
+		if sk.IsPackage {
+			row.Kind = state.KindPackage
 		}
 		if sk.LocalPath != "" {
 			row.Excerpt = readExcerpt(sk.LocalPath, excerptLineBudget)

@@ -224,3 +224,96 @@ func TestReconcileRemovesStaleManagedProjection(t *testing.T) {
 		t.Fatalf("toolPath still exists: %v", err)
 	}
 }
+
+func TestReconcileSkipsPackages(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Stage a tree package as if sync wrote it.
+	pkgsDir, err := tools.PackagesDir()
+	if err != nil {
+		t.Fatalf("PackagesDir: %v", err)
+	}
+	pkgDir := filepath.Join(pkgsDir, "gstack")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "SKILL.md"), []byte("# pkg\n"), 0o644); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"gstack": {Revision: 1, Kind: state.KindPackage, Tools: []string{}, Paths: []string{}},
+	}}
+
+	engine := reconcile.Engine{Tools: []tools.Tool{tools.ClaudeTool{}, tools.CodexTool{}}, Now: func() time.Time { return time.Unix(1, 0).UTC() }}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// No projections should be attempted for a package.
+	if summary.Installed != 0 {
+		t.Fatalf("Installed = %d, want 0 for a package", summary.Installed)
+	}
+	if summary.Relinked != 0 || summary.Removed != 0 {
+		t.Fatalf("summary = %+v, want all-zero for a package", summary)
+	}
+	for _, a := range actions {
+		if a.Name == "gstack" {
+			t.Fatalf("unexpected action for package: %+v", a)
+		}
+	}
+
+	// No tool-side symlinks should have been created.
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "gstack")); err == nil {
+		t.Error("claude skills/gstack symlink was created for a package")
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".codex", "skills", "gstack")); err == nil {
+		t.Error("codex skills/gstack symlink was created for a package")
+	}
+}
+
+func TestReconcileRemovesStalePackageProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Simulate a legacy install: skill was projected into ~/.claude/skills/
+	// and then reclassified into packages/. Reconcile should clean the
+	// stale projection up next pass.
+	pkgsDir, _ := tools.PackagesDir()
+	pkgDir := filepath.Join(pkgsDir, "gstack")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "SKILL.md"), []byte("# pkg\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	stale := filepath.Join(home, ".claude", "skills", "gstack")
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(pkgDir, stale); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"gstack": {
+			Revision:     1,
+			Kind:         state.KindPackage,
+			ManagedPaths: []string{stale},
+		},
+	}}
+	engine := reconcile.Engine{Tools: []tools.Tool{tools.ClaudeTool{}}, Now: func() time.Time { return time.Unix(1, 0).UTC() }}
+	summary, _, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Removed != 1 {
+		t.Fatalf("Removed = %d, want 1", summary.Removed)
+	}
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale package projection still exists: %v", err)
+	}
+}

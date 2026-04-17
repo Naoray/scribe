@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -113,38 +115,55 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Uninstall from every tool that originally installed the skill, even if
-	// that tool is now disabled or missing from config. Otherwise disabling a
-	// tool after install would orphan its side of the skill on disk.
 	var errs []string
-	for _, name := range installed.Tools {
-		tool, err := tools.ResolveByName(cfg, name)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
-			continue
-		}
-		if err := tool.Uninstall(key); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
-		}
-	}
 
-	// Remove from canonical store.
-	storeDir, err := tools.StoreDir()
-	if err == nil {
-		skillDir := filepath.Join(storeDir, key)
-		if err := os.RemoveAll(skillDir); err != nil {
-			errs = append(errs, fmt.Sprintf("store: %v", err))
+	// Packages self-manage: best-effort uninstall command, then drop the
+	// package dir. Skip tool uninstallers and projection cleanup because
+	// packages were never projected in the first place.
+	if installed.Kind == state.KindPackage {
+		if uninstallErrs := runPackageUninstall(cmd, key, installed); len(uninstallErrs) > 0 {
+			errs = append(errs, uninstallErrs...)
 		}
-	}
+		pkgsDir, pdErr := tools.PackagesDir()
+		if pdErr == nil {
+			pkgDir := filepath.Join(pkgsDir, key)
+			if err := os.RemoveAll(pkgDir); err != nil {
+				errs = append(errs, fmt.Sprintf("package store: %v", err))
+			}
+		}
+	} else {
+		// Uninstall from every tool that originally installed the skill, even if
+		// that tool is now disabled or missing from config. Otherwise disabling a
+		// tool after install would orphan its side of the skill on disk.
+		for _, name := range installed.Tools {
+			tool, err := tools.ResolveByName(cfg, name)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", name, err))
+				continue
+			}
+			if err := tool.Uninstall(key); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", name, err))
+			}
+		}
 
-	// Remove only the projections Scribe still believes it manages.
-	managedPaths := installed.ManagedPaths
-	if len(managedPaths) == 0 {
-		managedPaths = installed.Paths
-	}
-	for _, p := range managedPaths {
-		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Sprintf("managed path %s: %v", p, err))
+		// Remove from canonical store.
+		storeDir, err := tools.StoreDir()
+		if err == nil {
+			skillDir := filepath.Join(storeDir, key)
+			if err := os.RemoveAll(skillDir); err != nil {
+				errs = append(errs, fmt.Sprintf("store: %v", err))
+			}
+		}
+
+		// Remove only the projections Scribe still believes it manages.
+		managedPaths := installed.ManagedPaths
+		if len(managedPaths) == 0 {
+			managedPaths = installed.Paths
+		}
+		for _, p := range managedPaths {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Sprintf("managed path %s: %v", p, err))
+			}
 		}
 	}
 
@@ -238,6 +257,45 @@ func findBareNameMatches(input string, keys []string) []string {
 		}
 	}
 	return matches
+}
+
+// runPackageUninstall executes the package's declared uninstall command, if
+// any. Resolution mirrors the install side: scribe.yaml's install.uninstall
+// field, else an uninstall.sh at the package root. Best-effort — non-zero
+// exit is returned as a warning, never fatal.
+func runPackageUninstall(cmd *cobra.Command, name string, installed state.InstalledSkill) []string {
+	pkgsDir, err := tools.PackagesDir()
+	if err != nil {
+		return []string{fmt.Sprintf("packages dir: %v", err)}
+	}
+	pkgDir := filepath.Join(pkgsDir, name)
+
+	// Best-effort: skip silently if the dir is already gone.
+	if _, err := os.Stat(pkgDir); err != nil {
+		return nil
+	}
+
+	// Prefer scribe.yaml → install.uninstall; fall back to uninstall.sh.
+	var uninstallCmd string
+	if plan, err := sync.ResolvePackageInstall(pkgDir); err == nil && plan.Uninstall != "" {
+		uninstallCmd = plan.Uninstall
+	} else if _, err := os.Stat(filepath.Join(pkgDir, "uninstall.sh")); err == nil {
+		uninstallCmd = "sh uninstall.sh"
+	}
+	if uninstallCmd == "" {
+		return nil
+	}
+
+	exec := &sync.ShellExecutor{}
+	_, stderr, err := sync.RunPackageCommand(cmd.Context(), exec, pkgDir, uninstallCmd, 0)
+	if err != nil {
+		warn := fmt.Sprintf("uninstall command: %v", err)
+		if stderr != "" {
+			warn += " (" + strings.TrimSpace(stderr) + ")"
+		}
+		return []string{warn}
+	}
+	return nil
 }
 
 // findManagingRegistries returns registry repos that manage the given skill key.

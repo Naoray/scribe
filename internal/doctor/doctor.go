@@ -50,7 +50,7 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 	for _, skillName := range names {
 		skill := st.Installed[skillName]
 
-		if skill.Type == "package" {
+		if skill.IsPackage() {
 			continue
 		}
 
@@ -193,7 +193,7 @@ func inspectCanonicalMetadata(skillName string) ([]Issue, error) {
 
 func inspectProjectionDrift(cfg *config.Config, skillName string, skill state.InstalledSkill, availableTools []string) (Issue, bool) {
 	expectedTools := skill.EffectiveTools(availableTools)
-	if skill.Type == "package" {
+	if skill.IsPackage() {
 		return Issue{}, false
 	}
 

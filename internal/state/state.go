@@ -63,6 +63,21 @@ const (
 	ToolsModePinned ToolsMode = "pinned"
 )
 
+// Kind classifies how a tracked entry is stored and projected.
+//
+// KindSkill (zero-value, also legacy default) is the canonical skill case:
+// files in ~/.scribe/skills/<name>/ and dir-symlinked into tool skill dirs.
+//
+// KindPackage is a self-installing multi-skill bundle. Files live in
+// ~/.scribe/packages/<name>/ and are NEVER projected into agent skill dirs.
+// Reconcile, discovery, and the list TUI all treat packages as opaque.
+type Kind string
+
+const (
+	KindSkill   Kind = ""
+	KindPackage Kind = "package"
+)
+
 // InstalledSkill records everything needed to detect updates and uninstall.
 type InstalledSkill struct {
 	Revision      int                  `json:"revision"`
@@ -76,6 +91,12 @@ type InstalledSkill struct {
 	Conflicts     []ProjectionConflict `json:"projection_conflicts,omitempty"`
 	Origin        Origin               `json:"origin,omitempty"`
 
+	// Kind distinguishes auto-detected tree packages (files under
+	// ~/.scribe/packages/<name>/) from regular skills. Missing value on
+	// legacy entries defaults to KindSkill; the first sync after upgrade
+	// may flip an entry to KindPackage via the reclassification pass.
+	Kind Kind `json:"kind,omitempty"`
+
 	// Package-specific fields (omitted for regular skills).
 	Type       string    `json:"type,omitempty"`
 	InstallCmd string    `json:"install_cmd,omitempty"`
@@ -83,6 +104,13 @@ type InstalledSkill struct {
 	CmdHash    string    `json:"cmd_hash,omitempty"`
 	Approval   string    `json:"approval,omitempty"`
 	ApprovedAt time.Time `json:"approved_at,omitempty"`
+}
+
+// IsPackage reports whether this state entry is a tree-package (new kind
+// field) or a legacy manifest-declared command-only package (Type field).
+// Both flavours skip projection into tool skill dirs.
+func (i InstalledSkill) IsPackage() bool {
+	return i.Kind == KindPackage || i.Type == "package"
 }
 
 // SkillSource records a registry that provides this skill.
@@ -137,6 +165,7 @@ type legacyInstalledSkill struct {
 	Sources       []SkillSource `json:"sources,omitempty"`
 	Origin        Origin        `json:"origin,omitempty"`
 	ToolsMode     ToolsMode     `json:"tools_mode,omitempty"`
+	Kind          Kind          `json:"kind,omitempty"`
 }
 
 // DisplayVersion returns the version string shown in `scribe list`.
@@ -482,6 +511,14 @@ func (s *State) RecordScribeBinaryUpdateSuccessAt(at time.Time) {
 // legacyToSkill converts a legacyInstalledSkill to an InstalledSkill,
 // carrying over all fields that map directly.
 func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
+	kind := ls.Kind
+	// Legacy manifest-declared command-only packages used Type="package"
+	// exclusively; treat them as KindPackage on load so downstream checks can
+	// simply consult Kind. We intentionally do NOT clear Type — downstream
+	// code may still rely on it for manifest-type (command-only) handling.
+	if kind == KindSkill && ls.Type == "package" {
+		kind = KindPackage
+	}
 	return InstalledSkill{
 		Revision:      ls.Revision,
 		InstalledHash: ls.InstalledHash,
@@ -492,6 +529,7 @@ func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
 		Paths:         ls.Paths,
 		ManagedPaths:  append([]string(nil), ls.Paths...),
 		Origin:        ls.Origin,
+		Kind:          kind,
 		Type:          ls.Type,
 		InstallCmd:    ls.InstallCmd,
 		UpdateCmd:     ls.UpdateCmd,
@@ -528,7 +566,7 @@ func normalizeBranchSourceSHAs(s *State) {
 	}
 
 	for name, skill := range s.Installed {
-		if skill.Type == "package" {
+		if skill.IsPackage() {
 			continue
 		}
 		changed := false
@@ -551,7 +589,7 @@ func normalizeBranchSourceSHAs(s *State) {
 
 func seedManagedPaths(s *State) {
 	for name, skill := range s.Installed {
-		if skill.Type == "package" {
+		if skill.IsPackage() {
 			// Packages own their own install lifecycle and their Paths
 			// (if any) are command-output, not tool projections.
 			continue

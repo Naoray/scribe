@@ -11,7 +11,7 @@ package state
 // full available list. This mirrors the existing behavior where packages install
 // independently of tool-facing symlinks.
 func (s InstalledSkill) EffectiveTools(available []string) []string {
-	if s.Type == "package" {
+	if s.IsPackage() {
 		return append([]string(nil), available...)
 	}
 	if s.ToolsMode != ToolsModePinned {

@@ -224,7 +224,7 @@ func doctorSkillNames(st *state.State, skillName string) []string {
 
 	names := make([]string, 0, len(st.Installed))
 	for name, installed := range st.Installed {
-		if installed.Type == "package" {
+		if installed.IsPackage() {
 			continue
 		}
 		names = append(names, name)

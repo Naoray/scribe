@@ -85,6 +85,86 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
+func TestKindRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	s, _ := state.Load()
+	s.RecordInstall("gstack", state.InstalledSkill{
+		Revision: 1,
+		Kind:     state.KindPackage,
+	})
+	s.RecordInstall("brand", state.InstalledSkill{
+		Revision: 1,
+		// Kind omitted — legacy skill default.
+	})
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := loaded.Installed["gstack"].Kind; got != state.KindPackage {
+		t.Errorf("gstack kind = %q, want %q", got, state.KindPackage)
+	}
+	if !loaded.Installed["gstack"].IsPackage() {
+		t.Error("gstack IsPackage() = false, want true")
+	}
+	if got := loaded.Installed["brand"].Kind; got != state.KindSkill {
+		t.Errorf("brand kind = %q, want skill (empty)", got)
+	}
+	if loaded.Installed["brand"].IsPackage() {
+		t.Error("brand IsPackage() = true, want false")
+	}
+}
+
+func TestLegacyTypePackageMigratesToKind(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Hand-craft a state.json representing a legacy (pre-Kind) manifest
+	// package entry: Type="package" only, no Kind.
+	scribeDir := filepath.Join(home, ".scribe")
+	if err := os.MkdirAll(scribeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	legacy := []byte(`{
+		"schema_version": 4,
+		"installed": {
+			"superpowers": {
+				"revision": 1,
+				"type": "package",
+				"install_cmd": "echo install",
+				"installed_at": "2026-04-17T00:00:00Z",
+				"tools": [],
+				"paths": []
+			}
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(scribeDir, "state.json"), legacy, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	sp, ok := loaded.Installed["superpowers"]
+	if !ok {
+		t.Fatal("superpowers not loaded")
+	}
+	if sp.Kind != state.KindPackage {
+		t.Errorf("expected legacy type=package to migrate into Kind=package; got Kind=%q", sp.Kind)
+	}
+	if sp.Type != "package" {
+		t.Errorf("expected Type to remain for command-only packages; got %q", sp.Type)
+	}
+	if !sp.IsPackage() {
+		t.Error("IsPackage() should be true")
+	}
+}
+
 func TestBinaryUpdateChecksRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
