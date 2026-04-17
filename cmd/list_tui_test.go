@@ -503,6 +503,61 @@ func TestViewListFull_DoesNotOverflowViewportAndKeepsTopChrome(t *testing.T) {
 	}
 }
 
+func TestEnsureCursorVisible_ReservesSlotsForMoreAboveAndBelowIndicators(t *testing.T) {
+	// Regression: ensureCursorVisible must mirror renderRows' budget so the
+	// cursor row is actually drawn. Before the fix, the top/bottom "↑/↓ more"
+	// indicators were not subtracted from the viewport, so the cursor could
+	// sit one or two rows past the last rendered line and the list appeared
+	// frozen on arrow presses until offset caught up.
+	rows := make([]listRow, 80)
+	for i := range rows {
+		rows[i] = listRow{Name: "s", Group: "g"}
+	}
+	m := listModel{
+		width:    80,
+		height:   27, // contentHeight = 27 - 7 = 20
+		rows:     rows,
+		filtered: rows,
+		cursor:   20,
+	}
+	m = m.ensureCursorVisible()
+
+	if !m.cursorFitsAt(m.offset, m.contentHeight()) {
+		t.Fatalf("cursor (%d) does not fit at offset %d with viewport %d", m.cursor, m.offset, m.contentHeight())
+	}
+	if m.offset == 0 {
+		t.Fatalf("offset should have advanced past 0 to keep cursor visible, got offset=%d", m.offset)
+	}
+}
+
+func TestViewListFull_PadsContentToPinSummaryToBottom(t *testing.T) {
+	// Regression: the summary + help footer must sit at the bottom of the
+	// terminal, not float mid-screen when the filtered list is shorter than
+	// the viewport.
+	rows := []listRow{
+		{Name: "alpha", Group: "local"},
+		{Name: "beta", Group: "local"},
+	}
+	m := listModel{
+		width:       80,
+		height:      25,
+		rows:        rows,
+		filtered:    rows,
+		groupCounts: map[string]int{"local": 2},
+		bag:         &workflow.Bag{},
+	}
+
+	view := m.viewListFull()
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	if len(lines) != m.height {
+		t.Fatalf("view rendered %d lines, want %d (full viewport):\n%s", len(lines), m.height, view)
+	}
+	// Commands help is the very last line when pinned to the terminal bottom.
+	if !strings.Contains(lines[len(lines)-1], "Commands:") {
+		t.Fatalf("last line should be the Commands help, got %q", lines[len(lines)-1])
+	}
+}
+
 func TestRefreshFilteredBuildsGroupCounts(t *testing.T) {
 	m := listModel{
 		rows: []listRow{

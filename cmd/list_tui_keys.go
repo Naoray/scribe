@@ -881,27 +881,50 @@ func buildGroupCounts(rows []listRow) map[string]int {
 
 func (m listModel) ensureCursorVisible() listModel {
 	visible := m.contentHeight()
-	headersBetween := 0
-	prevGroup := ""
-	if m.offset > 0 && m.offset < len(m.filtered) {
-		prevGroup = m.filtered[m.offset-1].Group
-	}
-	for i := m.offset; i <= m.cursor && i < len(m.filtered); i++ {
-		if m.filtered[i].Group != prevGroup {
-			headersBetween++
-			prevGroup = m.filtered[i].Group
-		}
-	}
-	effectiveVisible := visible - headersBetween
-	if effectiveVisible < 3 {
-		effectiveVisible = 3
+	if visible < 3 {
+		visible = 3
 	}
 
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}
-	if m.cursor >= m.offset+effectiveVisible {
-		m.offset = m.cursor - effectiveVisible + 1
+	for m.offset < m.cursor && !m.cursorFitsAt(m.offset, visible) {
+		m.offset++
 	}
 	return m
+}
+
+// cursorFitsAt simulates renderRows' line budget to decide whether the
+// cursor row will actually be drawn when the viewport starts at `offset`.
+// Must stay in sync with renderRows — accounts for the top/bottom "more"
+// indicators and group-header rows that eat into the capacity.
+func (m listModel) cursorFitsAt(offset, capacity int) bool {
+	linesUsed := 0
+	if offset > 0 {
+		linesUsed++
+	}
+	prevGroup := ""
+	if offset > 0 && offset < len(m.filtered) {
+		prevGroup = m.filtered[offset-1].Group
+	}
+	for i := offset; i < len(m.filtered); i++ {
+		row := m.filtered[i]
+		headerLines := 0
+		if row.Group != prevGroup {
+			headerLines = 1
+		}
+		needed := headerLines + 1
+		if remainingAfter := len(m.filtered) - (i + 1); remainingAfter > 0 {
+			needed++
+		}
+		if linesUsed+needed > capacity {
+			return i > m.cursor
+		}
+		linesUsed += headerLines + 1
+		prevGroup = row.Group
+		if i == m.cursor {
+			return true
+		}
+	}
+	return true
 }
