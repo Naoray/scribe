@@ -661,7 +661,12 @@ func (m listModel) metadataPairsForRow(row listRow) []metaPair {
 	add("Author", row.Author)
 	add("Registry", row.Group)
 	add("Source", originLabel(row.Origin))
-	add("Tools", strings.Join(row.Targets, ", "))
+	if row.Kind == state.KindPackage {
+		add("Kind", "package")
+		add("Tools", "self-managed")
+	} else {
+		add("Tools", strings.Join(row.Targets, ", "))
+	}
 	add("Path", skillPathLabel(row))
 	return pairs
 }

@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -133,5 +137,48 @@ func TestRemoveLeavesConflictResidue(t *testing.T) {
 	}
 	if _, err := os.Stat(residue); err != nil {
 		t.Fatalf("conflict residue missing: %v", err)
+	}
+}
+
+func TestRunPackageUninstall_RunsScribeYAMLCommand(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	pkgsDir, _ := paths.PackagesDir()
+	pkgDir := filepath.Join(pkgsDir, "gstack")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	marker := filepath.Join(pkgDir, "UNINSTALLED")
+	manifest := []byte("install:\n  command: ./setup\n  uninstall: touch " + marker + "\n")
+	if err := os.WriteFile(filepath.Join(pkgDir, "scribe.yaml"), manifest, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	warnings := runPackageUninstall(cmd, "gstack", state.InstalledSkill{Kind: state.KindPackage})
+	if len(warnings) > 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("uninstall command did not run: %v", err)
+	}
+}
+
+func TestRunPackageUninstall_NoManifestNoop(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	pkgsDir, _ := paths.PackagesDir()
+	pkgDir := filepath.Join(pkgsDir, "bare")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	warnings := runPackageUninstall(cmd, "bare", state.InstalledSkill{Kind: state.KindPackage})
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", warnings)
 	}
 }

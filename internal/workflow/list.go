@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/Naoray/scribe/internal/discovery"
+	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -88,9 +90,30 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 		Origin      string   `json:"origin,omitempty"`
 		Path        string   `json:"path,omitempty"`
 	}
+	type localPackageJSON struct {
+		Name        string   `json:"name"`
+		Description string   `json:"description,omitempty"`
+		Revision    int      `json:"revision,omitempty"`
+		Path        string   `json:"path,omitempty"`
+		InstallCmd  string   `json:"install_cmd,omitempty"`
+		Sources     []string `json:"sources,omitempty"`
+	}
 
-	out := make([]localSkillJSON, 0, len(skills))
+	skillsOut := make([]localSkillJSON, 0, len(skills))
+	// Emit one entry per discovered skill that is NOT tracked as a package.
+	// Package entries come from the state map because discovery walks
+	// ~/.scribe/skills/ and tool dirs, neither of which now hold packages.
 	for _, sk := range skills {
+		// A sub-skill whose Package name matches an installed package entry
+		// should not surface as a standalone skill — the package owns it.
+		if sk.Package != "" {
+			if inst, ok := st.Installed[sk.Package]; ok && inst.IsPackage() {
+				continue
+			}
+		}
+		if inst, ok := st.Installed[sk.Name]; ok && inst.IsPackage() {
+			continue
+		}
 		targets := sk.Targets
 		if targets == nil {
 			targets = []string{}
@@ -101,7 +124,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 			origin = "local"
 		}
 
-		out = append(out, localSkillJSON{
+		skillsOut = append(skillsOut, localSkillJSON{
 			Name:        sk.Name,
 			Description: sk.Description,
 			Package:     sk.Package,
@@ -114,9 +137,44 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 		})
 	}
 
+	packagesOut := make([]localPackageJSON, 0)
+	for name, inst := range st.Installed {
+		if !inst.IsPackage() {
+			continue
+		}
+		pkgsDir, _ := stateInstalledPackageDir(name)
+		srcRegistries := make([]string, 0, len(inst.Sources))
+		for _, s := range inst.Sources {
+			if s.Registry != "" {
+				srcRegistries = append(srcRegistries, s.Registry)
+			}
+		}
+		packagesOut = append(packagesOut, localPackageJSON{
+			Name:       name,
+			Revision:   inst.Revision,
+			Path:       pkgsDir,
+			InstallCmd: inst.InstallCmd,
+			Sources:    srcRegistries,
+		})
+	}
+
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return enc.Encode(map[string]any{
+		"skills":   skillsOut,
+		"packages": packagesOut,
+	})
+}
+
+// stateInstalledPackageDir resolves the canonical package directory for a
+// given package name. Returns the empty string if the packages root cannot
+// be resolved (we still emit the entry).
+func stateInstalledPackageDir(name string) (string, error) {
+	pkgs, err := paths.PackagesDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(pkgs, name), nil
 }
 
 func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) (bool, error) {
