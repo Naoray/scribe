@@ -233,3 +233,31 @@ type PackageUpdateMsg struct{ Name string }
 
 // PackageUpdatedMsg is sent when a package update completes successfully.
 type PackageUpdatedMsg struct{ Name string }
+
+// PackageDetectedMsg is emitted when a fetched payload was classified as a
+// tree-package (nested SKILL.md or install script). Lets the UI show a
+// "stored as package" hint before the install command runs.
+type PackageDetectedMsg struct {
+	Name   string
+	Dir    string
+	Source string // where the install command came from (scribe.yaml, ./setup, …)
+}
+
+// PackageOutputMsg streams a package install/uninstall command's combined
+// output to the UI. Emitted once per command, after it finishes.
+type PackageOutputMsg struct {
+	Name   string
+	Stdout string
+	Stderr string
+}
+
+// PackageReclassifiedMsg is emitted by the migration pass when a legacy
+// skills/ install is moved into packages/ because its tree shape identifies
+// it as a package. InstallHint carries a note about whether setup should
+// be re-run (we don't auto-run during migration).
+type PackageReclassifiedMsg struct {
+	Name        string
+	OldPath     string
+	NewPath     string
+	InstallHint string
+}

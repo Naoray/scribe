@@ -318,6 +318,16 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				}
 			}
 
+			// Auto-detect tree packages: repos with nested SKILL.md or an
+			// install script route into ~/.scribe/packages/<name>/ and
+			// never get projected into tool skill dirs. Skips this branch
+			// only when the manifest already declared a command-only
+			// package (handled above via sk.IsPackage).
+			if DetectKind(tFiles) == KindPackage {
+				s.applyTreePackage(ctx, sk, teamRepo, tFiles, st, &summary)
+				continue
+			}
+
 			// Check for local modifications before writing.
 			installed := lookupInstalled(st, sk.Name)
 			if installed != nil && sk.Status == StatusOutdated {
@@ -842,4 +852,123 @@ func (s *Syncer) updateSourceEntry(st *state.State, skillName, teamRepo string, 
 	existing := st.Installed[skillName]
 	existing.Sources = mergeSources(installed, newSource)
 	st.Installed[skillName] = existing
+}
+
+// applyTreePackage writes a fetched multi-skill repo into ~/.scribe/packages/
+// and runs its self-install command. Rolls back on failure. Never creates
+// tool projections; packages own their own wiring.
+func (s *Syncer) applyTreePackage(ctx context.Context, sk SkillStatus, teamRepo string, files []tools.SkillFile, st *state.State, summary *SyncCompleteMsg) {
+	installed := lookupInstalled(st, sk.Name)
+
+	// Before writing packages/<name>/, clear any stale skills/<name>/ dir
+	// plus its tool projections — these come from a prior install that
+	// routed the same repo through the skill path. See also the migration
+	// pass in Syncer.RunPackageReclassification for bulk cases.
+	if installed != nil && !installed.IsPackage() {
+		if err := s.pruneStaleSkillInstall(sk.Name, installed); err != nil {
+			s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("prune stale skill install: %w", err)})
+			summary.Failed++
+			return
+		}
+	}
+
+	pkgDir, err := tools.WriteToPackageStore(sk.Name, files)
+	if err != nil {
+		s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("write package store: %w", err)})
+		summary.Failed++
+		return
+	}
+
+	plan, err := ResolvePackageInstall(pkgDir)
+	if err != nil {
+		_ = os.RemoveAll(pkgDir)
+		s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("resolve install: %w", err)})
+		summary.Failed++
+		return
+	}
+
+	s.emit(PackageDetectedMsg{Name: sk.Name, Dir: pkgDir, Source: plan.Source})
+
+	if plan.Command != "" {
+		if s.Executor == nil {
+			_ = os.RemoveAll(pkgDir)
+			s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("no command executor configured")})
+			summary.Failed++
+			return
+		}
+		s.emit(PackageInstallingMsg{Name: sk.Name})
+		timeout := defaultPackageTimeout
+		if sk.Entry != nil && sk.Entry.Timeout > 0 {
+			timeout = time.Duration(sk.Entry.Timeout) * time.Second
+		}
+		stdout, stderr, runErr := RunPackageCommand(ctx, s.Executor, pkgDir, plan.Command, timeout)
+		s.emit(PackageOutputMsg{Name: sk.Name, Stdout: stdout, Stderr: stderr})
+		if runErr != nil {
+			// Roll back: a failed install must not leave a half-extracted tree
+			// behind where `scribe list` would later show it as healthy.
+			_ = os.RemoveAll(pkgDir)
+			s.emit(PackageErrorMsg{Name: sk.Name, Err: runErr, Stderr: stderr})
+			summary.Failed++
+			return
+		}
+	}
+
+	// Record state. Packages carry empty Tools/Paths because Scribe never
+	// projects them into tool skill dirs — the package ran its own install
+	// and anything it needs now lives wherever that script decided.
+	src, _ := manifest.ParseSource(entrySource(sk.Entry))
+	newSource := state.SkillSource{
+		Registry:   teamRepo,
+		Ref:        src.Ref,
+		LastSHA:    sk.LatestSHA,
+		LastSynced: time.Now().UTC(),
+	}
+
+	st.RecordInstall(sk.Name, state.InstalledSkill{
+		Revision:   nextRevision(installed),
+		Sources:    mergeSources(installed, newSource),
+		Tools:      []string{},
+		Paths:      []string{},
+		Kind:       state.KindPackage,
+		InstallCmd: plan.Command,
+		UpdateCmd:  plan.Uninstall, // retained for future `scribe sync` package updates
+	})
+	if err := st.Save(); err != nil {
+		s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
+	}
+
+	s.emit(PackageInstalledMsg{Name: sk.Name})
+	if sk.Status == StatusOutdated {
+		summary.Updated++
+	} else {
+		summary.Installed++
+	}
+}
+
+// pruneStaleSkillInstall removes any canonical skill dir and tool
+// projections created by a prior install that treated this name as a
+// skill. Used when the same repo now auto-detects as a package.
+func (s *Syncer) pruneStaleSkillInstall(name string, installed *state.InstalledSkill) error {
+	storeDir, err := tools.StoreDir()
+	if err == nil {
+		_ = os.RemoveAll(filepath.Join(storeDir, name))
+	}
+	managed := installed.ManagedPaths
+	if len(managed) == 0 {
+		managed = installed.Paths
+	}
+	for _, p := range managed {
+		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
+			return rmErr
+		}
+	}
+	return nil
+}
+
+// entrySource returns sk.Entry.Source or "" when the entry is nil.
+func entrySource(e *manifest.Entry) string {
+	if e == nil {
+		return ""
+	}
+	return e.Source
 }
