@@ -227,6 +227,13 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 // Emits events throughout. Updates state incrementally — a failed skill
 // does not prevent successful skills from being recorded.
 func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) error {
+	// First run after upgrading to the packages-store split: reclassify any
+	// legacy skills/<name>/ installs whose tree shape identifies them as
+	// packages. Idempotent — guarded by state.Migrations.
+	if err := s.ReclassifyLegacyPackages(st); err != nil {
+		s.emit(SkillErrorMsg{Name: "<migration>", Err: fmt.Errorf("reclassify legacy packages: %w", err)})
+	}
+
 	statuses, _, err := s.Diff(ctx, teamRepo, st)
 	if err != nil {
 		return fmt.Errorf("sync %s: %w", teamRepo, err)

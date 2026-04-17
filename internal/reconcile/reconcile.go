@@ -66,8 +66,36 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 		byName[tool.Name()] = tool
 	}
 
+	pkgsDir, pkgErr := tools.PackagesDir()
+	if pkgErr != nil {
+		return summary, nil, pkgErr
+	}
+
 	for name, skill := range st.Installed {
-		if skill.Type == "package" {
+		if skill.IsPackage() {
+			// Non-projection invariant: packages own their own wiring.
+			// Still scan for stale tool symlinks that resolve back to the
+			// package dir so a legacy skills/<name> → packages/<name> flip
+			// cleans up any prior projections on the next sync.
+			pkgDir := filepath.Join(pkgsDir, name)
+			for _, path := range projectionPaths(skill) {
+				if path == "" {
+					continue
+				}
+				if isManagedProjection(path, pkgDir) {
+					if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+						return summary, actions, err
+					}
+					summary.Removed++
+					actions = append(actions, Action{Kind: ActionRemoved, Name: name, Tool: inferToolName(path, byName, name), Path: path})
+				}
+			}
+			// Wipe tracked paths — packages never project.
+			if len(skill.Paths) > 0 || len(skill.ManagedPaths) > 0 {
+				skill.Paths = nil
+				skill.ManagedPaths = nil
+				st.Installed[name] = skill
+			}
 			continue
 		}
 
