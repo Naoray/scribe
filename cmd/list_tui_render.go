@@ -71,7 +71,13 @@ func (m listModel) viewListFull() string {
 	b.WriteString(m.renderQueryLine() + "\n")
 
 	contentHeight := m.contentHeight()
-	m.renderRows(&b, contentHeight, m.width-4, false)
+	var rowsBuf strings.Builder
+	m.renderRows(&rowsBuf, contentHeight, m.width-4, false)
+	content := rowsBuf.String()
+	b.WriteString(content)
+	for i := strings.Count(content, "\n"); i < contentHeight; i++ {
+		b.WriteString("\n")
+	}
 
 	b.WriteString("\n")
 	b.WriteString(m.renderSummary() + "\n")
@@ -488,32 +494,88 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 	}
 
 	actions := m.actionsForRow(row)
-	for i, a := range actions {
-		isCursor := i == m.actionCursor && m.focus == focusActions
-		prefix := "  "
-		if isCursor {
-			prefix = ltCursorStyle.Render("▸") + " "
-		}
-		if a.disabled {
-			label := ltDimStyle.Render(a.label)
-			reason := ""
-			if a.reason != "" {
-				reason = " " + ltReasonStyle.Render(a.reason)
-			}
-			b.WriteString(prefix + label + reason + "\n")
-		} else {
-			label := a.style.Render(a.label)
-			if isCursor {
-				label = ltCursorStyle.Render(a.label)
-			}
-			b.WriteString(prefix + label + "\n")
-		}
-	}
+	b.WriteString(m.renderActionGrid(actions, width-2))
 
 	if row.Excerpt != "" {
 		b.WriteString(m.renderPreviewSection(row, width-2) + "\n")
 	}
 	return b.String()
+}
+
+// renderActionGrid lays actions out in a 2-column grid (column-major, so the
+// flat actionCursor still walks top-to-bottom naturally) when the pane is
+// wide enough. Falls back to a single column on narrow panes. Collapsing
+// the action list saves vertical room for the preview below.
+func (m listModel) renderActionGrid(actions []actionItem, width int) string {
+	const cols = 2
+	const minColWidth = 18
+
+	var b strings.Builder
+	colWidth := width / cols
+	if colWidth < minColWidth || len(actions) < 2 {
+		for i, a := range actions {
+			isCursor := i == m.actionCursor && m.focus == focusActions
+			b.WriteString(m.formatActionCell(a, isCursor, 0) + "\n")
+		}
+		return b.String()
+	}
+
+	rowsCount := (len(actions) + cols - 1) / cols
+	for r := 0; r < rowsCount; r++ {
+		leftIdx := r
+		rightIdx := r + rowsCount
+		left := m.formatActionCell(actions[leftIdx], leftIdx == m.actionCursor && m.focus == focusActions, colWidth)
+		var right string
+		if rightIdx < len(actions) {
+			right = m.formatActionCell(actions[rightIdx], rightIdx == m.actionCursor && m.focus == focusActions, 0)
+		}
+		b.WriteString(left + right + "\n")
+	}
+	if m.focus == focusActions && m.actionCursor >= 0 && m.actionCursor < len(actions) {
+		if a := actions[m.actionCursor]; a.disabled && a.reason != "" {
+			b.WriteString("  " + ltReasonStyle.Render(a.reason) + "\n")
+		}
+	}
+	return b.String()
+}
+
+// formatActionCell renders a single action. When width > 0 the cell is
+// right-padded to that display width so the next column aligns. Padding is
+// based on the unstyled text length because lipgloss emits zero-width ANSI
+// escapes that would inflate rune-width measurements.
+func (m listModel) formatActionCell(a actionItem, isCursor bool, width int) string {
+	rawPrefix := "  "
+	styledPrefix := rawPrefix
+	if isCursor {
+		styledPrefix = ltCursorStyle.Render("▸") + " "
+	}
+
+	rawLabel := a.label
+	var styledLabel string
+	switch {
+	case a.disabled:
+		styledLabel = ltDimStyle.Render(rawLabel)
+	case isCursor:
+		styledLabel = ltCursorStyle.Render(rawLabel)
+	default:
+		styledLabel = a.style.Render(rawLabel)
+	}
+
+	cell := styledPrefix + styledLabel
+	used := runewidth.StringWidth(rawPrefix + rawLabel)
+
+	// Only append the reason when rendering single-column (width == 0);
+	// grid cells drop it to keep columns narrow.
+	if width == 0 && a.disabled && a.reason != "" {
+		reason := " " + ltReasonStyle.Render(a.reason)
+		cell += reason
+		used += runewidth.StringWidth(" " + a.reason)
+	}
+
+	if width > 0 && used < width {
+		cell += strings.Repeat(" ", width-used)
+	}
+	return cell
 }
 
 func (m listModel) renderPreviewSection(row listRow, width int) string {
