@@ -25,7 +25,7 @@ func repairSkillProjections(cfg *config.Config, st *state.State, name string) (s
 	if !ok {
 		return skillProjectionRepairResult{}, fmt.Errorf("skill %q is not installed", name)
 	}
-	if installed.Type == "package" {
+	if installed.IsPackage() {
 		return skillProjectionRepairResult{}, fmt.Errorf("skill %q is a package — tool projection repair does not apply", name)
 	}
 

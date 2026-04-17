@@ -32,7 +32,7 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 	if !ok {
 		return skillEditResult{}, fmt.Errorf("skill %q is not installed (run `scribe list` to see managed skills)", name)
 	}
-	if installed.Type == "package" {
+	if installed.IsPackage() {
 		return skillEditResult{}, fmt.Errorf("skill %q is a package — per-skill tool pinning does not apply", name)
 	}
 
