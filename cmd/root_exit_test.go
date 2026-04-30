@@ -15,18 +15,24 @@ func TestRootExitSubprocessMatrix(t *testing.T) {
 		args       []string
 		wantCode   int
 		wantJSON   bool
+		wantErr    string
 		wantStdout string
+		stdoutJSON bool
+		badHome    bool
 	}{
-		{name: "unknown command json", args: []string{"--json", "nope"}, wantCode: 2, wantJSON: true},
-		{name: "bad flag json", args: []string{"--json", "--bad"}, wantCode: 2, wantJSON: true},
+		{name: "unknown command json", args: []string{"--json", "nope"}, wantCode: 2, wantJSON: true, wantErr: "USAGE"},
+		{name: "bad flag json", args: []string{"--json", "--bad"}, wantCode: 2, wantJSON: true, wantErr: "USAGE"},
 		{name: "help", args: []string{"--help"}, wantCode: 0, wantStdout: "Scribe manages local AI coding agent skills"},
 		{name: "version", args: []string{"--version"}, wantCode: 0, wantStdout: "scribe version"},
-		{name: "pre-run failure json", args: []string{"--json", "list"}, wantCode: 2, wantJSON: true},
+		{name: "operational pre-run failure json", args: []string{"--json", "list"}, wantCode: 1, wantJSON: true, wantErr: "GENERAL", badHome: true},
+		{name: "json unsupported config adoption", args: []string{"--json", "config", "adoption"}, wantCode: 2, wantJSON: true, wantErr: "JSON_NOT_SUPPORTED"},
+		{name: "json unsupported resolve", args: []string{"--json", "resolve", "recap"}, wantCode: 2, wantJSON: true, wantErr: "JSON_NOT_SUPPORTED"},
+		{name: "json supported schema list", args: []string{"--json", "schema", "list"}, wantCode: 0, stdoutJSON: true},
 	}
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			stdout, stderr, code := runScribeHelper(t, tt.args, tt.name == "pre-run failure json")
+			stdout, stderr, code := runScribeHelper(t, tt.args, tt.badHome)
 			if code != tt.wantCode {
 				t.Fatalf("exit = %d, want %d\nstdout=%s\nstderr=%s", code, tt.wantCode, stdout, stderr)
 			}
@@ -37,6 +43,25 @@ func TestRootExitSubprocessMatrix(t *testing.T) {
 				}
 				if env["status"] != "error" || env["format_version"] != "1" {
 					t.Fatalf("unexpected envelope: %#v", env)
+				}
+				if tt.wantErr != "" {
+					errObj, ok := env["error"].(map[string]any)
+					if !ok {
+						t.Fatalf("envelope missing error object: %#v", env)
+					}
+					if got := errObj["code"]; got != tt.wantErr {
+						t.Fatalf("error code = %v, want %s\nenvelope=%#v", got, tt.wantErr, env)
+					}
+				}
+				return
+			}
+			if tt.stdoutJSON {
+				var env map[string]any
+				if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &env); err != nil {
+					t.Fatalf("stdout is not JSON: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+				}
+				if _, ok := env["input_schema"]; !ok {
+					t.Fatalf("schema JSON missing input_schema: %#v", env)
 				}
 				return
 			}
@@ -50,13 +75,14 @@ func TestRootExitSubprocessMatrix(t *testing.T) {
 func runScribeHelper(t *testing.T, args []string, badHome bool) (string, string, int) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=TestScribeHelperProcess", "--"}, args...)...)
-	cmd.Env = append(os.Environ(), "GO_WANT_SCRIBE_HELPER_PROCESS=1")
+	home := t.TempDir()
+	cmd.Env = append(os.Environ(), "GO_WANT_SCRIBE_HELPER_PROCESS=1", "HOME="+home)
 	if badHome {
-		home := filepath.Join(t.TempDir(), "home-file")
-		if err := os.WriteFile(home, []byte("not a dir"), 0o644); err != nil {
+		homeFile := filepath.Join(t.TempDir(), "home-file")
+		if err := os.WriteFile(homeFile, []byte("not a dir"), 0o644); err != nil {
 			t.Fatalf("write home file: %v", err)
 		}
-		cmd.Env = append(cmd.Env, "HOME="+home)
+		cmd.Env = append(cmd.Env, "HOME="+homeFile)
 	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -80,6 +106,7 @@ func TestScribeHelperProcess(t *testing.T) {
 		if arg == "--" {
 			os.Args = append([]string{"scribe"}, os.Args[i+1:]...)
 			Execute()
+			os.Exit(0)
 			return
 		}
 	}
