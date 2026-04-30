@@ -27,8 +27,49 @@ type Client struct {
 	authenticated bool
 }
 
+// AuthenticatedUser describes the token owner used for author checks.
+type AuthenticatedUser struct {
+	Login  string
+	Emails []string
+}
+
+// CommitResult describes a pushed GitHub commit.
+type CommitResult struct {
+	SHA string
+	URL string
+}
+
 // IsAuthenticated returns true if the client has a GitHub token.
 func (c *Client) IsAuthenticated() bool { return c.authenticated }
+
+// AuthenticatedUser returns the login and visible email addresses for the
+// current token. Private email addresses may be unavailable depending on token
+// scopes, so callers should also check local git config when enforcing author.
+func (c *Client) AuthenticatedUser(ctx context.Context) (AuthenticatedUser, error) {
+	if !c.authenticated {
+		return AuthenticatedUser{}, clierrors.Wrap(errors.New("GitHub authentication required"), "GH_AUTH_REQUIRED", clierrors.ExitPerm,
+			clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
+		)
+	}
+	user, _, err := c.gh.Users.Get(ctx, "")
+	if err != nil {
+		return AuthenticatedUser{}, wrapErr(err, "get authenticated user")
+	}
+	out := AuthenticatedUser{Login: user.GetLogin()}
+	if email := strings.TrimSpace(user.GetEmail()); email != "" {
+		out.Emails = append(out.Emails, email)
+	}
+	emails, _, err := c.gh.Users.ListEmails(ctx, nil)
+	if err == nil {
+		for _, email := range emails {
+			addr := strings.TrimSpace(email.GetEmail())
+			if addr != "" {
+				out.Emails = append(out.Emails, addr)
+			}
+		}
+	}
+	return out, nil
+}
 
 // NewClient creates a GitHub client using the auth chain:
 //  1. gh auth token  (piggyback on gh CLI if installed)
@@ -276,6 +317,74 @@ func (c *Client) PushFiles(ctx context.Context, owner, repo string, files map[st
 	return nil
 }
 
+// PushFilesAtomic creates a single commit containing all file updates and moves
+// refs/heads/<branch> to it. If expectedHead is non-empty and the branch moved
+// since the caller checked it, the push is refused.
+func (c *Client) PushFilesAtomic(ctx context.Context, owner, repo, branch string, files map[string][]byte, message, expectedHead string) (CommitResult, error) {
+	if branch == "" {
+		branch = "main"
+	}
+	ref, _, err := c.gh.Git.GetRef(ctx, owner, repo, "refs/heads/"+branch)
+	if err != nil {
+		return CommitResult{}, wrapErr(err, fmt.Sprintf("%s/%s branch %s", owner, repo, branch))
+	}
+	parentSHA := ref.GetObject().GetSHA()
+	if expectedHead != "" && parentSHA != expectedHead {
+		return CommitResult{}, clierrors.Wrap(errors.New("remote branch changed while preparing push"), "GH_CONFLICT", clierrors.ExitConflict,
+			clierrors.WithRemediation("run `scribe sync` and retry"),
+			clierrors.WithResource(owner+"/"+repo),
+		)
+	}
+	parentCommit, _, err := c.gh.Git.GetCommit(ctx, owner, repo, parentSHA)
+	if err != nil {
+		return CommitResult{}, wrapErr(err, fmt.Sprintf("get commit %s/%s@%s", owner, repo, parentSHA))
+	}
+
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	entries := make([]*github.TreeEntry, 0, len(paths))
+	for _, path := range paths {
+		blob, _, err := c.gh.Git.CreateBlob(ctx, owner, repo, &github.Blob{
+			Content:  github.Ptr(string(files[path])),
+			Encoding: github.Ptr("utf-8"),
+		})
+		if err != nil {
+			return CommitResult{}, wrapErr(err, fmt.Sprintf("create blob %s", path))
+		}
+		entries = append(entries, &github.TreeEntry{
+			Path: github.Ptr(path),
+			Mode: github.Ptr("100644"),
+			Type: github.Ptr("blob"),
+			SHA:  blob.SHA,
+		})
+	}
+
+	tree, _, err := c.gh.Git.CreateTree(ctx, owner, repo, parentCommit.GetTree().GetSHA(), entries)
+	if err != nil {
+		return CommitResult{}, wrapErr(err, fmt.Sprintf("create tree %s/%s", owner, repo))
+	}
+	commit, _, err := c.gh.Git.CreateCommit(ctx, owner, repo, &github.Commit{
+		Message: github.Ptr(message),
+		Tree:    tree,
+		Parents: []*github.Commit{{SHA: github.Ptr(parentSHA)}},
+	}, nil)
+	if err != nil {
+		return CommitResult{}, wrapErr(err, fmt.Sprintf("create commit %s/%s", owner, repo))
+	}
+	_, _, err = c.gh.Git.UpdateRef(ctx, owner, repo, &github.Reference{
+		Ref:    github.Ptr("refs/heads/" + branch),
+		Object: &github.GitObject{SHA: commit.SHA},
+	}, false)
+	if err != nil {
+		return CommitResult{}, wrapErr(err, fmt.Sprintf("set ref %s/%s", owner, repo))
+	}
+	return CommitResult{SHA: commit.GetSHA(), URL: commit.GetHTMLURL()}, nil
+}
+
 // FileExists checks whether a file exists in a GitHub repo at the given ref.
 func (c *Client) FileExists(ctx context.Context, owner, repo, path, ref string) (bool, error) {
 	opts := &github.RepositoryContentGetOptions{Ref: ref}
@@ -387,6 +496,12 @@ func wrapErr(err error, operation string) error {
 				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
 				clierrors.WithResource(operation),
 			)
+		case http.StatusConflict:
+			return githubConflict(err, operation)
+		case http.StatusUnprocessableEntity:
+			if isUpdateRefConflict(operation, ghErr) {
+				return githubConflict(err, operation)
+			}
 		}
 	}
 	return clierrors.Wrap(err, "GH_NETWORK_FAILED", clierrors.ExitNetwork,
@@ -394,6 +509,24 @@ func wrapErr(err error, operation string) error {
 		clierrors.WithRetryable(true),
 		clierrors.WithResource(operation),
 	)
+}
+
+func githubConflict(err error, operation string) error {
+	return clierrors.Wrap(err, "GH_CONFLICT", clierrors.ExitConflict,
+		clierrors.WithMessage(fmt.Sprintf("%s: remote changed while writing", operation)),
+		clierrors.WithRemediation("run `scribe sync` and retry"),
+		clierrors.WithResource(operation),
+	)
+}
+
+func isUpdateRefConflict(operation string, ghErr *github.ErrorResponse) bool {
+	if !strings.HasPrefix(operation, "set ref ") {
+		return false
+	}
+	msg := strings.ToLower(ghErr.Message)
+	return strings.Contains(msg, "fast forward") ||
+		strings.Contains(msg, "non-fast-forward") ||
+		strings.Contains(msg, "reference update failed")
 }
 
 func formatReset(unixTimestamp string) string {

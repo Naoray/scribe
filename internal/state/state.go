@@ -153,10 +153,22 @@ func (i InstalledSkill) IsPackage() bool {
 
 // SkillSource records a registry that provides this skill.
 type SkillSource struct {
-	Registry   string    `json:"registry"`
-	Ref        string    `json:"ref"`
-	LastSHA    string    `json:"last_sha"`
-	LastSynced time.Time `json:"last_synced"`
+	Registry   string            `json:"registry"`
+	SourceRepo string            `json:"source_repo,omitempty"`
+	Path       string            `json:"path,omitempty"`
+	Author     string            `json:"author,omitempty"`
+	Ref        string            `json:"ref"`
+	LastSHA    string            `json:"last_sha"`
+	BlobSHAs   map[string]string `json:"blob_shas,omitempty"`
+	LastSynced time.Time         `json:"last_synced"`
+}
+
+// PushRegistry returns the repository that should receive local edits.
+func (s SkillSource) PushRegistry() string {
+	if s.SourceRepo != "" {
+		return s.SourceRepo
+	}
+	return s.Registry
 }
 
 // ProjectionConflict records a divergent tool-facing projection that Scribe

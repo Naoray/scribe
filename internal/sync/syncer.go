@@ -152,6 +152,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		// still compare commit SHAs via LatestCommitSHA (tree-based identity is a
 		// follow-up PR). If the API is unavailable, latestSHA stays "" and
 		// compareEntry handles that gracefully.
+		var blobSHAs map[string]string
 		if err == nil {
 			switch {
 			case entry.IsPackage():
@@ -176,8 +177,8 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 					}
 				}
 				if len(tree) > 0 {
-					resolvedSHA, found := resolveSkillBlobSHA(tree, *entry)
-					if found {
+					blobSHAs = resolveSkillBlobSHAs(tree, *entry)
+					if resolvedSHA, found := blobSHAs[skillBlobTarget(*entry)]; found {
 						latestSHA = resolvedSHA
 					} else {
 						latestSHA = missingSkillBlobSHA
@@ -196,6 +197,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 			Maintainer: entry.Maintainer(),
 			IsPackage:  entry.IsPackage(),
 			LatestSHA:  latestSHA,
+			BlobSHAs:   blobSHAs,
 		})
 	}
 
@@ -497,12 +499,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			// Build sources: merge with existing sources from other registries.
-			newSource := state.SkillSource{
-				Registry:   teamRepo,
-				Ref:        ref,
-				LastSHA:    sk.LatestSHA,
-				LastSynced: time.Now().UTC(),
-			}
+			newSource := skillSourceFromEntry(teamRepo, sk.Entry, ref, sk.LatestSHA, sk.BlobSHAs)
 			sources := mergeSources(installed, newSource)
 
 			// Preserve pinned ToolsMode across re-syncs. New skills default to
@@ -840,12 +837,7 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, teamRepo stri
 		}
 
 		installed := lookupInstalled(st, stateName)
-		newSource := state.SkillSource{
-			Registry:   teamRepo,
-			Ref:        ref,
-			LastSHA:    sk.LatestSHA,
-			LastSynced: time.Now().UTC(),
-		}
+		newSource := skillSourceFromEntry(teamRepo, sk.Entry, ref, sk.LatestSHA, sk.BlobSHAs)
 
 		st.RecordInstall(stateName, state.InstalledSkill{
 			Revision:   nextRevision(installed),
@@ -1016,6 +1008,42 @@ func mergeSources(installed *state.InstalledSkill, newSource state.SkillSource) 
 	return sources
 }
 
+func skillSourceFromEntry(teamRepo string, entry *manifest.Entry, ref, lastSHA string, blobSHAs map[string]string) state.SkillSource {
+	source := state.SkillSource{
+		Registry:   teamRepo,
+		Ref:        ref,
+		LastSHA:    lastSHA,
+		BlobSHAs:   cloneBlobSHAs(blobSHAs),
+		LastSynced: time.Now().UTC(),
+	}
+	if entry == nil {
+		return source
+	}
+	source.Path = entry.Path
+	source.Author = entry.Author
+	if source.Path == "" {
+		source.Path = entry.Name
+	}
+	if src, err := manifest.ParseSource(entry.Source); err == nil {
+		source.SourceRepo = src.Owner + "/" + src.Repo
+		if source.Ref == "" {
+			source.Ref = src.Ref
+		}
+	}
+	return source
+}
+
+func cloneBlobSHAs(blobSHAs map[string]string) map[string]string {
+	if len(blobSHAs) == 0 {
+		return nil
+	}
+	clone := make(map[string]string, len(blobSHAs))
+	for path, sha := range blobSHAs {
+		clone[path] = sha
+	}
+	return clone
+}
+
 // updateSourceEntry updates the source entry for a registry in the installed skill state.
 // Used after merge operations where we don't want to fully overwrite the install record.
 func (s *Syncer) updateSourceEntry(st *state.State, skillName, teamRepo string, sk SkillStatus, installed *state.InstalledSkill) {
@@ -1024,12 +1052,7 @@ func (s *Syncer) updateSourceEntry(st *state.State, skillName, teamRepo string, 
 	if parseErr == nil {
 		ref = src.Ref
 	}
-	newSource := state.SkillSource{
-		Registry:   teamRepo,
-		Ref:        ref,
-		LastSHA:    sk.LatestSHA,
-		LastSynced: time.Now().UTC(),
-	}
+	newSource := skillSourceFromEntry(teamRepo, sk.Entry, ref, sk.LatestSHA, sk.BlobSHAs)
 
 	existing := st.Installed[skillName]
 	existing.Sources = mergeSources(installed, newSource)
@@ -1099,12 +1122,7 @@ func (s *Syncer) applyTreePackage(ctx context.Context, sk SkillStatus, teamRepo 
 	// projects them into tool skill dirs — the package ran its own install
 	// and anything it needs now lives wherever that script decided.
 	src, _ := manifest.ParseSource(entrySource(sk.Entry))
-	newSource := state.SkillSource{
-		Registry:   teamRepo,
-		Ref:        src.Ref,
-		LastSHA:    sk.LatestSHA,
-		LastSynced: time.Now().UTC(),
-	}
+	newSource := skillSourceFromEntry(teamRepo, sk.Entry, src.Ref, sk.LatestSHA, sk.BlobSHAs)
 
 	st.RecordInstall(sk.Name, state.InstalledSkill{
 		Revision:   nextRevision(installed),

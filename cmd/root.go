@@ -227,6 +227,7 @@ func newRootCmd() *cobra.Command {
 		newBrowseCommand(),
 		newInstallCommand(),
 		newAddCommand(),
+		newPushCommand(),
 		newRemoveCommand(),
 		newSyncCommand(),
 		newAdoptCommand(),

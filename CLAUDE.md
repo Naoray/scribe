@@ -71,6 +71,7 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe list` | --fields, --json, --registry, --remote | yes |
 | `scribe migrate global-to-projects` | --dry-run, --json, --project | no |
 | `scribe migrate` | --json | no |
+| `scribe push` | --json | yes |
 | `scribe registry add` | --install, --json, --registry, --yes | no |
 | `scribe registry connect` | --install-all, --json | yes |
 | `scribe registry create` | --json, --owner, --private, --repo, --team | no |

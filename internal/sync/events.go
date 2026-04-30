@@ -49,6 +49,7 @@ type SkillStatus struct {
 	Maintainer string
 	IsPackage  bool
 	LatestSHA  string // resolved SHA for branch-pinned skills; empty if unavailable
+	BlobSHAs   map[string]string
 }
 
 // DisplayVersion returns the best human-readable version for this skill.
