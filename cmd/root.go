@@ -231,6 +231,7 @@ func newRootCmd() *cobra.Command {
 		newRemoveCommand(),
 		newSyncCommand(),
 		newCheckCommand(),
+		newUpdateCommand(),
 		newAdoptCommand(),
 		newStatusCommand(),
 		newInitCommand(),
