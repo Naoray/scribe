@@ -1,5 +1,7 @@
 package cmd
 
+//go:generate go run ../internal/cli/schema/cmd/gen-claudemd
+
 import (
 	"context"
 	stderrors "errors"

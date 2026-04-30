@@ -1,76 +1,105 @@
-# Scribe
+# Scribe Agent Contract
 
-Team skill sync CLI for AI coding agents. Go + Cobra + Charm (Bubble Tea).
+Scribe is an agent-first CLI for managing local AI coding agent skills. Prefer JSON mode for automation and inspect command schemas when composing calls.
 
-## Project
+## JSON Envelope
 
-- **Module**: `github.com/Naoray/scribe`
-- **Binary**: `cmd/scribe/main.go`
-- **Go version**: 1.26.1
+Migrated commands emit a versioned envelope on stdout:
 
-## Architecture
-
-```
-cmd/                    # Cobra commands (add, list, remove, sync, tools, guide, create, explain, registry)
-internal/
-  add/                  # Add workflow — local/remote discovery, GitHub push
-  adopt/                # Skill adoption scanning + apply (import/detect/candidate)
-  agent/                # Scribe agent skill bootstrap embedding
-  app/                  # Application factory + dependency injection
-  config/               # config.yaml loading (~/.scribe/config.yaml), legacy config.toml migration
-  discovery/            # On-disk skill discovery, YAML frontmatter parsing, content hashing
-  firstrun/             # First-run experience and onboarding
-  github/               # GitHub API client (go-github + oauth2)
-  logo/                 # ASCII logo rendering with lipgloss gradient (width-adaptive, NO_COLOR safe)
-  manifest/             # scribe.yaml parsing (gopkg.in/yaml.v3), legacy scribe.toml fallback
-  migrate/              # TOML → YAML manifest conversion
-  paths/                # XDG-style path helpers (~/.scribe/)
-  prereq/               # Prerequisite checks (gh CLI availability)
-  provider/             # Provider abstraction — GitHubProvider, marketplace.json, tree scan
-  reconcile/            # Managed tool projection reconciliation
-  state/                # ~/.scribe/state.json management
-  storemigrate/         # Store format migration utilities
-  sync/                 # Sync algorithm — UI-agnostic, emits tea.Msg events
-  tools/                # Install target writers (claude, cursor)
-  scaffold/             # Registry scaffolding (scribe create registry)
-  upgrade/              # Upgrade command (self-update via GitHub releases)
-  workflow/             # Step-sequence engine: Runner, Bag, Formatter, per-command steps
+```json
+{
+  "status": "ok",
+  "format_version": "1",
+  "data": {},
+  "meta": {
+    "duration_ms": 12,
+    "bootstrap_ms": 3,
+    "command": "scribe list",
+    "scribe_version": "dev"
+  }
+}
 ```
 
-## North Star
+Errors use the same envelope shape on stderr. Payload keys that were previously top-level now live under `data`.
 
-**Convenience first, tech debt second.** When facing implementation choices, always ask: "which makes Scribe more convenient for the person running it?" Ship usable > ship perfect.
+## Exit Codes
 
-**The best-designed CLI tool.** Every output should be visually pleasing, intuitively structured, and delightful to use. Color-coded status indicators, styled headers, aligned columns, helpful summaries. If a user screenshots our output, it should look good enough to share. Aim for the most adorable, polished CLI experience in the ecosystem.
+| Code | Meaning |
+|---:|---|
+| 0 | success |
+| 1 | general operational failure |
+| 2 | usage or invalid flags |
+| 3 | requested command, registry, skill, or schema was not found |
+| 4 | permission or authentication failure |
+| 5 | conflict requiring user action |
+| 6 | network or remote service failure |
+| 7 | temporarily unavailable local dependency |
+| 8 | validation failure |
+| 9 | user canceled |
+| 10 | partial success; inspect `data.summary.failed` or item-level errors |
 
-**Show exactly what's useful, nothing more.** Every line of output should earn its place. Default to the minimum information needed to understand what happened and what to do next. Hide details behind flags (`--verbose`, `--json`) for users who want them. When in doubt, leave it out. An overwhelmed user is a lost user.
+## Prompting Tips
 
-## Key Conventions
+Use `scribe schema <command> --json` before calling an unfamiliar command. Use `--fields` only on commands whose schema lists the flag. When updating scripts from pre-envelope output, change `jq '.foo'` to `jq '.data.foo'`.
 
-- Core packages (`sync/`, `add/`, `state/`, `github/`) are **UI-agnostic** — they emit events, never print
-- TUI models live in `cmd/` (e.g. `add_tui.go`) as pure presentation consuming those events
-- Non-TTY auto-detected: when stdout is not a terminal, fall back to plain line output
-- `--json` flag available on `sync`, `list`, and `add` for CI/agent use
-- GitHub auth chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/config.yaml` → unauthenticated
-
-## Build
+Examples:
 
 ```bash
-go build ./...
-go run ./cmd/scribe --help
+scribe list --json --fields name,status
+scribe schema sync --json
+scribe sync --json | jq '.data.summary'
+scribe adopt --dry-run --json | jq '.data.conflicts'
 ```
 
-## Data Directories
+## Commands
 
-```
-~/.scribe/
-  state.json      # installed packages + team connection
-  skills/         # canonical skill store (symlinked by targets)
-  config.yaml     # user preferences (tool settings, registries)
-```
+| Command | Flags | Output schema |
+|---|---|---|
+| `scribe add` | --json, --registry, --yes | yes |
+| `scribe adopt` | --dry-run, --json, --verbose, --yes | yes |
+| `scribe browse` | --install, --json, --query, --registry, --yes | no |
+| `scribe config adoption` | --add-path, --json, --mode, --remove-path | no |
+| `scribe config set editor` | --json | no |
+| `scribe config set` | --json | no |
+| `scribe config` | --json | no |
+| `scribe create registry` | --json, --owner, --private, --repo, --team | no |
+| `scribe create` | --json | no |
+| `scribe doctor` | --fix, --json, --skill | yes |
+| `scribe explain` | --json, --raw | yes |
+| `scribe guide` | --json | yes |
+| `scribe install` | --all, --json, --registry | no |
+| `scribe list` | --fields, --json, --registry, --remote | yes |
+| `scribe registry add` | --install, --json, --registry, --yes | no |
+| `scribe registry connect` | --install-all, --json | yes |
+| `scribe registry create` | --json, --owner, --private, --repo, --team | no |
+| `scribe registry disable` | --json | no |
+| `scribe registry enable` | --json | no |
+| `scribe registry forget` | --json | no |
+| `scribe registry list` | --json | no |
+| `scribe registry migrate` | --json | no |
+| `scribe registry resync` | --json | no |
+| `scribe registry` | --json | no |
+| `scribe remove` | --json, --yes | no |
+| `scribe resolve` | --json, --ours, --theirs | no |
+| `scribe restore` | --json | no |
+| `scribe schema` | --all, --json, --markdown | no |
+| `scribe skill edit` | --add, --inherit, --json, --pin, --remove, --tools | no |
+| `scribe skill repair` | --from, --json, --tool | no |
+| `scribe skill tools` | --disable, --enable, --json, --reset | no |
+| `scribe skill` | --json | no |
+| `scribe status` | --json | yes |
+| `scribe sync` | --all, --json, --registry, --trust-all | yes |
+| `scribe tools add` | --detect, --install, --json, --path, --uninstall | no |
+| `scribe tools disable` | --json | no |
+| `scribe tools enable` | --json | no |
+| `scribe tools` | --json | no |
+| `scribe upgrade-agent` | --json | no |
+| `scribe upgrade` | --check, --json | no |
+| `scribe` |  | no |
 
-## Bootstrap Governance
 
-- Scribe auto-installs exactly one first-party bootstrap skill: `scribe-agent`.
-- That bootstrap payload is read-only markdown embedded in the binary and written only under `~/.scribe/skills/scribe-agent/`.
-- Do not auto-install third-party skills, package-style skills, or anything that writes outside the canonical scribe-agent store path and state file without a new design doc and changelog entry.
+## Spec Deviations
+
+- Use `--fields name,version` as a separate flag, not overloaded `--json name,version`; this preserves boolean `--json=true` compatibility.
+- `meta.duration_ms` measures leaf `RunE` execution. `meta.bootstrap_ms` covers first-run, store migration, builtins apply, and embedded-agent refresh work before the leaf command runs.
+- Some wave-3 commands still reject `--json` with `JSON_NOT_SUPPORTED`; inspect `scribe schema --all --json` for migrated commands.
