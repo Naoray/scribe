@@ -47,6 +47,9 @@ func (i *Installer) Install() (Status, error) {
 	if err != nil {
 		return StatusNotApplicable, err
 	}
+	if err := validateHooksShape(settings); err != nil {
+		return StatusNotApplicable, err
+	}
 
 	alreadyInstalled := scriptIsCurrent(scriptPath) && settingsHasManagedHook(settings, scriptPath)
 	if alreadyInstalled {
@@ -84,6 +87,9 @@ func (i *Installer) Uninstall() error {
 	if err != nil {
 		return err
 	}
+	if err := validateHooksShape(settings); err != nil {
+		return err
+	}
 	settings, changed := removeManagedHook(settings, scriptPath)
 	if !changed {
 		return nil
@@ -108,6 +114,9 @@ func (i *Installer) CurrentStatus() (Status, error) {
 
 	settings, _, err := readSettings(claudeDir)
 	if err != nil {
+		return StatusNotApplicable, err
+	}
+	if err := validateHooksShape(settings); err != nil {
 		return StatusNotApplicable, err
 	}
 	scriptPath := managedScriptPath(claudeDir)
@@ -226,6 +235,30 @@ func writeSettings(claudeDir string, settings map[string]any, mode fs.FileMode) 
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("save settings.json: %w", err)
+	}
+	return nil
+}
+
+// validateHooksShape returns an error when settings.json contains a `hooks`
+// field of the wrong type. It permits the field to be absent (a fresh config)
+// or a JSON object with `PostToolUseFailure` either absent or shaped as a JSON
+// array. Any other shape is reported instead of being silently overwritten so
+// the user's hand-edited config is preserved until they fix it.
+func validateHooksShape(settings map[string]any) error {
+	hooksValue, exists := settings["hooks"]
+	if !exists {
+		return nil
+	}
+	hooksMap, ok := hooksValue.(map[string]any)
+	if !ok {
+		return fmt.Errorf("settings.json `hooks` is not a JSON object (got %T); please fix manually before reinstalling the scribe hook", hooksValue)
+	}
+	eventValue, exists := hooksMap[hookEvent]
+	if !exists {
+		return nil
+	}
+	if _, ok := eventValue.([]any); !ok {
+		return fmt.Errorf("settings.json `hooks.%s` is not a JSON array (got %T); please fix manually before reinstalling the scribe hook", hookEvent, eventValue)
 	}
 	return nil
 }

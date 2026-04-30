@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -188,6 +189,117 @@ func TestInstallerCurrentStatus(t *testing.T) {
 	}
 	if status != StatusAlreadyInstalled {
 		t.Fatalf("CurrentStatus() after install = %v, want %v", status, StatusAlreadyInstalled)
+	}
+}
+
+func TestInstallerInstallRejectsHooksFieldWithWrongType(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	claudeDir := makeClaudeDir(t, home)
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	original := map[string]any{
+		"theme": "dark",
+		"hooks": "this-is-not-an-object",
+	}
+	writeJSON(t, settingsPath, original)
+
+	_, err := (&Installer{HomeDir: home}).Install()
+	if err == nil {
+		t.Fatal("Install() error = nil, want malformed-hooks error")
+	}
+	if !strings.Contains(err.Error(), "`hooks`") {
+		t.Fatalf("Install() error = %v, want hooks-field message", err)
+	}
+
+	var roundTrip map[string]any
+	readJSON(t, settingsPath, &roundTrip)
+	if roundTrip["hooks"] != "this-is-not-an-object" {
+		t.Fatalf("settings.hooks was overwritten: %#v", roundTrip["hooks"])
+	}
+	if roundTrip["theme"] != "dark" {
+		t.Fatalf("settings.theme was overwritten: %#v", roundTrip["theme"])
+	}
+	if _, statErr := os.Stat(filepath.Join(claudeDir, "hooks", "scribe-hook.sh")); !os.IsNotExist(statErr) {
+		t.Fatalf("hook script was written despite malformed settings: %v", statErr)
+	}
+}
+
+func TestInstallerInstallRejectsPostToolUseFailureWithWrongType(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	claudeDir := makeClaudeDir(t, home)
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	original := map[string]any{
+		"hooks": map[string]any{
+			"PostToolUseFailure": "not-an-array",
+		},
+	}
+	writeJSON(t, settingsPath, original)
+
+	_, err := (&Installer{HomeDir: home}).Install()
+	if err == nil {
+		t.Fatal("Install() error = nil, want malformed-event error")
+	}
+	if !strings.Contains(err.Error(), "PostToolUseFailure") {
+		t.Fatalf("Install() error = %v, want PostToolUseFailure message", err)
+	}
+
+	var roundTrip map[string]any
+	readJSON(t, settingsPath, &roundTrip)
+	hooks, ok := roundTrip["hooks"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings.hooks lost its shape: %#v", roundTrip["hooks"])
+	}
+	if hooks["PostToolUseFailure"] != "not-an-array" {
+		t.Fatalf("hooks.PostToolUseFailure was overwritten: %#v", hooks["PostToolUseFailure"])
+	}
+}
+
+func TestInstallerUninstallRejectsMalformedHooksField(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	claudeDir := makeClaudeDir(t, home)
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	original := map[string]any{
+		"hooks": []any{"unexpected-array"},
+	}
+	writeJSON(t, settingsPath, original)
+
+	err := (&Installer{HomeDir: home}).Uninstall()
+	if err == nil {
+		t.Fatal("Uninstall() error = nil, want malformed-hooks error")
+	}
+	if !strings.Contains(err.Error(), "`hooks`") {
+		t.Fatalf("Uninstall() error = %v, want hooks-field message", err)
+	}
+
+	var roundTrip map[string]any
+	readJSON(t, settingsPath, &roundTrip)
+	hooks, ok := roundTrip["hooks"].([]any)
+	if !ok || len(hooks) != 1 || hooks[0] != "unexpected-array" {
+		t.Fatalf("settings.hooks was modified: %#v", roundTrip["hooks"])
+	}
+}
+
+func TestInstallerCurrentStatusRejectsMalformedHooksField(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	claudeDir := makeClaudeDir(t, home)
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	writeJSON(t, settingsPath, map[string]any{
+		"hooks": "broken",
+	})
+
+	_, err := (&Installer{HomeDir: home}).CurrentStatus()
+	if err == nil {
+		t.Fatal("CurrentStatus() error = nil, want malformed-hooks error")
+	}
+	if !strings.Contains(err.Error(), "`hooks`") {
+		t.Fatalf("CurrentStatus() error = %v, want hooks-field message", err)
 	}
 }
 
