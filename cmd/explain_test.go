@@ -21,7 +21,9 @@ func newTestRoot() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
+	root.PersistentFlags().Bool("json", false, "Output machine-readable JSON")
 	root.AddCommand(newExplainCommand())
+	wrapRunECommands(root)
 	return root
 }
 

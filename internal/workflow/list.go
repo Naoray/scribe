@@ -50,19 +50,68 @@ func ListJSONSteps() []Step {
 // the loader logic the TUI runs (in cmd/) but writes structured output to
 // stdout instead of rendering a TUI.
 func StepWriteListJSON(ctx context.Context, b *Bag) error {
-	w := os.Stdout
+	out, stateDirty, err := BuildListJSONData(ctx, b)
+	if stateDirty {
+		b.MarkStateDirty()
+	}
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
 
+// ListOutput is the legacy payload shape for `scribe list --json`.
+type ListOutput map[string]any
+
+type ListLocalSkillJSON struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Package     string   `json:"package,omitempty"`
+	Revision    int      `json:"revision,omitempty"`
+	ContentHash string   `json:"content_hash,omitempty"`
+	Targets     []string `json:"targets"`
+	Managed     bool     `json:"managed"`
+	Origin      string   `json:"origin,omitempty"`
+	Path        string   `json:"path,omitempty"`
+}
+
+type ListLocalPackageJSON struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Revision    int      `json:"revision,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	InstallCmd  string   `json:"install_cmd,omitempty"`
+	Sources     []string `json:"sources,omitempty"`
+}
+
+type ListRemoteSkillJSON struct {
+	Name       string   `json:"name"`
+	Status     string   `json:"status"`
+	Version    string   `json:"version,omitempty"`
+	LoadoutRef string   `json:"loadout_ref,omitempty"`
+	Maintainer string   `json:"maintainer,omitempty"`
+	Agents     []string `json:"agents,omitempty"`
+}
+
+type ListRegistryJSON struct {
+	Registry string                `json:"registry"`
+	Skills   []ListRemoteSkillJSON `json:"skills"`
+}
+
+func BuildListJSONData(ctx context.Context, b *Bag) (ListOutput, bool, error) {
 	// Local view is the default; --remote switches to registry diff.
 	if !b.RemoteFlag {
 		skills, err := discovery.OnDisk(b.State)
 		if err != nil {
-			return err
+			return ListOutput{}, false, err
 		}
-		return printLocalJSON(w, skills, b.State)
+		return buildLocalListJSON(skills, b.State), false, nil
 	}
 
 	if err := StepFilterRegistries(ctx, b); err != nil {
-		return err
+		return ListOutput{}, false, err
 	}
 
 	syncer := &sync.Syncer{
@@ -71,35 +120,17 @@ func StepWriteListJSON(ctx context.Context, b *Bag) error {
 		Tools:    []tools.Tool{},
 	}
 
-	stateDirty, err := printMultiListJSON(ctx, w, b.Repos, syncer, b.State)
-	if stateDirty {
-		b.MarkStateDirty()
-	}
-	return err
+	return buildMultiListJSON(ctx, b.Repos, syncer, b.State)
 }
 
 func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) error {
-	type localSkillJSON struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description,omitempty"`
-		Package     string   `json:"package,omitempty"`
-		Revision    int      `json:"revision,omitempty"`
-		ContentHash string   `json:"content_hash,omitempty"`
-		Targets     []string `json:"targets"`
-		Managed     bool     `json:"managed"`
-		Origin      string   `json:"origin,omitempty"`
-		Path        string   `json:"path,omitempty"`
-	}
-	type localPackageJSON struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description,omitempty"`
-		Revision    int      `json:"revision,omitempty"`
-		Path        string   `json:"path,omitempty"`
-		InstallCmd  string   `json:"install_cmd,omitempty"`
-		Sources     []string `json:"sources,omitempty"`
-	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(buildLocalListJSON(skills, st))
+}
 
-	skillsOut := make([]localSkillJSON, 0, len(skills))
+func buildLocalListJSON(skills []discovery.Skill, st *state.State) ListOutput {
+	skillsOut := make([]ListLocalSkillJSON, 0, len(skills))
 	// Emit one entry per discovered skill that is NOT tracked as a package.
 	// Package entries come from the state map because discovery walks
 	// ~/.scribe/skills/ and tool dirs, neither of which now hold packages.
@@ -124,7 +155,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 			origin = "local"
 		}
 
-		skillsOut = append(skillsOut, localSkillJSON{
+		skillsOut = append(skillsOut, ListLocalSkillJSON{
 			Name:        sk.Name,
 			Description: sk.Description,
 			Package:     sk.Package,
@@ -137,7 +168,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 		})
 	}
 
-	packagesOut := make([]localPackageJSON, 0)
+	packagesOut := make([]ListLocalPackageJSON, 0)
 	for name, inst := range st.Installed {
 		if !inst.IsPackage() {
 			continue
@@ -149,7 +180,7 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 				srcRegistries = append(srcRegistries, s.Registry)
 			}
 		}
-		packagesOut = append(packagesOut, localPackageJSON{
+		packagesOut = append(packagesOut, ListLocalPackageJSON{
 			Name:       name,
 			Revision:   inst.Revision,
 			Path:       pkgsDir,
@@ -158,12 +189,10 @@ func printLocalJSON(w io.Writer, skills []discovery.Skill, st *state.State) erro
 		})
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(map[string]any{
+	return ListOutput{
 		"skills":   skillsOut,
 		"packages": packagesOut,
-	})
+	}
 }
 
 // stateInstalledPackageDir resolves the canonical package directory for a
@@ -178,21 +207,15 @@ func stateInstalledPackageDir(name string) (string, error) {
 }
 
 func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer *sync.Syncer, st *state.State) (bool, error) {
-	type skillJSON struct {
-		Name       string   `json:"name"`
-		Status     string   `json:"status"`
-		Version    string   `json:"version,omitempty"`
-		LoadoutRef string   `json:"loadout_ref,omitempty"`
-		Maintainer string   `json:"maintainer,omitempty"`
-		Agents     []string `json:"agents,omitempty"`
+	out, stateDirty, err := buildMultiListJSON(ctx, repos, syncer, st)
+	if err != nil {
+		return stateDirty, err
 	}
+	return stateDirty, json.NewEncoder(w).Encode(out)
+}
 
-	type registryJSON struct {
-		Registry string      `json:"registry"`
-		Skills   []skillJSON `json:"skills"`
-	}
-
-	var registries []registryJSON
+func buildMultiListJSON(ctx context.Context, repos []string, syncer *sync.Syncer, st *state.State) (ListOutput, bool, error) {
+	var registries []ListRegistryJSON
 	var warnings []string
 	stateDirty := false
 
@@ -211,7 +234,7 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 		}
 		stateDirty = stateDirty || st.ClearRegistryFailure(teamRepo)
 
-		skills := make([]skillJSON, 0, len(statuses))
+		skills := make([]ListRemoteSkillJSON, 0, len(statuses))
 		for _, sk := range statuses {
 			ver := ""
 			var agents []string
@@ -219,7 +242,7 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 				ver = sk.Installed.DisplayVersion()
 				agents = sk.Installed.Tools
 			}
-			skills = append(skills, skillJSON{
+			skills = append(skills, ListRemoteSkillJSON{
 				Name:       sk.Name,
 				Status:     sk.Status.String(),
 				Version:    ver,
@@ -229,17 +252,17 @@ func printMultiListJSON(ctx context.Context, w io.Writer, repos []string, syncer
 			})
 		}
 
-		registries = append(registries, registryJSON{
+		registries = append(registries, ListRegistryJSON{
 			Registry: teamRepo,
 			Skills:   skills,
 		})
 	}
 
-	out := map[string]any{"registries": registries}
+	out := ListOutput{"registries": registries}
 	if len(warnings) > 0 {
 		out["warnings"] = warnings
 	}
-	return stateDirty, json.NewEncoder(w).Encode(out)
+	return out, stateDirty, nil
 }
 
 func CountStatuses(statuses []sync.SkillStatus) map[sync.Status]int {

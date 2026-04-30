@@ -24,7 +24,7 @@ type Error struct {
 	Retryable   bool   `json:"retryable"`
 	Remediation string `json:"remediation,omitempty"`
 	Resource    string `json:"resource,omitempty"`
-	Exit        int    `json:"-"`
+	Exit        int    `json:"exit_code,omitempty"`
 	err         error
 }
 

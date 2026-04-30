@@ -36,7 +36,7 @@ func (r *jsonRenderer) Result(data any) error {
 func (r *jsonRenderer) Error(err *clierrors.Error) error {
 	r.err = err
 	r.SetStatus(envelope.StatusError)
-	return r.flushTo(r.errOut)
+	return r.flushTo(r.out)
 }
 
 func (r *jsonRenderer) Progress(msg string) {

@@ -25,7 +25,7 @@ func runDefault(cmd *cobra.Command, args []string) error {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 	factory := newCommandFactory()
 
 	cfg, err := factory.Config()
@@ -38,7 +38,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if jsonFlag || !isatty.IsTerminal(os.Stdout.Fd()) || os.Getenv("CI") != "" {
-		return writeStatusJSON(os.Stdout, Version, cfg, st)
+		r := jsonRendererForCommand(cmd, jsonFlag)
+		if err := r.Result(buildStatusOutput(Version, cfg, st)); err != nil {
+			return err
+		}
+		return r.Flush()
 	}
 
 	if os.Getenv("TERM") == "dumb" {
@@ -57,31 +61,33 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func writeStatusJSON(w io.Writer, version string, cfg *config.Config, st *state.State) error {
-	repos := cfg.TeamRepos()
+type statusOutput struct {
+	Version        string   `json:"version"`
+	Registries     []string `json:"registries"`
+	InstalledCount int      `json:"installed_count"`
+	LastSync       string   `json:"last_sync,omitempty"`
+}
 
-	status := struct {
-		Version        string   `json:"version"`
-		Registries     []string `json:"registries"`
-		InstalledCount int      `json:"installed_count"`
-		LastSync       string   `json:"last_sync,omitempty"`
-	}{
+func buildStatusOutput(version string, cfg *config.Config, st *state.State) statusOutput {
+	repos := cfg.TeamRepos()
+	out := statusOutput{
 		Version:        version,
 		Registries:     repos,
 		InstalledCount: len(st.Installed),
 	}
-
 	if repos == nil {
-		status.Registries = []string{}
+		out.Registries = []string{}
 	}
-
 	if !st.LastSync.IsZero() {
-		status.LastSync = st.LastSync.UTC().Format(time.RFC3339)
+		out.LastSync = st.LastSync.UTC().Format(time.RFC3339)
 	}
+	return out
+}
 
+func writeStatusJSON(w io.Writer, version string, cfg *config.Config, st *state.State) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(status)
+	return enc.Encode(buildStatusOutput(version, cfg, st))
 }
 
 // syncTime returns a human-readable last-sync string. Uses "never" for the

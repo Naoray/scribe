@@ -19,6 +19,8 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	clienv "github.com/Naoray/scribe/internal/cli/env"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/discovery"
 )
 
@@ -47,16 +49,18 @@ Falls back to rendering the SKILL.md directly if no LLM is available.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runExplain,
 	}
-	cmd.Flags().Bool("json", false, "Output structured JSON (for agents/scripts)")
 	cmd.Flags().Bool("raw", false, "Show rendered SKILL.md directly, skip AI explanation")
 	return markJSONSupported(cmd)
 }
 
 func runExplain(cmd *cobra.Command, args []string) error {
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 	rawFlag, _ := cmd.Flags().GetBool("raw")
 	if jsonFlag && rawFlag {
-		return fmt.Errorf("if any flags in the group [json raw] are set none of the others can be; [json raw] were all set")
+		err := fmt.Errorf("if any flags in the group [json raw] are set none of the others can be; [json raw] were all set")
+		return clierrors.Wrap(err, "USAGE_FLAG_CONFLICT", clierrors.ExitUsage,
+			clierrors.WithRemediation("Use either --json or --raw, not both."),
+		)
 	}
 	factory := newCommandFactory()
 
@@ -72,26 +76,38 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	skill, ok := findSkill(skills, args[0])
 	if !ok {
-		return fmt.Errorf("skill %q not found — run `scribe list` to see installed skills", args[0])
+		err := fmt.Errorf("skill %q not found", args[0])
+		return clierrors.Wrap(err, "SKILL_NOT_FOUND", clierrors.ExitNotFound,
+			clierrors.WithResource(args[0]),
+			clierrors.WithRemediation("Run `scribe list` to see installed skills."),
+		)
 	}
 
 	if skill.LocalPath == "" {
-		return fmt.Errorf("skill %q is tracked but not on disk — try `scribe sync` first", args[0])
+		err := fmt.Errorf("skill %q is tracked but not on disk", args[0])
+		return clierrors.Wrap(err, "SKILL_NOT_ON_DISK", clierrors.ExitNotFound,
+			clierrors.WithResource(args[0]),
+			clierrors.WithRemediation("Run `scribe sync` before explaining this skill."),
+		)
 	}
 
 	content, err := readSkillContent(skill.LocalPath)
 	if err != nil {
-		return err
+		return wrapSkillReadError(err, args[0])
 	}
 
-	isTTY := isatty.IsTerminal(os.Stdout.Fd())
+	mode := clienv.Detect(os.Stdout, os.Stdin, jsonFlag)
 	w := cmd.OutOrStdout()
 
-	if jsonFlag {
-		return explainJSON(w, skill, content)
+	if mode.Format == clienv.FormatJSON {
+		r := jsonRendererForCommand(cmd, jsonFlag)
+		if err := r.Result(buildExplainOutput(skill, content)); err != nil {
+			return err
+		}
+		return r.Flush()
 	}
 
-	if !isTTY {
+	if mode.Format != clienv.FormatText {
 		return renderSkillBody(w, content)
 	}
 
@@ -158,6 +174,22 @@ func readSkillContent(skillDir string) (string, error) {
 	return string(data), nil
 }
 
+func wrapSkillReadError(err error, skillName string) error {
+	if os.IsNotExist(err) {
+		return clierrors.Wrap(err, "SKILL_NOT_FOUND", clierrors.ExitNotFound,
+			clierrors.WithResource(skillName),
+			clierrors.WithRemediation("Run `scribe sync` before explaining this skill."),
+		)
+	}
+	if os.IsPermission(err) {
+		return clierrors.Wrap(err, "SKILL_READ_PERMISSION_DENIED", clierrors.ExitPerm,
+			clierrors.WithResource(skillName),
+			clierrors.WithRemediation("Check file permissions for the skill directory."),
+		)
+	}
+	return err
+}
+
 // detectLLMCLI finds the first available LLM CLI on the machine.
 func detectLLMCLI() (string, error) {
 	if _, err := exec.LookPath("claude"); err == nil {
@@ -180,14 +212,22 @@ func stripFrontmatter(s string) string {
 }
 
 func explainJSON(w io.Writer, skill discovery.Skill, content string) error {
-	out := struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description,omitempty"`
-		Revision    int      `json:"revision,omitempty"`
-		Targets     []string `json:"targets,omitempty"`
-		Path        string   `json:"path,omitempty"`
-		Content     string   `json:"content"`
-	}{
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(buildExplainOutput(skill, content))
+}
+
+type explainOutput struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Revision    int      `json:"revision,omitempty"`
+	Targets     []string `json:"targets,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Content     string   `json:"content"`
+}
+
+func buildExplainOutput(skill discovery.Skill, content string) explainOutput {
+	return explainOutput{
 		Name:        skill.Name,
 		Description: skill.Description,
 		Revision:    skill.Revision,
@@ -195,9 +235,6 @@ func explainJSON(w io.Writer, skill discovery.Skill, content string) error {
 		Path:        skill.LocalPath,
 		Content:     content,
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
 }
 
 func printSkillHeader(w io.Writer, skill discovery.Skill) {

@@ -8,9 +8,10 @@ import (
 
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	clienv "github.com/Naoray/scribe/internal/cli/env"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/prereq"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -29,7 +30,6 @@ Examples:
 		Args: cobra.NoArgs,
 		RunE: runGuide,
 	}
-	cmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
 	return markJSONSupported(cmd)
 }
 
@@ -45,14 +45,21 @@ var (
 )
 
 func runGuide(cmd *cobra.Command, _ []string) error {
-	jsonFlag, _ := cmd.Flags().GetBool("json")
-	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
-	if useJSON {
-		return runGuideJSON(os.Stdout)
+	jsonFlag := jsonFlagPassed(cmd)
+	mode := clienv.Detect(os.Stdout, os.Stdin, jsonFlag)
+	if mode.Format == clienv.FormatJSON {
+		r := jsonRendererForCommand(cmd, jsonFlag)
+		if err := r.Result(buildGuideOutput()); err != nil {
+			return err
+		}
+		return r.Flush()
 	}
 
-	if !isatty.IsTerminal(os.Stdin.Fd()) {
-		return fmt.Errorf("scribe guide requires an interactive terminal — use --json for agent-friendly output")
+	if !mode.Interactive {
+		err := fmt.Errorf("scribe guide requires an interactive terminal")
+		return clierrors.Wrap(err, "INTERACTIVE_TERMINAL_REQUIRED", clierrors.ExitUsage,
+			clierrors.WithRemediation("Use `scribe guide --json` for agent-friendly output."),
+		)
 	}
 
 	return runGuideInteractive(cmd)
@@ -66,6 +73,18 @@ type guideStep struct {
 
 // runGuideJSON writes the guide steps as JSON to w.
 func runGuideJSON(w io.Writer) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(buildGuideOutput())
+}
+
+type guideOutput struct {
+	Status        string        `json:"status"`
+	Prerequisites prereq.Result `json:"prerequisites"`
+	Steps         []guideStep   `json:"steps"`
+}
+
+func buildGuideOutput() guideOutput {
 	result := prereq.Check()
 
 	status := "not_connected"
@@ -104,13 +123,11 @@ func runGuideJSON(w io.Writer) error {
 		Description: "Import hand-rolled skills from ~/.claude/skills into the store",
 	})
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(map[string]any{
-		"status":        status,
-		"prerequisites": result,
-		"steps":         steps,
-	})
+	return guideOutput{
+		Status:        status,
+		Prerequisites: result,
+		Steps:         steps,
+	}
 }
 
 // displayPrereqs shows prereq status with styled icons.

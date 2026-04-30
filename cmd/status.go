@@ -16,6 +16,5 @@ Examples:
 		Args: cobra.NoArgs,
 		RunE: runStatus,
 	}
-	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	return markJSONSupported(cmd)
 }

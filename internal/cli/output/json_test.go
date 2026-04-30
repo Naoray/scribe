@@ -55,13 +55,13 @@ func TestJSONRendererError(t *testing.T) {
 	}
 
 	var got envelope.Envelope
-	if decodeErr := json.Unmarshal(stderr.Bytes(), &got); decodeErr != nil {
+	if decodeErr := json.Unmarshal(stdout.Bytes(), &got); decodeErr != nil {
 		t.Fatalf("unmarshal: %v", decodeErr)
 	}
 	if got.Status != envelope.StatusError || got.Error.Code != "BAD" {
 		t.Fatalf("envelope = %+v", got)
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }

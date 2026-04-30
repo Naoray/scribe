@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/doctor"
 	"github.com/Naoray/scribe/internal/skillmd"
@@ -38,7 +39,6 @@ Examples:
 	}
 	cmd.Flags().Bool("fix", false, "Normalize canonical skill metadata and repair affected projections")
 	cmd.Flags().String("skill", "", "Inspect a single managed skill")
-	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	return markJSONSupported(cmd)
 }
 
@@ -82,33 +82,46 @@ type pathSnapshot struct {
 func runDoctor(cmd *cobra.Command, _ []string) error {
 	fixFlag, _ := cmd.Flags().GetBool("fix")
 	skillFlag, _ := cmd.Flags().GetString("skill")
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 
 	if fixFlag && jsonFlag {
-		return fmt.Errorf("doctor: --fix cannot be combined with --json")
+		err := fmt.Errorf("doctor: --fix cannot be combined with --json")
+		return clierrors.Wrap(err, "USAGE_FLAG_CONFLICT", clierrors.ExitUsage,
+			clierrors.WithRemediation("Run `scribe doctor --fix` for repairs or `scribe doctor --json` for inspection."),
+		)
 	}
 
 	factory := newCommandFactory()
 
 	cfg, err := factory.Config()
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return clierrors.Wrap(fmt.Errorf("load config: %w", err), "CONFIG_LOAD_FAILED", clierrors.ExitValid,
+			clierrors.WithRemediation("Check ~/.scribe/config.yaml for invalid YAML or schema drift."),
+		)
 	}
 
 	st, err := factory.State()
 	if err != nil {
-		return fmt.Errorf("load state: %w", err)
+		return clierrors.Wrap(fmt.Errorf("load state: %w", err), "STATE_LOAD_FAILED", clierrors.ExitValid,
+			clierrors.WithRemediation("Check ~/.scribe/state.yaml for invalid YAML or schema drift."),
+		)
 	}
 
 	if skillFlag != "" {
 		if _, ok := st.Installed[skillFlag]; !ok {
-			return fmt.Errorf("doctor: skill %q is not installed", skillFlag)
+			err := fmt.Errorf("doctor: skill %q is not installed", skillFlag)
+			return clierrors.Wrap(err, "SKILL_NOT_FOUND", clierrors.ExitNotFound,
+				clierrors.WithResource(skillFlag),
+				clierrors.WithRemediation("Run `scribe list` to see installed skills."),
+			)
 		}
 	}
 
 	report, err := doctor.InspectManagedSkills(cfg, st, skillFlag)
 	if err != nil {
-		return fmt.Errorf("inspect managed skills: %w", err)
+		return clierrors.Wrap(fmt.Errorf("inspect managed skills: %w", err), "DOCTOR_INSPECT_FAILED", clierrors.ExitValid,
+			clierrors.WithRemediation("Run `scribe doctor` without filters to inspect all managed skills."),
+		)
 	}
 
 	if fixFlag {
@@ -120,7 +133,11 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	}
 
 	if jsonFlag {
-		return writeDoctorJSON(cmd.OutOrStdout(), skillFlag, report)
+		r := jsonRendererForCommand(cmd, jsonFlag)
+		if err := r.Result(buildDoctorReportJSON(skillFlag, report)); err != nil {
+			return err
+		}
+		return r.Flush()
 	}
 	return writeDoctorText(cmd.OutOrStdout(), skillFlag, report)
 }
@@ -540,6 +557,14 @@ func copyPath(src, dst string) error {
 }
 
 func writeDoctorJSON(w io.Writer, skill string, report doctor.Report) error {
+	out := buildDoctorReportJSON(skill, report)
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func buildDoctorReportJSON(skill string, report doctor.Report) doctorReportJSON {
 	out := doctorReportJSON{
 		Skill:  skill,
 		Fix:    false,
@@ -554,10 +579,7 @@ func writeDoctorJSON(w io.Writer, skill string, report doctor.Report) error {
 			Message: issue.Message,
 		})
 	}
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return out
 }
 
 func writeDoctorText(w io.Writer, skill string, report doctor.Report) error {

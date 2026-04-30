@@ -38,8 +38,8 @@ func TestRootExitSubprocessMatrix(t *testing.T) {
 			}
 			if tt.wantJSON {
 				var env map[string]any
-				if err := json.Unmarshal([]byte(strings.TrimSpace(stderr)), &env); err != nil {
-					t.Fatalf("stderr is not JSON envelope: %v\nstderr=%s\nstdout=%s", err, stderr, stdout)
+				if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &env); err != nil {
+					t.Fatalf("stdout is not JSON envelope: %v\nstderr=%s\nstdout=%s", err, stderr, stdout)
 				}
 				if env["status"] != "error" || env["format_version"] != "1" {
 					t.Fatalf("unexpected envelope: %#v", env)

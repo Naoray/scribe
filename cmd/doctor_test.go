@@ -353,20 +353,22 @@ func TestDoctorJSONOutput(t *testing.T) {
 		t.Fatalf("unexpected error: %v (stderr=%s)", err, errBuf.String())
 	}
 
-	var report struct {
-		Issues []struct {
-			Skill   string `json:"skill"`
-			Tool    string `json:"tool"`
-			Kind    string `json:"kind"`
-			Status  string `json:"status"`
-			Message string `json:"message"`
-		} `json:"issues"`
+	var env struct {
+		Data struct {
+			Issues []struct {
+				Skill   string `json:"skill"`
+				Tool    string `json:"tool"`
+				Kind    string `json:"kind"`
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			} `json:"issues"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("invalid JSON: %v\noutput: %s", err, out.String())
 	}
-	if len(report.Issues) != 1 {
-		t.Fatalf("expected 1 issue, got %d: %+v", len(report.Issues), report.Issues)
+	if len(env.Data.Issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d: %+v", len(env.Data.Issues), env.Data.Issues)
 	}
 }
 

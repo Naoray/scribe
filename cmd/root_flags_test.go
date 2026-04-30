@@ -12,6 +12,12 @@ func TestRootFlags(t *testing.T) {
 		if cmd.Root().PersistentFlags().Lookup("json") == nil {
 			t.Fatalf("%s: root missing persistent --json", cmd.CommandPath())
 		}
+		if cmd.CommandPath() == "scribe list" {
+			if cmd.Flags().Lookup("fields") == nil {
+				t.Fatalf("%s: missing --fields opt-in", cmd.CommandPath())
+			}
+			return
+		}
 		if cmd.Flags().Lookup("fields") != nil {
 			t.Fatalf("%s: unexpected --fields; use output.AttachFieldsFlag for opt-in commands", cmd.CommandPath())
 		}

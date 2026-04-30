@@ -51,7 +51,7 @@ Examples:
 	cmd.MarkFlagsMutuallyExclusive("inherit", "pin")
 	cmd.MarkFlagsMutuallyExclusive("inherit", "add")
 	cmd.MarkFlagsMutuallyExclusive("inherit", "remove")
-	return markJSONSupported(cmd)
+	return cmd
 }
 
 type skillEditResult struct {
@@ -81,7 +81,7 @@ func newSkillRepairCommand() *cobra.Command {
 	if err := cmd.MarkFlagRequired("tool"); err != nil {
 		panic(err)
 	}
-	return markJSONSupported(cmd)
+	return cmd
 }
 
 func runSkillEdit(cmd *cobra.Command, args []string) error {
