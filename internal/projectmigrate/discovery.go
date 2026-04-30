@@ -126,6 +126,9 @@ func DiscoverGlobalSymlinks(homeDir, storeDir string, toolNames []string) ([]Glo
 			if !pathWithin(target, storeDir) {
 				continue
 			}
+			if isGlobalSkillException(entry.Name()) {
+				continue
+			}
 			links = append(links, GlobalSymlink{
 				Tool:          tool,
 				Skill:         entry.Name(),

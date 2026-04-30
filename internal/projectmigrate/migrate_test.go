@@ -65,6 +65,67 @@ func TestApplyWritesProjectFileRemovesGlobalSymlinksAndIsIdempotent(t *testing.T
 	}
 }
 
+func TestMigrationPreservesScribeAgentGlobalSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	store := filepath.Join(home, ".scribe", "skills")
+	project := filepath.Join(tmp, "project")
+	normalLink := filepath.Join(home, ".claude", "skills", "tdd")
+	scribeAgentLink := filepath.Join(home, ".claude", "skills", "scribe-agent")
+
+	mustMkdir(t, filepath.Join(store, "tdd"))
+	mustMkdir(t, filepath.Join(store, "scribe-agent"))
+	mustMkdir(t, filepath.Dir(normalLink))
+	mustMkdir(t, project)
+	mustSymlink(t, filepath.Join(store, "tdd"), normalLink)
+	mustSymlink(t, filepath.Join(store, "scribe-agent"), scribeAgentLink)
+
+	discovery, err := Discover(DiscoveryOptions{
+		HomeDir:     home,
+		StoreDir:    store,
+		ToolNames:   []string{"claude"},
+		SearchRoots: []string{project},
+	})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if !reflect.DeepEqual(discovery.Skills, []string{"tdd"}) {
+		t.Fatalf("discovered skills = %v, want [tdd]", discovery.Skills)
+	}
+
+	plan, err := BuildPlan(discovery, []string{project}, false)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	result, err := Apply(plan, discovery.Projects)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	if result.RemovedGlobalLinks != 1 {
+		t.Fatalf("RemovedGlobalLinks = %d, want 1", result.RemovedGlobalLinks)
+	}
+	if _, err := os.Lstat(normalLink); !os.IsNotExist(err) {
+		t.Fatalf("normal global symlink still exists or unexpected stat error: %v", err)
+	}
+	if _, err := os.Lstat(scribeAgentLink); err != nil {
+		t.Fatalf("scribe-agent global symlink should remain: %v", err)
+	}
+
+	pf, err := projectfile.Load(filepath.Join(project, projectfile.Filename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(pf.Add, []string{"tdd"}) {
+		t.Fatalf("project add = %v, want [tdd]", pf.Add)
+	}
+	for _, link := range plan.RemovedLinks {
+		if link.Skill == "scribe-agent" {
+			t.Fatalf("scribe-agent should not be scheduled for removal: %#v", plan.RemovedLinks)
+		}
+	}
+}
+
 func TestApplyDryRunDoesNotMutateFilesystem(t *testing.T) {
 	tmp := t.TempDir()
 	project := filepath.Join(tmp, "project")
