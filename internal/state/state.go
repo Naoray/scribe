@@ -287,6 +287,7 @@ func emptyState() *State {
 //  6. Schema v4: normalize branch-backed LastSHA values to the locally cached
 //     SKILL.md blob SHA so blob-SHA diffs do not force needless reinstalls.
 //  7. Schema v5: initialize the user removal deny-list.
+//  8. Schema v5: seed legacy global tools/paths into Projections.
 func parseAndMigrate(data []byte) (*State, error) {
 	var legacy legacyState
 	if err := json.Unmarshal(data, &legacy); err != nil {
@@ -427,6 +428,7 @@ func parseAndMigrate(data []byte) (*State, error) {
 		}
 		s.SchemaVersion = 5
 	}
+	seedLegacyProjections(s)
 	seedManagedPaths(s)
 
 	return s, nil
@@ -750,6 +752,22 @@ func seedManagedPaths(s *State) {
 			skill.ManagedPaths = append([]string(nil), skill.Paths...)
 			s.Installed[name] = skill
 		}
+	}
+}
+
+func seedLegacyProjections(s *State) {
+	for name, skill := range s.Installed {
+		if len(skill.Projections) > 0 {
+			continue
+		}
+		if len(skill.Tools) == 0 && len(skill.Paths) == 0 {
+			continue
+		}
+		skill.Projections = []ProjectionEntry{{
+			Project: "",
+			Tools:   append([]string{}, skill.Tools...),
+		}}
+		s.Installed[name] = skill
 	}
 }
 
