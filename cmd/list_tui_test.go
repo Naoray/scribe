@@ -530,6 +530,141 @@ func TestEnsureCursorVisible_ReservesSlotsForMoreAboveAndBelowIndicators(t *test
 	}
 }
 
+func TestEnsureCursorVisible_CursorArrowAlwaysRendered(t *testing.T) {
+	// Regression for #486: pressing ↓ past the visible region must scroll the
+	// viewport so the focused-row arrow is actually drawn. Renders the rows
+	// and asserts the cursor marker is present in the output for every cursor
+	// position from 0..N-1.
+	cases := []struct {
+		name        string
+		rows        []listRow
+		groupCounts map[string]int
+		height      int
+	}{
+		{
+			name: "single group",
+			rows: func() []listRow {
+				rs := make([]listRow, 50)
+				for i := range rs {
+					rs[i] = listRow{Name: "s", Group: "g"}
+				}
+				return rs
+			}(),
+			groupCounts: map[string]int{"g": 50},
+			height:      27,
+		},
+		{
+			name: "multi group",
+			rows: func() []listRow {
+				rs := make([]listRow, 0, 60)
+				for g := 0; g < 3; g++ {
+					group := string(rune('A' + g))
+					for i := 0; i < 20; i++ {
+						rs = append(rs, listRow{Name: "s", Group: group})
+					}
+				}
+				return rs
+			}(),
+			groupCounts: map[string]int{"A": 20, "B": 20, "C": 20},
+			height:      27,
+		},
+		{
+			name: "mixed empty and non-empty groups",
+			rows: func() []listRow {
+				// 25 unmanaged (Group="") + 25 grouped — exposes the
+				// header-budget divergence between cursorFitsAt and
+				// renderRows for empty group transitions.
+				rs := make([]listRow, 0, 50)
+				for i := 0; i < 25; i++ {
+					rs = append(rs, listRow{Name: "s", Group: "owner/repo"})
+				}
+				for i := 0; i < 25; i++ {
+					rs = append(rs, listRow{Name: "s"})
+				}
+				return rs
+			}(),
+			groupCounts: map[string]int{"owner/repo": 25},
+			height:      27,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			m := listModel{
+				width:       80,
+				height:      tc.height,
+				rows:        tc.rows,
+				filtered:    tc.rows,
+				groupCounts: tc.groupCounts,
+			}
+			for cursor := 0; cursor < len(tc.rows); cursor++ {
+				m.cursor = cursor
+				m = m.ensureCursorVisible()
+
+				var sb strings.Builder
+				m.renderRows(&sb, m.contentHeight(), m.width-4, false)
+				out := sb.String()
+				if !strings.Contains(out, "▸") {
+					t.Fatalf("cursor=%d offset=%d: cursor arrow not rendered\n%s", cursor, m.offset, out)
+				}
+			}
+		})
+	}
+}
+
+func TestEnsureCursorVisible_LastRowSkipsBottomIndicator(t *testing.T) {
+	// Regression for #486: when cursor is on the last row there is no
+	// "↓ N more below" indicator, so cursorFitsAt must not reserve a slot
+	// for it. Otherwise scrolling to the very end leaves cursor off-screen.
+	rows := make([]listRow, 50)
+	for i := range rows {
+		rows[i] = listRow{Name: "s", Group: "g"}
+	}
+	m := listModel{
+		width:       80,
+		height:      27,
+		rows:        rows,
+		filtered:    rows,
+		cursor:      49,
+		groupCounts: map[string]int{"g": 50},
+	}
+	m = m.ensureCursorVisible()
+
+	var sb strings.Builder
+	m.renderRows(&sb, m.contentHeight(), m.width-4, false)
+	out := sb.String()
+	if !strings.Contains(out, "▸") {
+		t.Fatalf("cursor arrow missing at last row\n%s", out)
+	}
+	if strings.Contains(out, "↓ ") {
+		t.Fatalf("bottom indicator should not appear when cursor is on last row\n%s", out)
+	}
+}
+
+func TestEnsureCursorVisible_FirstRowResetsOffset(t *testing.T) {
+	// Regression for #486: pressing Home (or scrolling to top) must reset
+	// the offset back to 0, not leave it stale where the cursor is no
+	// longer in view.
+	rows := make([]listRow, 50)
+	for i := range rows {
+		rows[i] = listRow{Name: "s", Group: "g"}
+	}
+	m := listModel{
+		width:       80,
+		height:      27,
+		rows:        rows,
+		filtered:    rows,
+		cursor:      0,
+		offset:      20,
+		groupCounts: map[string]int{"g": 50},
+	}
+	m = m.ensureCursorVisible()
+	if m.offset != 0 {
+		t.Fatalf("offset should reset to 0 when cursor is at top, got %d", m.offset)
+	}
+}
+
 func TestViewListFull_PadsContentToPinSummaryToBottom(t *testing.T) {
 	// Regression: the summary + help footer must sit at the bottom of the
 	// terminal, not float mid-screen when the filtered list is shorter than
