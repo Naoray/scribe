@@ -1,17 +1,17 @@
 package workflow
 
 import (
-	"encoding/json"
 	"io"
 
+	clienv "github.com/Naoray/scribe/internal/cli/env"
 	"github.com/Naoray/scribe/internal/cli/envelope"
+	"github.com/Naoray/scribe/internal/cli/output"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 )
 
 // jsonFormatter buffers all events and writes a single JSON object on Flush.
 type jsonFormatter struct {
-	out        io.Writer
 	registries []registryResult
 	current    *registryResult
 	summary    sync.SyncCompleteMsg
@@ -19,6 +19,7 @@ type jsonFormatter struct {
 	adoption   adoptionResult
 	reconcile  *reconcileResult
 	meta       func() envelope.Meta
+	renderer   output.Renderer
 }
 
 type reconcileResult struct {
@@ -65,7 +66,8 @@ func newJSONFormatter(out io.Writer, meta func() envelope.Meta) *jsonFormatter {
 	if meta == nil {
 		meta = func() envelope.Meta { return envelope.Meta{} }
 	}
-	return &jsonFormatter{out: out, registries: []registryResult{}, meta: meta}
+	renderer := output.New(clienv.Mode{Format: clienv.FormatJSON}, out, io.Discard)
+	return &jsonFormatter{registries: []registryResult{}, meta: meta, renderer: renderer}
 }
 
 func (f *jsonFormatter) OnRegistryStart(repo string) {
@@ -297,5 +299,14 @@ func (f *jsonFormatter) Flush() error {
 	if f.summary.Failed > 0 || f.adoption.Failed > 0 {
 		status = envelope.StatusPartialSuccess
 	}
-	return json.NewEncoder(f.out).Encode(envelope.New(status, out, f.meta()))
+	meta := f.meta()
+	f.renderer.SetMeta("duration_ms", meta.DurationMS)
+	f.renderer.SetMeta("bootstrap_ms", meta.BootstrapMS)
+	f.renderer.SetMeta("command", meta.Command)
+	f.renderer.SetMeta("scribe_version", meta.ScribeVersion)
+	f.renderer.SetStatus(status)
+	if err := f.renderer.Result(out); err != nil {
+		return err
+	}
+	return f.renderer.Flush()
 }
