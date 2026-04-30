@@ -128,6 +128,27 @@ Use it for installs, updates, removal, adoption of unmanaged local skills, and s
 9. `scribe list` is local-first. Use `scribe browse` for registry discovery.
 10. Some failures still return plain stderr plus non-zero exit, not a JSON error envelope.
 
+## JSON envelope (format_version=1)
+
+Migrated commands wrap their output in a versioned envelope. Read payload from `data`, never from the top level:
+
+```json
+{ "status": "ok", "format_version": "1", "data": { /* payload */ },
+  "meta": { "duration_ms": 12, "command": "scribe sync", "scribe_version": "..." } }
+```
+
+`status` is `"ok"` on success, `"partial_success"` when `data.summary.failed > 0` (exit code 10), or `"error"` (with non-zero exit). Use `jq '.data.foo'`, not `jq '.foo'`.
+
+Run `scribe schema <command> --json` before composing an unfamiliar call — returns JSON Schema 2020-12 for inputs and outputs.
+
+## Exit codes
+
+`0` ok · `2` usage · `3` not-found · `4` permission · `5` conflict · `6` network · `7` dependency · `8` validation · `9` user-canceled · `10` partial success.
+
+## Project file (`.scribe.yaml`)
+
+If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. The schema and parser ship; CLI surfaces that act on it land per release. Don't synthesize one without being asked.
+
 ## JSON shapes
 
 ### `scribe list --json`
