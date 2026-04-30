@@ -279,6 +279,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 				b.Formatter.OnSkillResolved(m.Name, m.SkillStatus)
 			case sync.SkillSkippedMsg:
 				b.Formatter.OnSkillSkipped(m.Name, resolved[m.Name])
+			case sync.SkillSkippedByDenyListMsg:
+				b.Formatter.OnSkillSkippedByDenyList(m.Name, m.Registry)
 			case sync.SkillDownloadingMsg:
 				b.Formatter.OnSkillDownloading(m.Name)
 			case sync.SkillInstalledMsg:

@@ -56,6 +56,10 @@ func (f *textFormatter) OnSkillSkipped(name string, status sync.SkillStatus) {
 	fmt.Fprintf(f.out, "  %-20s ok (%s)\n", name, ver)
 }
 
+func (f *textFormatter) OnSkillSkippedByDenyList(name, registry string) {
+	fmt.Fprintf(f.out, "  %-20s skipped (removed by user from %s)\n", name, registry)
+}
+
 func (f *textFormatter) OnSkillError(name string, err error) {
 	fmt.Fprintf(f.errOut, "  %-20s error: %v\n", name, err)
 }

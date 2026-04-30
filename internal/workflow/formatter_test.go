@@ -76,8 +76,9 @@ func TestJSONFormatter(t *testing.T) {
 		Status:    sync.StatusCurrent,
 		Installed: &state.InstalledSkill{Revision: 2},
 	})
+	fmtr.OnSkillSkippedByDenyList("removed", "acme/skills")
 	fmtr.OnSkillError("broken", fmt.Errorf("download failed"))
-	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1, Skipped: 1, Failed: 1})
+	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1, Skipped: 2, Failed: 1})
 
 	if err := fmtr.Flush(); err != nil {
 		t.Fatalf("Flush() error: %v", err)
@@ -99,12 +100,19 @@ func TestJSONFormatter(t *testing.T) {
 	}
 
 	skills := reg["skills"].([]any)
-	if len(skills) != 3 {
-		t.Errorf("expected 3 skills, got %d", len(skills))
+	if len(skills) != 4 {
+		t.Errorf("expected 4 skills, got %d", len(skills))
 	}
 
 	summary := result["summary"].(map[string]any)
 	if summary["installed"].(float64) != 1 {
 		t.Errorf("expected installed=1, got: %v", summary["installed"])
+	}
+	denied := result["skipped_by_deny_list"].([]any)
+	if len(denied) != 1 {
+		t.Fatalf("expected 1 deny-list skip, got %d", len(denied))
+	}
+	if denied[0].(map[string]any)["name"] != "removed" {
+		t.Fatalf("unexpected deny-list skip payload: %v", denied[0])
 	}
 }

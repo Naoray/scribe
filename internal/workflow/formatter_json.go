@@ -14,6 +14,7 @@ type jsonFormatter struct {
 	registries []registryResult
 	current    *registryResult
 	summary    sync.SyncCompleteMsg
+	denied     []denyListSkip
 	adoption   adoptionResult
 	reconcile  *reconcileResult
 }
@@ -46,6 +47,11 @@ type skillResult struct {
 	Status  string `json:"status,omitempty"`
 	Version string `json:"version,omitempty"`
 	Error   string `json:"error,omitempty"`
+}
+
+type denyListSkip struct {
+	Name     string `json:"name"`
+	Registry string `json:"registry"`
 }
 
 type registryResult struct {
@@ -96,6 +102,18 @@ func (f *jsonFormatter) OnSkillSkipped(name string, status sync.SkillStatus) {
 		Action:  "skipped",
 		Status:  status.Status.String(),
 		Version: ver,
+	})
+}
+
+func (f *jsonFormatter) OnSkillSkippedByDenyList(name, registry string) {
+	f.denied = append(f.denied, denyListSkip{Name: name, Registry: registry})
+	if f.current == nil {
+		return
+	}
+	f.current.Skills = append(f.current.Skills, skillResult{
+		Name:   name,
+		Action: "skipped",
+		Status: "removed_by_user",
 	})
 }
 
@@ -266,6 +284,9 @@ func (f *jsonFormatter) Flush() error {
 	}
 	if f.reconcile != nil {
 		out["reconcile"] = f.reconcile
+	}
+	if len(f.denied) > 0 {
+		out["skipped_by_deny_list"] = f.denied
 	}
 	return json.NewEncoder(f.out).Encode(out)
 }
