@@ -19,6 +19,9 @@ import (
 // validSkillName matches safe skill names that work as catalog entry names and filesystem paths.
 var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+// validAgentSkillName matches the agentskills registry name convention.
+var validAgentSkillName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
 // SkillMeta holds metadata parsed from SKILL.md frontmatter.
 type SkillMeta struct {
 	Name           string
@@ -529,4 +532,71 @@ func truncateDescription(s string) string {
 		return s[:80] + "..."
 	}
 	return s
+}
+
+// ReadSkillMetadata extracts SKILL.md metadata from a skill directory.
+func ReadSkillMetadata(skillDir string) (SkillMeta, error) {
+	path := filepath.Join(skillDir, "SKILL.md")
+
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return SkillMeta{}, fmt.Errorf("resolve SKILL.md: %w", err)
+	}
+
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return SkillMeta{}, fmt.Errorf("read SKILL.md: %w", err)
+	}
+
+	return ParseSkillMetadata(data)
+}
+
+// ParseSkillMetadata extracts SKILL.md frontmatter from bytes.
+func ParseSkillMetadata(data []byte) (SkillMeta, error) {
+	fm := extractFrontmatter(data)
+	if fm == "" {
+		return SkillMeta{Description: extractFirstParagraph(data)}, nil
+	}
+
+	var raw rawFrontmatter
+	if err := yaml.Unmarshal([]byte(fm), &raw); err != nil {
+		return SkillMeta{}, fmt.Errorf("parse frontmatter: %w", err)
+	}
+
+	meta := SkillMeta{
+		Name:        raw.Name,
+		Description: truncateDescription(raw.Description),
+		Version:     raw.Version,
+		Author:      raw.Author,
+	}
+	if v, ok := raw.Metadata["version"]; ok {
+		meta.Version = fmt.Sprint(v)
+	}
+	if v, ok := raw.Metadata["author"]; ok {
+		meta.Author = fmt.Sprint(v)
+	}
+	if meta.Description == "" {
+		meta.Description = extractFirstParagraph(data)
+	}
+	return meta, nil
+}
+
+// ValidateAgentSkillMetadata checks the name and description fields required by
+// agentskills registries before publishing.
+func ValidateAgentSkillMetadata(meta SkillMeta) error {
+	name := strings.TrimSpace(meta.Name)
+	if name == "" {
+		return fmt.Errorf("SKILL.md frontmatter missing name")
+	}
+	if !validAgentSkillName.MatchString(name) {
+		return fmt.Errorf("skill name %q must use lowercase letters, digits, dot, underscore, or hyphen and start with a letter or digit", meta.Name)
+	}
+	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("skill name %q must not contain path separators or parent-directory segments", meta.Name)
+	}
+	desc := strings.TrimSpace(meta.Description)
+	if desc == "" {
+		return fmt.Errorf("SKILL.md frontmatter missing description")
+	}
+	return nil
 }
