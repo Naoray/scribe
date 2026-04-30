@@ -5,6 +5,8 @@ package tools
 
 import "os"
 
+const bootstrapSkillName = "scribe-agent"
+
 // SkillFile represents a file to be written to the skill store.
 type SkillFile struct {
 	Path    string // relative to the skill root (e.g. "scripts/deploy.sh")
@@ -59,4 +61,11 @@ func DetectTools() []Tool {
 func homeDirExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func projectionProjectRoot(skillName, projectRoot string) string {
+	if skillName == bootstrapSkillName {
+		return ""
+	}
+	return projectRoot
 }

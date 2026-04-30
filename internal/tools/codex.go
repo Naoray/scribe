@@ -31,6 +31,7 @@ func (t CodexTool) Detect() bool {
 }
 
 func (t CodexTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
+	projectRoot = projectionProjectRoot(skillName, projectRoot)
 	if err := ensureCodexCompatibleSkillMD(skillName, canonicalDir); err != nil {
 		return nil, err
 	}

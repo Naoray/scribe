@@ -28,6 +28,7 @@ func (t ClaudeTool) Detect() bool {
 }
 
 func (t ClaudeTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
+	projectRoot = projectionProjectRoot(skillName, projectRoot)
 	skillsDir, err := claudeSkillsDir(projectRoot)
 	if err != nil {
 		return nil, err

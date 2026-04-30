@@ -33,6 +33,7 @@ func (t CursorTool) Detect() bool {
 }
 
 func (t CursorTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
+	projectRoot = projectionProjectRoot(skillName, projectRoot)
 	// Generate .cursor.mdc from SKILL.md in the store.
 	skillMDPath := filepath.Join(canonicalDir, "SKILL.md")
 	skillMD, err := os.ReadFile(skillMDPath)
