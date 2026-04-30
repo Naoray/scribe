@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 
 	"github.com/Naoray/scribe/internal/add"
+	"github.com/Naoray/scribe/internal/discovery"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
@@ -18,6 +21,8 @@ import (
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
+
+var githubURLInDescriptionRE = regexp.MustCompile(`https?://github\.com/[^\s)]+`)
 
 // addResult is the per-skill result emitted by registry-push flows.
 type addResult struct {
@@ -72,6 +77,8 @@ func runAddByName(
 			return nil
 		}
 	}
+
+	warnOnMissingSourceAttribution([]add.Candidate{*found})
 
 	results := wireAddEmit(adder, targetRepo, useJSON)
 
@@ -138,6 +145,8 @@ func runAddInteractive(
 		}
 	}
 
+	warnOnMissingSourceAttribution(selected)
+
 	results := wireAddEmit(adder, targetRepo, useJSON)
 
 	if err := adder.Add(ctx, targetRepo, selected); err != nil {
@@ -145,6 +154,27 @@ func runAddInteractive(
 	}
 
 	return finishAdd(ctx, *results, targetRepo, st, client, targets, useJSON)
+}
+
+func warnOnMissingSourceAttribution(candidates []add.Candidate) {
+	for _, candidate := range candidates {
+		if warning := missingSourceWarning(candidate); warning != "" {
+			fmt.Fprintln(os.Stderr, warning)
+		}
+	}
+}
+
+func missingSourceWarning(candidate add.Candidate) string {
+	if candidate.Attribution != (discovery.Source{}) {
+		return ""
+	}
+	if strings.Contains(candidate.Description, "⛔️") {
+		return ""
+	}
+	if !githubURLInDescriptionRE.MatchString(candidate.Description) {
+		return ""
+	}
+	return fmt.Sprintf("warning: %s mentions a GitHub URL in its description but has no source frontmatter", candidate.Name)
 }
 
 // sortCandidates groups by origin (local first, then remote), then by package,

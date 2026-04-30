@@ -1,6 +1,11 @@
 package cmd
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Naoray/scribe/internal/add"
+	"github.com/Naoray/scribe/internal/discovery"
+)
 
 func TestResolveRegistry(t *testing.T) {
 	repos := []string{"ArtistfyHQ/team-skills", "vercel/skills", "acme/skills"}
@@ -39,6 +44,30 @@ func TestResolveRegistry(t *testing.T) {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestMissingSourceWarning(t *testing.T) {
+	candidate := add.Candidate{
+		Name:        "borrowed",
+		Description: "Imported from https://github.com/acme/borrowed",
+		LocalPath:   "/tmp/borrowed",
+	}
+
+	got := missingSourceWarning(candidate)
+	if got == "" {
+		t.Fatal("expected warning for GitHub URL without source frontmatter")
+	}
+
+	candidate.Attribution = discovery.Source{URL: "https://github.com/acme/borrowed"}
+	if got := missingSourceWarning(candidate); got != "" {
+		t.Fatalf("expected no warning when source is set, got %q", got)
+	}
+
+	candidate.Attribution = discovery.Source{}
+	candidate.Description = "⛔️ https://github.com/acme/borrowed"
+	if got := missingSourceWarning(candidate); got != "" {
+		t.Fatalf("expected opt-out marker to suppress warning, got %q", got)
 	}
 }
 

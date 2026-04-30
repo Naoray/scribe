@@ -8,6 +8,15 @@ var explainOutputSchema = `{
   "properties": {
     "name": { "type": "string" },
     "description": { "type": "string" },
+    "source": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "author": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "revision": { "type": "integer" },
     "targets": { "type": "array", "items": { "type": "string" } },
     "path": { "type": "string" },
