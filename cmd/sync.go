@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
@@ -17,11 +18,11 @@ func newSyncCommand() *cobra.Command {
 	cmd.Flags().Bool("trust-all", false, "Approve all package install commands without prompting")
 	cmd.Flags().Bool("all", false, "Sync all registries (default behavior)")
 	cmd.Flags().MarkHidden("all")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 	repoFlag, _ := cmd.Flags().GetString("registry")
 	trustAllFlag, _ := cmd.Flags().GetBool("trust-all")
 
@@ -35,6 +36,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 	if err := workflow.Run(cmd.Context(), workflow.SyncSteps(), bag); err != nil {
 		return err
+	}
+	if bag.Partial {
+		return clierrors.Wrap(clierrors.ErrPartialSuccess, "SYNC_PARTIAL", clierrors.ExitPartial)
 	}
 	return saveWorkflowState(bag)
 }

@@ -111,7 +111,7 @@ func findCommand(root *cobra.Command, path string) (*cobra.Command, error) {
 	path = strings.TrimSpace(strings.TrimPrefix(path, root.CommandPath()+" "))
 	var found *cobra.Command
 	walkCommandsForSchema(root, func(cmd *cobra.Command) {
-		if found != nil || cmd.Hidden {
+		if found != nil {
 			return
 		}
 		if cmd.CommandPath() == path || cmd.CommandPath() == root.CommandPath()+" "+path || cmd.Name() == path {

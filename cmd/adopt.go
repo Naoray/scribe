@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/adopt"
+	"github.com/Naoray/scribe/internal/cli/envelope"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/tools"
 	"github.com/Naoray/scribe/internal/workflow"
@@ -41,13 +42,13 @@ Examples:
 	cmd.Flags().Bool("dry-run", false, "Print plan without writing anything")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().Bool("verbose", false, "Include paths and hashes in plan output")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runAdopt(cmd *cobra.Command, args []string) error {
 	yes, _ := cmd.Flags().GetBool("yes")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
@@ -91,13 +92,13 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 	// Bypasses formatter — one-shot output, not an event stream.
 	if dryRun {
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		return printDryRun(plan, useJSON, verbose)
+		return printDryRun(cmd, plan, useJSON, verbose)
 	}
 
 	// Non-TTY + --json without --yes: also print dry-run style plan.
 	if useJSON && !yes {
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		return printDryRun(plan, true, verbose)
+		return printDryRun(cmd, plan, true, verbose)
 	}
 
 	resolvedTools, err := tools.ResolveActive(cfg)
@@ -105,7 +106,7 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve tools: %w", err)
 	}
 
-	formatter := workflow.NewFormatter(useJSON, false)
+	formatter := workflow.NewFormatterForContext(cmd.Context(), useJSON, false)
 
 	var finalCandidates []adopt.Candidate
 
@@ -155,7 +156,11 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(result.Failed) > 0 {
-		return fmt.Errorf("adoption completed with %d failure(s)", len(result.Failed))
+		return clierrors.Wrap(
+			fmt.Errorf("adoption completed with %d failure(s)", len(result.Failed)),
+			"ADOPT_PARTIAL",
+			clierrors.ExitPartial,
+		)
 	}
 
 	return nil
@@ -199,7 +204,7 @@ type dryRunConflict struct {
 }
 
 // printDryRun outputs the plan without making any writes.
-func printDryRun(plan adopt.Plan, useJSON, verbose bool) error {
+func printDryRun(cmd *cobra.Command, plan adopt.Plan, useJSON, verbose bool) error {
 	if useJSON {
 		p := dryRunPlan{
 			DryRun:    true,
@@ -224,9 +229,7 @@ func printDryRun(plan adopt.Plan, useJSON, verbose bool) error {
 			}
 			p.Conflicts = append(p.Conflicts, entry)
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(p)
+		return renderMutatorEnvelope(cmd, p, envelope.StatusOK)
 	}
 
 	// Text output.

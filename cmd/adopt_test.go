@@ -74,6 +74,9 @@ func TestAdopt_DryRunWritesNothing(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &plan); err != nil {
 		t.Fatalf("output is not valid JSON: %v\noutput: %s", err, out)
 	}
+	if data, ok := plan["data"].(map[string]any); ok {
+		plan = data
+	}
 	if plan["dry_run"] != true {
 		t.Errorf("expected dry_run=true in JSON output, got: %v", plan["dry_run"])
 	}
@@ -167,10 +170,13 @@ func TestAdopt_JSONStructure(t *testing.T) {
 	var buf bytes.Buffer
 	buf.ReadFrom(r)
 
-	var plan dryRunPlan
-	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
+	var env struct {
+		Data dryRunPlan `json:"data"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("invalid JSON: %v\noutput: %s", err, buf.String())
 	}
+	plan := env.Data
 	if !plan.DryRun {
 		t.Error("expected dry_run=true")
 	}
