@@ -496,6 +496,12 @@ func wrapErr(err error, operation string) error {
 				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
 				clierrors.WithResource(operation),
 			)
+		case http.StatusConflict:
+			return githubConflict(err, operation)
+		case http.StatusUnprocessableEntity:
+			if isUpdateRefConflict(operation, ghErr) {
+				return githubConflict(err, operation)
+			}
 		}
 	}
 	return clierrors.Wrap(err, "GH_NETWORK_FAILED", clierrors.ExitNetwork,
@@ -503,6 +509,24 @@ func wrapErr(err error, operation string) error {
 		clierrors.WithRetryable(true),
 		clierrors.WithResource(operation),
 	)
+}
+
+func githubConflict(err error, operation string) error {
+	return clierrors.Wrap(err, "GH_CONFLICT", clierrors.ExitConflict,
+		clierrors.WithMessage(fmt.Sprintf("%s: remote changed while writing", operation)),
+		clierrors.WithRemediation("run `scribe sync` and retry"),
+		clierrors.WithResource(operation),
+	)
+}
+
+func isUpdateRefConflict(operation string, ghErr *github.ErrorResponse) bool {
+	if !strings.HasPrefix(operation, "set ref ") {
+		return false
+	}
+	msg := strings.ToLower(ghErr.Message)
+	return strings.Contains(msg, "fast forward") ||
+		strings.Contains(msg, "non-fast-forward") ||
+		strings.Contains(msg, "reference update failed")
 }
 
 func formatReset(unixTimestamp string) string {
