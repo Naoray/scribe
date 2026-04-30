@@ -25,6 +25,7 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 // skillRefPattern matches "owner/repo:skillname" — direct install reference.
@@ -85,7 +86,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	aliasName, _ := cmd.Flags().GetString("alias")
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
-	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
+	conflictMode := workflow.ConflictModeForProcess(jsonFlag)
+	useJSON := workflow.UseJSONOutputForProcess(jsonFlag)
 	factory := newCommandFactory()
 
 	cfg, err := factory.Config()
@@ -125,7 +127,9 @@ func runAdd(cmd *cobra.Command, args []string) error {
 				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
 			)
 		}
-		if err := runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncerWithOptions(client, targets, forceBudget, aliasName), true, useJSON, skipConfirm); err != nil {
+		syncer := newInstallSyncerWithOptions(client, targets, forceBudget, aliasName)
+		configureInstallNameConflictResolver(syncer, conflictMode, aliasName)
+		if err := runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, syncer, true, useJSON, skipConfirm); err != nil {
 			return handleNameConflictError(cmd, err)
 		}
 		return nil
@@ -200,7 +204,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if err := installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget, aliasName); err != nil {
+	if err := installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget, aliasName, conflictMode); err != nil {
 		return handleNameConflictError(cmd, err)
 	}
 	return nil
@@ -337,6 +341,7 @@ func installSelected(
 	skipConfirm bool,
 	forceBudget bool,
 	aliasName string,
+	conflictMode workflow.ConflictMode,
 ) error {
 	// Group by registry.
 	byRegistry := map[string][]sync.SkillStatus{}
@@ -371,6 +376,7 @@ func installSelected(
 	}
 
 	syncer := newInstallSyncerWithOptions(client, targets, forceBudget, aliasName)
+	configureInstallNameConflictResolver(syncer, conflictMode, aliasName)
 
 	var installErr error
 	for _, registryRepo := range order {
@@ -424,6 +430,12 @@ func newInstallSyncerWithOptions(client *gh.Client, targets []tools.Tool, forceB
 		ProjectRoot: resolveCurrentProjectRoot(),
 		ForceBudget: forceBudget,
 		AliasName:   aliasName,
+	}
+}
+
+func configureInstallNameConflictResolver(syncer *sync.Syncer, conflictMode workflow.ConflictMode, aliasName string) {
+	if syncer != nil && conflictMode == workflow.ConflictModeInteractive && aliasName == "" {
+		syncer.NameConflictResolver = workflow.PromptNameConflictResolution
 	}
 }
 

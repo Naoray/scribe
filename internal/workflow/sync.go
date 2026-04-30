@@ -206,7 +206,7 @@ func StepResolveFormatter(ctx context.Context, b *Bag) error {
 	if b.Formatter != nil {
 		return nil
 	}
-	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
+	useJSON := UseJSONOutputForProcess(b.JSONFlag)
 	multiRegistry := len(b.Repos) > 1
 	b.Formatter = NewFormatterForContext(ctx, useJSON, multiRegistry)
 	return nil
@@ -369,8 +369,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 			return approved
 		}
 	}
-	if isTTY && !b.JSONFlag && b.AliasName == "" {
-		syncer.NameConflictResolver = promptNameConflictResolution
+	if ConflictModeForProcess(b.JSONFlag) == ConflictModeInteractive && b.AliasName == "" {
+		syncer.NameConflictResolver = PromptNameConflictResolution
 	}
 
 	for _, teamRepo := range b.Repos {
@@ -398,7 +398,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	return nil
 }
 
-func promptNameConflictResolution(conflict sync.NameConflict) (sync.NameConflictResolution, error) {
+func PromptNameConflictResolution(conflict sync.NameConflict) (sync.NameConflictResolution, error) {
 	const (
 		adopt = "adopt"
 		alias = "alias"

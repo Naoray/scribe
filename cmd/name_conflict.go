@@ -6,12 +6,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/cli/envelope"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 type nameConflictResolutionPayload struct {
@@ -35,7 +35,7 @@ func handleNameConflictError(cmd *cobra.Command, err error) error {
 		clierrors.WithRemediation("run `scribe adopt "+conflict.Conflict.Name+"`, retry with `--alias <name>`, or skip from an interactive terminal"),
 	)
 
-	if !jsonFlagPassed(cmd) && isatty.IsTerminal(os.Stdout.Fd()) {
+	if workflow.ConflictModeForProcess(jsonFlagPassed(cmd)) == workflow.ConflictModeInteractive {
 		return wrapped
 	}
 
