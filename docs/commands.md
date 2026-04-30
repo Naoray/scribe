@@ -23,7 +23,7 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe status` | Show connected registries, installed count, and last sync |
 | `scribe tools` | List detected AI tools on this machine; enable, disable, or register custom ones |
 | `scribe explain <skill>` | AI-powered skill explanation (or `--raw` for the rendered SKILL.md body) |
-| `scribe upgrade-agent` | Refresh the embedded scribe-agent bootstrap skill |
+| `scribe upgrade-agent` | Refresh the embedded scribe bootstrap skill |
 
 ## Registry management
 
