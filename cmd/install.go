@@ -23,6 +23,7 @@ Pass skill names to install specific skills, or use --all to install everything.
 	cmd.Flags().Bool("all", false, "Install all available skills without prompting")
 	cmd.Flags().String("registry", "", "Limit to a specific registry (owner/repo)")
 	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
+	cmd.Flags().String("alias", "", "Install incoming skill under this name when a local directory conflicts")
 	return cmd
 }
 
@@ -30,6 +31,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	allFlag, _ := cmd.Flags().GetBool("all")
 	repoFlag, _ := cmd.Flags().GetString("registry")
 	forceBudget, _ := cmd.Flags().GetBool("force")
+	aliasName, _ := cmd.Flags().GetString("alias")
 	factory := newCommandFactory()
 
 	if err := enforceCurrentBudget(factory, forceBudget); err != nil {
@@ -47,6 +49,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		InstallAllFlag:   allFlag,
 		RepoFlag:         repoFlag,
 		ForceBudget:      forceBudget,
+		AliasName:        aliasName,
 		Factory:          factory,
 		FilterRegistries: filterRegistries,
 	}

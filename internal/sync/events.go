@@ -176,6 +176,62 @@ type SkillAdoptionNeededMsg struct {
 	Path string
 }
 
+type NameConflictAction string
+
+const (
+	NameConflictActionUnresolved NameConflictAction = "unresolved"
+	NameConflictActionAdopt      NameConflictAction = "adopt"
+	NameConflictActionAlias      NameConflictAction = "alias"
+	NameConflictActionSkip       NameConflictAction = "skip"
+)
+
+type NameConflict struct {
+	Name string
+	Tool string
+	Path string
+}
+
+type NameConflictResolution struct {
+	Action NameConflictAction `json:"action"`
+	Alias  string             `json:"alias,omitempty"`
+}
+
+type NameConflictResolvedMsg struct {
+	Conflict   NameConflict
+	Resolution NameConflictResolution
+}
+
+type NameConflictError struct {
+	Conflict   NameConflict
+	Resolution NameConflictResolution
+	Err        error
+}
+
+func (e *NameConflictError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	switch e.Resolution.Action {
+	case NameConflictActionAdopt:
+		return "name conflict for " + e.Conflict.Name + ": run `scribe adopt " + e.Conflict.Name + "` first, then retry sync"
+	case NameConflictActionAlias:
+		if e.Resolution.Alias != "" {
+			return "name conflict for " + e.Conflict.Name + ": alias " + e.Resolution.Alias + " already exists"
+		}
+	}
+	return "name conflict for " + e.Conflict.Name + ": real directory at " + e.Conflict.Path
+}
+
+func (e *NameConflictError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 // MergeConflictMsg is sent when a 3-way merge produces conflict markers.
 type MergeConflictMsg struct {
 	Name string

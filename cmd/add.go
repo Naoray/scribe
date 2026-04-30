@@ -68,6 +68,7 @@ Examples:
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
 	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
+	cmd.Flags().String("alias", "", "Install incoming skill under this name when a local directory conflicts")
 	return markJSONSupported(cmd)
 }
 
@@ -76,6 +77,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	jsonFlag := jsonFlagPassed(cmd)
 	registryFilter, _ := cmd.Flags().GetString("registry")
 	forceBudget, _ := cmd.Flags().GetBool("force")
+	aliasName, _ := cmd.Flags().GetString("alias")
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
@@ -118,7 +120,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
 			)
 		}
-		return runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets, forceBudget), true, useJSON, skipConfirm)
+		return runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncerWithOptions(client, targets, forceBudget, aliasName), true, useJSON, skipConfirm)
 	}
 
 	// Need at least one connected registry to search/browse.
@@ -190,7 +192,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget)
+	return installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget, aliasName)
 }
 
 // parseSkillRef parses "owner/repo:skillname" into its parts.
@@ -323,6 +325,7 @@ func installSelected(
 	targets []tools.Tool,
 	skipConfirm bool,
 	forceBudget bool,
+	aliasName string,
 ) error {
 	// Group by registry.
 	byRegistry := map[string][]sync.SkillStatus{}
@@ -356,7 +359,7 @@ func installSelected(
 		}
 	}
 
-	syncer := newInstallSyncer(client, targets, forceBudget)
+	syncer := newInstallSyncerWithOptions(client, targets, forceBudget, aliasName)
 
 	var installErr error
 	for _, registryRepo := range order {
@@ -398,6 +401,10 @@ func newInstallSyncer(client *gh.Client, targets []tools.Tool, forceBudgetOpt ..
 	if len(forceBudgetOpt) > 0 {
 		forceBudget = forceBudgetOpt[0]
 	}
+	return newInstallSyncerWithOptions(client, targets, forceBudget, "")
+}
+
+func newInstallSyncerWithOptions(client *gh.Client, targets []tools.Tool, forceBudget bool, aliasName string) *sync.Syncer {
 	return &sync.Syncer{
 		Client:      sync.WrapGitHubClient(client),
 		Provider:    provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
@@ -405,6 +412,7 @@ func newInstallSyncer(client *gh.Client, targets []tools.Tool, forceBudgetOpt ..
 		Executor:    &sync.ShellExecutor{},
 		ProjectRoot: resolveCurrentProjectRoot(),
 		ForceBudget: forceBudget,
+		AliasName:   aliasName,
 	}
 }
 

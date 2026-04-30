@@ -69,6 +69,14 @@ type Syncer struct {
 	// Returns true if approved, false if denied.
 	// If nil and TrustAll is false, packages needing approval are skipped.
 	ApprovalFunc func(name, command, source string) bool
+
+	// AliasName installs an incoming skill under this alternate name when a
+	// real directory already exists at the original tool projection path.
+	AliasName string
+
+	// NameConflictResolver is called when a real directory already exists at
+	// the incoming skill name. Nil means non-interactive conflict.
+	NameConflictResolver func(NameConflict) (NameConflictResolution, error)
 }
 
 // ModifiedStrategy controls how sync treats outdated skills with local edits.
@@ -432,14 +440,6 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				}
 			}
 
-			// Write files to canonical store once, then symlink per target.
-			canonicalDir, err := tools.WriteToStore(sk.Name, tFiles)
-			if err != nil {
-				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("write store: %w", err)})
-				summary.Failed++
-				continue
-			}
-
 			// Filter to the skill's effective tools (pinned mode respects user
 			// selection; inherit mode uses every globally-enabled tool).
 			effectiveTools := selectEffectiveTools(s.Tools, installed)
@@ -452,24 +452,58 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				}
 			}
 
+			installName := sk.Name
+			if conflict, ok := s.firstRealDirectoryConflict(sk.Name, effectiveTools); ok {
+				resolution, err := s.resolveNameConflict(conflict, st, effectiveTools)
+				if err != nil {
+					return err
+				}
+				s.emit(NameConflictResolvedMsg{Conflict: conflict, Resolution: resolution})
+				switch resolution.Action {
+				case NameConflictActionSkip:
+					s.emit(SkillSkippedMsg{Name: sk.Name})
+					summary.Skipped++
+					continue
+				case NameConflictActionAlias:
+					installName = resolution.Alias
+				case NameConflictActionAdopt:
+					return &NameConflictError{Conflict: conflict, Resolution: resolution}
+				default:
+					return &NameConflictError{Conflict: conflict, Resolution: resolution}
+				}
+			}
+
+			// Write files to canonical store once, then symlink per target.
+			canonicalDir, err := tools.WriteToStore(installName, tFiles)
+			if err != nil {
+				s.emit(SkillErrorMsg{Name: installName, Err: fmt.Errorf("write store: %w", err)})
+				summary.Failed++
+				continue
+			}
+
 			var paths []string
 			var toolNames []string
 			toolFailed := false
 			for _, t := range effectiveTools {
-				links, err := t.Install(sk.Name, canonicalDir, s.ProjectRoot)
+				links, err := t.Install(installName, canonicalDir, s.ProjectRoot)
 				if err != nil {
 					if errors.Is(err, tools.ErrRealDirectoryExists) {
-						existing, pathErr := t.SkillPath(sk.Name)
+						existing, pathErr := t.SkillPath(installName)
 						if pathErr != nil {
-							s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+							return &NameConflictError{
+								Conflict:   NameConflict{Name: installName, Tool: t.Name()},
+								Resolution: NameConflictResolution{Action: NameConflictActionUnresolved},
+								Err:        fmt.Errorf("link to %s: %w", t.Name(), err),
+							}
 						} else {
-							s.emit(SkillErrorMsg{
-								Name: sk.Name,
-								Err:  fmt.Errorf("link to %s: real directory at %s: run `scribe adopt %s` first", t.Name(), existing, sk.Name),
-							})
+							return &NameConflictError{
+								Conflict:   NameConflict{Name: installName, Tool: t.Name(), Path: existing},
+								Resolution: NameConflictResolution{Action: NameConflictActionUnresolved},
+								Err:        fmt.Errorf("link to %s: real directory at %s: run `scribe adopt %s` first", t.Name(), existing, installName),
+							}
 						}
 					} else {
-						s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+						s.emit(SkillErrorMsg{Name: installName, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
 					}
 					summary.Failed++
 					toolFailed = true
@@ -512,7 +546,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			managedPaths := mergeManagedPaths(installed, paths)
-			st.RecordInstall(sk.Name, state.InstalledSkill{
+			st.RecordInstall(installName, state.InstalledSkill{
 				Revision:      nextRevision(installed),
 				InstalledHash: installedHash,
 				Sources:       sources,
@@ -524,7 +558,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			})
 			// Save after each successful install — partial sync is safe.
 			if err := st.Save(); err != nil {
-				s.emit(SkillErrorMsg{Name: sk.Name, Err: fmt.Errorf("save state after %s: %w", sk.Name, err)})
+				s.emit(SkillErrorMsg{Name: installName, Err: fmt.Errorf("save state after %s: %w", installName, err)})
 			}
 
 			// Enforce version retention after successful write.
@@ -533,7 +567,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			s.emit(SkillInstalledMsg{
-				Name:    sk.Name,
+				Name:    installName,
 				Updated: sk.Status == StatusOutdated,
 			})
 			if sk.Status == StatusOutdated {
@@ -557,6 +591,80 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 func (s *Syncer) emit(msg any) {
 	if s.Emit != nil {
 		s.Emit(msg)
+	}
+}
+
+func (s *Syncer) firstRealDirectoryConflict(name string, targetTools []tools.Tool) (NameConflict, bool) {
+	for _, t := range targetTools {
+		if _, ok := t.CanonicalTarget(""); !ok {
+			continue
+		}
+		path, err := t.SkillPath(name)
+		if err != nil {
+			continue
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			continue
+		}
+		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			return NameConflict{Name: name, Tool: t.Name(), Path: path}, true
+		}
+	}
+	return NameConflict{}, false
+}
+
+func (s *Syncer) resolveNameConflict(conflict NameConflict, st *state.State, targetTools []tools.Tool) (NameConflictResolution, error) {
+	resolution := NameConflictResolution{Action: NameConflictActionUnresolved}
+	if strings.TrimSpace(s.AliasName) != "" {
+		resolution = NameConflictResolution{
+			Action: NameConflictActionAlias,
+			Alias:  strings.TrimSpace(s.AliasName),
+		}
+	} else if s.NameConflictResolver != nil {
+		var err error
+		resolution, err = s.NameConflictResolver(conflict)
+		if err != nil {
+			return resolution, err
+		}
+		resolution.Alias = strings.TrimSpace(resolution.Alias)
+	}
+
+	switch resolution.Action {
+	case NameConflictActionAlias:
+		if resolution.Alias == "" {
+			return resolution, &NameConflictError{
+				Conflict:   conflict,
+				Resolution: resolution,
+				Err:        fmt.Errorf("name conflict for %s: alias cannot be empty", conflict.Name),
+			}
+		}
+		if resolution.Alias == conflict.Name {
+			return resolution, &NameConflictError{
+				Conflict:   conflict,
+				Resolution: resolution,
+				Err:        fmt.Errorf("name conflict for %s: alias must be different from the conflicting name", conflict.Name),
+			}
+		}
+		if lookupInstalled(st, resolution.Alias) != nil {
+			return resolution, &NameConflictError{
+				Conflict:   conflict,
+				Resolution: resolution,
+				Err:        fmt.Errorf("name conflict for %s: alias %q is already installed", conflict.Name, resolution.Alias),
+			}
+		}
+		if aliasConflict, ok := s.firstRealDirectoryConflict(resolution.Alias, targetTools); ok {
+			return resolution, &NameConflictError{
+				Conflict:   aliasConflict,
+				Resolution: resolution,
+				Err:        fmt.Errorf("name conflict for %s: alias %q also conflicts with a real directory at %s", conflict.Name, resolution.Alias, aliasConflict.Path),
+			}
+		}
+		return resolution, nil
+	case NameConflictActionSkip, NameConflictActionAdopt:
+		return resolution, nil
+	default:
+		return resolution, &NameConflictError{Conflict: conflict, Resolution: resolution}
 	}
 }
 
