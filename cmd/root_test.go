@@ -5,9 +5,58 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
+
+func TestResolveVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial string
+		info    *debug.BuildInfo
+		want    string
+	}{
+		{
+			name:    "keeps ldflags version",
+			initial: "v1.2.3",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Version: "v9.9.9"},
+			},
+			want: "v1.2.3",
+		},
+		{
+			name:    "uses module version for dev builds",
+			initial: "dev",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Version: "v0.12.3"},
+			},
+			want: "v0.12.3",
+		},
+		{
+			name:    "keeps dev for local devel builds",
+			initial: "dev",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Version: "(devel)"},
+			},
+			want: "dev",
+		},
+		{
+			name:    "keeps dev without build info",
+			initial: "dev",
+			info:    nil,
+			want:    "dev",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveVersion(tt.initial, tt.info); got != tt.want {
+				t.Fatalf("resolveVersion(%q) = %q, want %q", tt.initial, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestRoot_JSONFlag_StdoutIsCleanJSON_EvenDuringBuiltinsBackfill(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
