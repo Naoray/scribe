@@ -46,7 +46,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		FilterRegistries: filterRegistries,
 	}
 	if err := workflow.Run(cmd.Context(), workflow.SyncSteps(), bag); err != nil {
-		return err
+		return handleNameConflictError(cmd, err)
 	}
 	if bag.Partial {
 		if err := saveWorkflowState(bag); err != nil {

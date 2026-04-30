@@ -313,6 +313,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 				b.Formatter.OnSkillError(m.Name, m.Err)
 			case sync.BudgetWarningMsg:
 				b.Formatter.OnBudgetWarning(m.Agent, m.Message)
+			case sync.NameConflictResolvedMsg:
+				b.Formatter.OnNameConflictResolved(m.Conflict, m.Resolution)
 			case sync.SkillAdoptionNeededMsg:
 				// Handled implicitly by the SkillErrorMsg that follows it.
 			case sync.LegacyFormatMsg:

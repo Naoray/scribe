@@ -38,6 +38,11 @@ type installResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
+type installRunResults struct {
+	Installed  []installResult
+	Resolution *nameConflictResolutionPayload
+}
+
 // browseEntry pairs a SkillStatus with the registry it came from.
 type browseEntry struct {
 	Status   sync.SkillStatus
@@ -120,7 +125,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
 			)
 		}
-		return runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncerWithOptions(client, targets, forceBudget, aliasName), true, useJSON, skipConfirm)
+		if err := runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncerWithOptions(client, targets, forceBudget, aliasName), true, useJSON, skipConfirm); err != nil {
+			return handleNameConflictError(cmd, err)
+		}
+		return nil
 	}
 
 	// Need at least one connected registry to search/browse.
@@ -192,7 +200,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget, aliasName)
+	if err := installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget, aliasName); err != nil {
+		return handleNameConflictError(cmd, err)
+	}
+	return nil
 }
 
 // parseSkillRef parses "owner/repo:skillname" into its parts.
@@ -282,7 +293,7 @@ func runAddDirectInstallForCommand(
 		if useJSON {
 			return emitInstallJSON([]installResult{{
 				Name: target.Name, Registry: registryRepo, Status: "already-installed",
-			}}, cmd)
+			}}, nil, cmd)
 		}
 		fmt.Printf("%s is already installed (current).\n", skillName)
 		return nil
@@ -309,7 +320,7 @@ func runAddDirectInstallForCommand(
 	}
 
 	if useJSON {
-		return emitInstallJSON(*results, cmd)
+		return emitInstallJSON(results.Installed, results.Resolution, cmd)
 	}
 	return nil
 }
@@ -430,8 +441,8 @@ func resolveCurrentProjectRoot() string {
 
 // wireInstallSyncer attaches an Emit callback that prints progress (or
 // collects results for JSON output) and returns the result slice pointer.
-func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *[]installResult {
-	results := &[]installResult{}
+func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *installRunResults {
+	results := &installRunResults{}
 	syncer.Emit = func(msg any) {
 		switch m := msg.(type) {
 		case sync.SkillInstalledMsg:
@@ -440,7 +451,7 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 				if m.Updated {
 					status = "updated"
 				}
-				*results = append(*results, installResult{
+				results.Installed = append(results.Installed, installResult{
 					Name: m.Name, Registry: registryRepo, Status: status,
 				})
 			} else {
@@ -452,7 +463,7 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 			}
 		case sync.SkillErrorMsg:
 			if useJSON {
-				*results = append(*results, installResult{
+				results.Installed = append(results.Installed, installResult{
 					Name: m.Name, Registry: registryRepo, Status: "error", Error: m.Err.Error(),
 				})
 			} else {
@@ -462,6 +473,9 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 			if !useJSON {
 				fmt.Fprintf(os.Stderr, "warning: %s\n", m.Message)
 			}
+		case sync.NameConflictResolvedMsg:
+			payload := conflictResolutionPayload(m.Conflict, m.Resolution)
+			results.Resolution = &payload
 		}
 	}
 	return results
@@ -566,8 +580,11 @@ func emitBrowseJSONForCommand(cmd *cobra.Command, entries []browseEntry) error {
 }
 
 // emitInstallJSON emits per-skill install results as JSON.
-func emitInstallJSON(results []installResult, cmd *cobra.Command) error {
+func emitInstallJSON(results []installResult, resolution *nameConflictResolutionPayload, cmd *cobra.Command) error {
 	payload := map[string]any{"installed": results}
+	if resolution != nil {
+		payload["resolution"] = resolution
+	}
 	if cmd == nil {
 		return json.NewEncoder(os.Stdout).Encode(payload)
 	}

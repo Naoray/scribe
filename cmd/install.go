@@ -54,7 +54,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		FilterRegistries: filterRegistries,
 	}
 	if err := workflow.Run(cmd.Context(), workflow.InstallSteps(), bag); err != nil {
-		return err
+		return handleNameConflictError(cmd, err)
 	}
 	return saveWorkflowState(bag)
 }

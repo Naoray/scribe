@@ -42,14 +42,16 @@ type adoptCompleteCall struct {
 }
 
 // No-ops for non-adoption Formatter methods.
-func (r *adoptRecorder) OnRegistryStart(_ string)                                 {}
-func (r *adoptRecorder) OnSkillResolved(_ string, _ isync.SkillStatus)            {}
-func (r *adoptRecorder) OnSkillDownloading(_ string)                              {}
-func (r *adoptRecorder) OnSkillInstalled(_ string, _ bool)                        {}
-func (r *adoptRecorder) OnSkillSkipped(_ string, _ isync.SkillStatus)             {}
-func (r *adoptRecorder) OnSkillSkippedByDenyList(_, _ string)                     {}
-func (r *adoptRecorder) OnSkillError(_ string, _ error)                           {}
-func (r *adoptRecorder) OnBudgetWarning(_, _ string)                              {}
+func (r *adoptRecorder) OnRegistryStart(_ string)                      {}
+func (r *adoptRecorder) OnSkillResolved(_ string, _ isync.SkillStatus) {}
+func (r *adoptRecorder) OnSkillDownloading(_ string)                   {}
+func (r *adoptRecorder) OnSkillInstalled(_ string, _ bool)             {}
+func (r *adoptRecorder) OnSkillSkipped(_ string, _ isync.SkillStatus)  {}
+func (r *adoptRecorder) OnSkillSkippedByDenyList(_, _ string)          {}
+func (r *adoptRecorder) OnSkillError(_ string, _ error)                {}
+func (r *adoptRecorder) OnBudgetWarning(_, _ string)                   {}
+func (r *adoptRecorder) OnNameConflictResolved(_ isync.NameConflict, _ isync.NameConflictResolution) {
+}
 func (r *adoptRecorder) OnSyncComplete(_ isync.SyncCompleteMsg)                   {}
 func (r *adoptRecorder) OnReconcileConflict(_ string, _ state.ProjectionConflict) {}
 func (r *adoptRecorder) OnReconcileComplete(_ isync.ReconcileCompleteMsg)         {}

@@ -17,6 +17,7 @@ type jsonFormatter struct {
 	summary    sync.SyncCompleteMsg
 	denied     []denyListSkip
 	adoption   adoptionResult
+	resolution *nameConflictResolutionResult
 	reconcile  *reconcileResult
 	meta       func() envelope.Meta
 	renderer   output.Renderer
@@ -55,6 +56,14 @@ type skillResult struct {
 type denyListSkip struct {
 	Name     string `json:"name"`
 	Registry string `json:"registry"`
+}
+
+type nameConflictResolutionResult struct {
+	Skill  string                  `json:"skill"`
+	Tool   string                  `json:"tool,omitempty"`
+	Path   string                  `json:"path,omitempty"`
+	Action sync.NameConflictAction `json:"action"`
+	Alias  string                  `json:"alias,omitempty"`
 }
 
 type registryResult struct {
@@ -136,6 +145,16 @@ func (f *jsonFormatter) OnSkillError(name string, err error) {
 }
 
 func (f *jsonFormatter) OnBudgetWarning(_, _ string) {}
+
+func (f *jsonFormatter) OnNameConflictResolved(conflict sync.NameConflict, resolution sync.NameConflictResolution) {
+	f.resolution = &nameConflictResolutionResult{
+		Skill:  conflict.Name,
+		Tool:   conflict.Tool,
+		Path:   conflict.Path,
+		Action: resolution.Action,
+		Alias:  resolution.Alias,
+	}
+}
 
 func (f *jsonFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	f.summary.Installed += summary.Installed
@@ -293,6 +312,9 @@ func (f *jsonFormatter) Flush() error {
 	}
 	if f.reconcile != nil {
 		out["reconcile"] = f.reconcile
+	}
+	if f.resolution != nil {
+		out["resolution"] = f.resolution
 	}
 	if len(f.denied) > 0 {
 		out["skipped_by_deny_list"] = f.denied
