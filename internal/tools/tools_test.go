@@ -34,6 +34,19 @@ func setup(t *testing.T) (canonicalDir string) {
 	return dir
 }
 
+func setupNamedSkill(t *testing.T, name string) string {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	dir, err := tools.WriteToStore(name, []tools.SkillFile{{
+		Path:    "SKILL.md",
+		Content: []byte("---\nname: " + name + "\ndescription: test skill\n---\n\n# " + name + "\n"),
+	}})
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+	return dir
+}
+
 func TestWriteToStore(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir, err := tools.WriteToStore("deploy", testFiles)
@@ -98,6 +111,72 @@ func TestClaudeInstallReplaces(t *testing.T) {
 	}
 }
 
+func TestClaudeInstallProjectRootWritesProjectLocalPath(t *testing.T) {
+	canonicalDir := setup(t)
+	projectRoot := t.TempDir()
+
+	tool := tools.ClaudeTool{}
+	paths, err := tool.Install("deploy", canonicalDir, projectRoot)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	want := filepath.Join(projectRoot, ".claude", "skills", "deploy")
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("paths = %v, want [%s]", paths, want)
+	}
+	if resolved, err := os.Readlink(want); err != nil || resolved != canonicalDir {
+		t.Fatalf("project-local symlink = %q, %v; want %q", resolved, err, canonicalDir)
+	}
+}
+
+func TestClaudeInstallEmptyProjectRootWritesGlobalPath(t *testing.T) {
+	canonicalDir := setup(t)
+	home := os.Getenv("HOME")
+
+	tool := tools.ClaudeTool{}
+	paths, err := tool.Install("deploy", canonicalDir, "")
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	want := filepath.Join(home, ".claude", "skills", "deploy")
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("paths = %v, want [%s]", paths, want)
+	}
+}
+
+func TestScribeAgentAlwaysProjectsGlobal(t *testing.T) {
+	canonicalDir := setupNamedSkill(t, "scribe-agent")
+	home := os.Getenv("HOME")
+	projectRoot := t.TempDir()
+
+	claudePaths, err := tools.ClaudeTool{}.Install("scribe-agent", canonicalDir, projectRoot)
+	if err != nil {
+		t.Fatalf("claude Install: %v", err)
+	}
+	codexPaths, err := tools.CodexTool{}.Install("scribe-agent", canonicalDir, projectRoot)
+	if err != nil {
+		t.Fatalf("codex Install: %v", err)
+	}
+	cursorPaths, err := tools.CursorTool{}.Install("scribe-agent", canonicalDir, projectRoot)
+	if err != nil {
+		t.Fatalf("cursor Install: %v", err)
+	}
+
+	wants := []string{
+		filepath.Join(home, ".claude", "skills", "scribe-agent"),
+		filepath.Join(home, ".codex", "skills", "scribe-agent"),
+		filepath.Join(home, ".cursor", "rules", "scribe-agent.mdc"),
+	}
+	got := []string{claudePaths[0], codexPaths[0], cursorPaths[0]}
+	for i := range wants {
+		if got[i] != wants[i] {
+			t.Fatalf("path[%d] = %q, want %q", i, got[i], wants[i])
+		}
+	}
+}
+
 func TestCursorInstall(t *testing.T) {
 	canonicalDir := setup(t)
 	workDir := t.TempDir()
@@ -138,6 +217,26 @@ func TestCursorInstall(t *testing.T) {
 	}
 	if strings.Contains(content, "license: MIT") {
 		t.Errorf("MDC should not contain SKILL.md frontmatter")
+	}
+}
+
+func TestCursorInstallProjectRootWritesProjectLocalRulesPath(t *testing.T) {
+	canonicalDir := setup(t)
+	workDir := t.TempDir()
+	projectRoot := t.TempDir()
+
+	tool := tools.CursorTool{WorkDir: workDir}
+	paths, err := tool.Install("deploy", canonicalDir, projectRoot)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	want := filepath.Join(projectRoot, ".cursor", "rules", "deploy.mdc")
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("paths = %v, want [%s]", paths, want)
+	}
+	if _, err := os.Lstat(filepath.Join(workDir, ".cursor", "rules", "deploy.mdc")); !os.IsNotExist(err) {
+		t.Fatalf("legacy workdir link exists or stat failed: %v", err)
 	}
 }
 
@@ -300,6 +399,25 @@ func TestCodexInstallAndUninstall(t *testing.T) {
 	}
 	if _, err := os.Lstat(paths[0]); !os.IsNotExist(err) {
 		t.Error("expected codex symlink to be removed after uninstall")
+	}
+}
+
+func TestCodexInstallProjectRootWritesProjectLocalPath(t *testing.T) {
+	canonicalDir := setup(t)
+	projectRoot := t.TempDir()
+
+	tool := tools.CodexTool{}
+	paths, err := tool.Install("deploy", canonicalDir, projectRoot)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	want := filepath.Join(projectRoot, ".codex", "skills", "deploy")
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("paths = %v, want [%s]", paths, want)
+	}
+	if resolved, err := os.Readlink(want); err != nil || resolved != canonicalDir {
+		t.Fatalf("project-local symlink = %q, %v; want %q", resolved, err, canonicalDir)
 	}
 }
 

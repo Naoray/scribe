@@ -154,6 +154,13 @@ func stripFrontmatter(content []byte) []byte {
 
 func (t CursorTool) installFromMDC(skillName, mdcPath, projectRoot string) ([]string, error) {
 	workDir := projectRoot
+	if skillName == bootstrapSkillName {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("home dir: %w", err)
+		}
+		workDir = home
+	}
 	if workDir == "" {
 		var err error
 		workDir, err = t.resolveWorkDir()
