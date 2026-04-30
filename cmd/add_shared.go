@@ -168,10 +168,14 @@ func missingSourceWarning(candidate add.Candidate) string {
 	if candidate.Attribution != (discovery.Source{}) {
 		return ""
 	}
-	if strings.Contains(candidate.Description, "⛔️") {
+	description := candidate.RawDescription
+	if description == "" {
+		description = candidate.Description
+	}
+	if strings.Contains(description, "⛔️") {
 		return ""
 	}
-	if !githubURLInDescriptionRE.MatchString(candidate.Description) {
+	if !githubURLInDescriptionRE.MatchString(description) {
 		return ""
 	}
 	return fmt.Sprintf("warning: %s mentions a GitHub URL in its description but has no source frontmatter", candidate.Name)

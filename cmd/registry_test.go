@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/add"
 	"github.com/Naoray/scribe/internal/discovery"
+	"github.com/Naoray/scribe/internal/state"
 )
 
 func TestResolveRegistry(t *testing.T) {
@@ -68,6 +72,61 @@ func TestMissingSourceWarning(t *testing.T) {
 	candidate.Description = "⛔️ https://github.com/acme/borrowed"
 	if got := missingSourceWarning(candidate); got != "" {
 		t.Fatalf("expected opt-out marker to suppress warning, got %q", got)
+	}
+}
+
+func TestMissingSourceWarningUsesRawDiscoveredDescription(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	longPrefix := strings.Repeat("background ", 8)
+	descriptionWithURL := longPrefix + "Imported from https://github.com/acme/upstreamed-skill"
+
+	writeSkill := func(name, body string) {
+		t.Helper()
+		skillDir := filepath.Join(home, ".scribe", "skills", name)
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeSkill("upstreamed", "---\nname: upstreamed\ndescription: "+descriptionWithURL+"\n---\n")
+	writeSkill("plain", "---\nname: plain\ndescription: "+longPrefix+"Locally authored helper\n---\n")
+	writeSkill("sourced", "---\nname: sourced\ndescription: "+descriptionWithURL+"\nsource:\n  url: https://github.com/acme/upstreamed-skill\n---\n")
+
+	adder := &add.Adder{}
+	candidates, err := adder.DiscoverLocal(&state.State{Installed: map[string]state.InstalledSkill{}})
+	if err != nil {
+		t.Fatalf("DiscoverLocal: %v", err)
+	}
+
+	byName := map[string]add.Candidate{}
+	for _, candidate := range candidates {
+		byName[candidate.Name] = candidate
+	}
+
+	upstreamed := byName["upstreamed"]
+	if upstreamed.RawDescription != descriptionWithURL {
+		t.Fatalf("RawDescription = %q, want %q", upstreamed.RawDescription, descriptionWithURL)
+	}
+	if upstreamed.Description == upstreamed.RawDescription {
+		t.Fatalf("Description was not truncated: %q", upstreamed.Description)
+	}
+	if githubURLInDescriptionRE.MatchString(upstreamed.Description) {
+		t.Fatalf("truncated Description unexpectedly contains a GitHub URL: %q", upstreamed.Description)
+	}
+	if got := missingSourceWarning(upstreamed); got == "" {
+		t.Fatal("expected warning for raw GitHub URL without source frontmatter")
+	}
+
+	if got := missingSourceWarning(byName["plain"]); got != "" {
+		t.Fatalf("expected no warning without GitHub URL, got %q", got)
+	}
+	if got := missingSourceWarning(byName["sourced"]); got != "" {
+		t.Fatalf("expected no warning with source frontmatter, got %q", got)
 	}
 }
 

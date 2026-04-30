@@ -19,13 +19,14 @@ import (
 
 // Candidate represents a skill that can be added to a registry.
 type Candidate struct {
-	Name        string // skill name (directory basename)
-	Description string // short description from SKILL.md
-	Origin      string // "local" or "registry:owner/repo"
-	Package     string // parent package name if sub-skill (e.g. "gstack")
-	Source      string // "github:owner/repo@ref" or empty for local-only
-	Attribution discovery.Source
-	LocalPath   string // absolute path on disk, empty for remote-only
+	Name           string // skill name (directory basename)
+	Description    string // short description from SKILL.md
+	RawDescription string // untruncated description from SKILL.md
+	Origin         string // "local" or "registry:owner/repo"
+	Package        string // parent package name if sub-skill (e.g. "gstack")
+	Source         string // "github:owner/repo@ref" or empty for local-only
+	Attribution    discovery.Source
+	LocalPath      string // absolute path on disk, empty for remote-only
 }
 
 // NeedsUpload reports whether this candidate requires uploading files to the
@@ -60,13 +61,14 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 	for _, sk := range skills {
 		source := sourceFromState(st, sk.Name)
 		candidates = append(candidates, Candidate{
-			Name:        sk.Name,
-			Description: sk.Description,
-			Origin:      "local",
-			Package:     sk.Package,
-			LocalPath:   sk.LocalPath,
-			Source:      source,
-			Attribution: sk.Source,
+			Name:           sk.Name,
+			Description:    sk.Description,
+			RawDescription: sk.RawDescription,
+			Origin:         "local",
+			Package:        sk.Package,
+			LocalPath:      sk.LocalPath,
+			Source:         source,
+			Attribution:    sk.Source,
 		})
 	}
 
