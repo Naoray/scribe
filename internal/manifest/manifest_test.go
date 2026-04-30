@@ -249,12 +249,59 @@ func TestManifestEncode(t *testing.T) {
 	}
 }
 
+func TestScaffoldPackageManifestProducesParseablePackage(t *testing.T) {
+	data, err := manifest.ScaffoldPackageManifest(
+		manifest.PackageMeta{
+			Name:        "my-skills",
+			Description: "Reusable development skills",
+			Author:      "Krishan",
+		},
+		[]manifest.Skill{
+			{Name: "review", Path: "review"},
+			{Name: "deploy", Path: "deploy"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("ScaffoldPackageManifest: %v", err)
+	}
+
+	m, err := manifest.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse scaffolded manifest: %v\n%s", err, string(data))
+	}
+	if !m.IsPackage() {
+		t.Fatal("scaffolded manifest is not a package")
+	}
+	if m.Package.Name != "my-skills" {
+		t.Fatalf("package name = %q, want my-skills", m.Package.Name)
+	}
+	if m.Package.Description != "Reusable development skills" {
+		t.Fatalf("description = %q", m.Package.Description)
+	}
+	if len(m.Package.Authors) != 1 || m.Package.Authors[0] != "Krishan" {
+		t.Fatalf("authors = %#v, want [Krishan]", m.Package.Authors)
+	}
+	if got := m.FindByName("review"); got == nil || got.Path != "review" {
+		t.Fatalf("review entry = %#v, want path review", got)
+	}
+	if got := m.FindByName("deploy"); got == nil || got.Path != "deploy" {
+		t.Fatalf("deploy entry = %#v, want path deploy", got)
+	}
+}
+
+func TestScaffoldPackageManifestRejectsInvalidPackageName(t *testing.T) {
+	_, err := manifest.ScaffoldPackageManifest(manifest.PackageMeta{Name: "bad name"}, nil)
+	if err == nil {
+		t.Fatal("ScaffoldPackageManifest returned nil error for invalid package name")
+	}
+}
+
 func TestParseSourceErrors(t *testing.T) {
 	cases := []string{
-		"garrytan/gstack@v1.0.0",  // missing host
-		"github:garrytan/gstack",  // missing @ref
-		"github:gstack@v1.0.0",    // missing slash in repo
-		"npm:garrytan/gstack@v1",  // unsupported host
+		"garrytan/gstack@v1.0.0", // missing host
+		"github:garrytan/gstack", // missing @ref
+		"github:gstack@v1.0.0",   // missing slash in repo
+		"npm:garrytan/gstack@v1", // unsupported host
 	}
 	for _, raw := range cases {
 		if _, err := manifest.ParseSource(raw); err == nil {
