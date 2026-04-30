@@ -134,6 +134,12 @@ func BuildLocalRows(skills []discovery.Skill, st *state.State) []ListRow {
 	var unmanagedRows []ListRow
 	for i := range skills {
 		sk := &skills[i]
+		// Bootstrap skills (e.g. scribe-agent) are auto-managed by the CLI:
+		// installed/refreshed on every run, not user-installable, not
+		// removable. Hide them from list output to keep the surface clean.
+		if installed, ok := st.Installed[sk.Name]; ok && installed.Origin == state.OriginBootstrap {
+			continue
+		}
 		g := RegistryGroupFromName(sk.Name)
 		row := ListRow{
 			Name:    sk.Name,

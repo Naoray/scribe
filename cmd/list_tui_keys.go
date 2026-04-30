@@ -880,6 +880,18 @@ func buildGroupCounts(rows []listRow) map[string]int {
 }
 
 func (m listModel) ensureCursorVisible() listModel {
+	n := len(m.filtered)
+	if n == 0 {
+		m.offset = 0
+		return m
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= n {
+		m.cursor = n - 1
+	}
+
 	visible := m.contentHeight()
 	if visible < 3 {
 		visible = 3
@@ -890,6 +902,9 @@ func (m listModel) ensureCursorVisible() listModel {
 	}
 	for m.offset < m.cursor && !m.cursorFitsAt(m.offset, visible) {
 		m.offset++
+	}
+	if m.offset < 0 {
+		m.offset = 0
 	}
 	return m
 }
@@ -909,8 +924,10 @@ func (m listModel) cursorFitsAt(offset, capacity int) bool {
 	}
 	for i := offset; i < len(m.filtered); i++ {
 		row := m.filtered[i]
+		// Match renderRows: empty group names yield no header line, so the
+		// simulation must not charge one when transitioning to/from "".
 		headerLines := 0
-		if row.Group != prevGroup {
+		if row.Group != prevGroup && row.Group != "" {
 			headerLines = 1
 		}
 		needed := headerLines + 1
@@ -918,7 +935,7 @@ func (m listModel) cursorFitsAt(offset, capacity int) bool {
 			needed++
 		}
 		if linesUsed+needed > capacity {
-			return i > m.cursor
+			return false
 		}
 		linesUsed += headerLines + 1
 		prevGroup = row.Group
