@@ -33,13 +33,14 @@ type Bag struct {
 	SkillFilter []string
 
 	// Populated by steps
-	Config     *config.Config
-	State      *state.State
-	Client     *gh.Client
-	Tools      []tools.Tool
-	Repos      []string // filtered registries to process
-	Formatter  Formatter
-	StateDirty bool
+	Config      *config.Config
+	State       *state.State
+	Client      *gh.Client
+	Tools       []tools.Tool
+	ProjectRoot string
+	Repos       []string // filtered registries to process
+	Formatter   Formatter
+	StateDirty  bool
 
 	// Provider is the skill discovery/fetch backend. Set by StepLoadConfig.
 	Provider provider.Provider

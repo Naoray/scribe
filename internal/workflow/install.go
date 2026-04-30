@@ -21,6 +21,7 @@ func InstallSteps() []Step {
 		{"FilterRegistries", StepFilterRegistries},
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
+		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"SelectSkills", StepSelectSkills},
 		{"SyncSkills", StepSyncSkills},
 	}
