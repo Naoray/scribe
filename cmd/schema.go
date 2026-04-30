@@ -3,12 +3,16 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/Naoray/scribe/internal/cli/envelope"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	"github.com/Naoray/scribe/internal/cli/output"
 	clischema "github.com/Naoray/scribe/internal/cli/schema"
 )
 
@@ -40,7 +44,7 @@ func newSchemaCommand(root *cobra.Command) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeCommandSchema(cmd, found)
+			return writeCommandSchema(cmd, found, target)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "Print schemas for all commands")
@@ -56,11 +60,38 @@ func writeAllSchemas(cmd *cobra.Command, root *cobra.Command) error {
 		}
 		out[c.CommandPath()] = schemaForCommand(c)
 	})
-	return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
+	return renderSchemaResult(cmd, cmd.CommandPath(), out)
 }
 
-func writeCommandSchema(cmd *cobra.Command, target *cobra.Command) error {
-	return json.NewEncoder(cmd.OutOrStdout()).Encode(schemaForCommand(target))
+func writeCommandSchema(cmd *cobra.Command, target *cobra.Command, requested string) error {
+	command := cmd.CommandPath()
+	if requested != "" && requested != cmd.Name() {
+		command += " " + requested
+	}
+	return renderSchemaResult(cmd, command, schemaForCommand(target))
+}
+
+func renderSchemaResult(cmd *cobra.Command, command string, data any) error {
+	if !jsonFlagPassed(cmd) {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(data)
+	}
+
+	renderer := output.New(envFromArgs(os.Args), os.Stdout, os.Stderr)
+	renderer.SetMeta("command", command)
+	if version, ok := cmd.Context().Value(envelope.ScribeVersionKey).(string); ok {
+		renderer.SetMeta("scribe_version", version)
+	}
+	if start, ok := cmd.Context().Value(envelope.RunEStartKey).(time.Time); ok {
+		duration := time.Since(start).Milliseconds()
+		if duration < 1 {
+			duration = 1
+		}
+		renderer.SetMeta("duration_ms", duration)
+	}
+	if err := renderer.Result(data); err != nil {
+		return err
+	}
+	return renderer.Flush()
 }
 
 func schemaForCommand(cmd *cobra.Command) commandSchema {

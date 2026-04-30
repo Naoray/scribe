@@ -60,8 +60,32 @@ func TestRootExitSubprocessMatrix(t *testing.T) {
 				if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &env); err != nil {
 					t.Fatalf("stdout is not JSON: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
 				}
-				if _, ok := env["input_schema"]; !ok {
-					t.Fatalf("schema JSON missing input_schema: %#v", env)
+				if env["status"] != "ok" || env["format_version"] != "1" {
+					t.Fatalf("unexpected success envelope: %#v", env)
+				}
+				data, ok := env["data"].(map[string]any)
+				if !ok {
+					t.Fatalf("envelope missing data object: %#v", env)
+				}
+				if _, ok := data["input_schema"]; !ok {
+					t.Fatalf("schema data missing input_schema: %#v", env)
+				}
+				if _, ok := data["output_schema"]; !ok {
+					t.Fatalf("schema data missing output_schema: %#v", env)
+				}
+				if _, ok := env["input_schema"]; ok {
+					t.Fatalf("schema leaked input_schema at top level: %#v", env)
+				}
+				meta, ok := env["meta"].(map[string]any)
+				if !ok {
+					t.Fatalf("envelope missing meta object: %#v", env)
+				}
+				if got := meta["command"]; got != "scribe schema list" {
+					t.Fatalf("meta.command = %v, want scribe schema list\nenvelope=%#v", got, env)
+				}
+				duration, ok := meta["duration_ms"].(float64)
+				if !ok || duration < 0 {
+					t.Fatalf("meta.duration_ms = %v, want number >= 0\nenvelope=%#v", meta["duration_ms"], env)
 				}
 				return
 			}
