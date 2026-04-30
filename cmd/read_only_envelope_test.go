@@ -104,21 +104,21 @@ func TestListFieldsProjection(t *testing.T) {
 		t.Fatalf("projected data kept packages: %#v", data)
 	}
 
-	_, stderr, code := runScribeHelper(t, []string{"list", "--json", "--fields", "nonexistent"}, false)
+	stdout, stderr, code := runScribeHelper(t, []string{"list", "--json", "--fields", "nonexistent"}, false)
 	if code != 2 {
-		t.Fatalf("exit = %d, want 2\nstderr=%s", code, stderr)
+		t.Fatalf("exit = %d, want 2\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
 	var errEnv struct {
 		Error struct {
 			Code string `json:"code"`
 		} `json:"error"`
 	}
-	jsonStart := strings.LastIndex(stderr, "{\"status\"")
+	jsonStart := strings.LastIndex(stdout, "{\"status\"")
 	if jsonStart < 0 {
-		t.Fatalf("stderr missing JSON envelope: %s", stderr)
+		t.Fatalf("stdout missing JSON envelope: %s", stdout)
 	}
-	if err := json.Unmarshal([]byte(stderr[jsonStart:]), &errEnv); err != nil {
-		t.Fatalf("stderr is not JSON: %v\n%s", err, stderr)
+	if err := json.Unmarshal([]byte(stdout[jsonStart:]), &errEnv); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
 	}
 	if errEnv.Error.Code != "USAGE_UNKNOWN_FIELD" {
 		t.Fatalf("error code = %q, want USAGE_UNKNOWN_FIELD", errEnv.Error.Code)
@@ -129,6 +129,37 @@ type testEnvelope struct {
 	Status        string          `json:"status"`
 	FormatVersion string          `json:"format_version"`
 	Data          json.RawMessage `json:"data"`
+	Meta          struct {
+		DurationMS  int64 `json:"duration_ms"`
+		BootstrapMS int64 `json:"bootstrap_ms"`
+	} `json:"meta"`
+}
+
+func TestReadOnlyTypedErrorsRoundTripThroughEnvelope(t *testing.T) {
+	stdout, stderr, code := runScribeHelper(t, []string{"explain", "nope", "--json"}, false)
+	if code != 3 {
+		t.Fatalf("exit = %d, want 3\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+
+	var env struct {
+		Status string `json:"status"`
+		Error  struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	jsonStart := strings.LastIndex(stdout, "{\"status\"")
+	if jsonStart < 0 {
+		t.Fatalf("stdout missing JSON envelope: %s", stdout)
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout[jsonStart:])), &env); err != nil {
+		t.Fatalf("stdout is not JSON: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+	if env.Status != "error" {
+		t.Fatalf("status = %q, want error\nenvelope=%#v", env.Status, env)
+	}
+	if env.Error.Code != "SKILL_NOT_FOUND" {
+		t.Fatalf("error code = %q, want SKILL_NOT_FOUND\nenvelope=%#v", env.Error.Code, env)
+	}
 }
 
 func executeEnvelopeCommand(t *testing.T, args []string) testEnvelope {

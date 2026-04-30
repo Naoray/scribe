@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	clienv "github.com/Naoray/scribe/internal/cli/env"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/discovery"
 )
 
@@ -56,7 +57,10 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	jsonFlag := jsonFlagPassed(cmd)
 	rawFlag, _ := cmd.Flags().GetBool("raw")
 	if jsonFlag && rawFlag {
-		return fmt.Errorf("if any flags in the group [json raw] are set none of the others can be; [json raw] were all set")
+		err := fmt.Errorf("if any flags in the group [json raw] are set none of the others can be; [json raw] were all set")
+		return clierrors.Wrap(err, "USAGE_FLAG_CONFLICT", clierrors.ExitUsage,
+			clierrors.WithRemediation("Use either --json or --raw, not both."),
+		)
 	}
 	factory := newCommandFactory()
 
@@ -72,16 +76,24 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	skill, ok := findSkill(skills, args[0])
 	if !ok {
-		return fmt.Errorf("skill %q not found — run `scribe list` to see installed skills", args[0])
+		err := fmt.Errorf("skill %q not found", args[0])
+		return clierrors.Wrap(err, "SKILL_NOT_FOUND", clierrors.ExitNotFound,
+			clierrors.WithResource(args[0]),
+			clierrors.WithRemediation("Run `scribe list` to see installed skills."),
+		)
 	}
 
 	if skill.LocalPath == "" {
-		return fmt.Errorf("skill %q is tracked but not on disk — try `scribe sync` first", args[0])
+		err := fmt.Errorf("skill %q is tracked but not on disk", args[0])
+		return clierrors.Wrap(err, "SKILL_NOT_ON_DISK", clierrors.ExitNotFound,
+			clierrors.WithResource(args[0]),
+			clierrors.WithRemediation("Run `scribe sync` before explaining this skill."),
+		)
 	}
 
 	content, err := readSkillContent(skill.LocalPath)
 	if err != nil {
-		return err
+		return wrapSkillReadError(err, args[0])
 	}
 
 	mode := clienv.Detect(os.Stdout, os.Stdin, jsonFlag)
@@ -160,6 +172,22 @@ func readSkillContent(skillDir string) (string, error) {
 		return "", fmt.Errorf("read SKILL.md: %w", err)
 	}
 	return string(data), nil
+}
+
+func wrapSkillReadError(err error, skillName string) error {
+	if os.IsNotExist(err) {
+		return clierrors.Wrap(err, "SKILL_NOT_FOUND", clierrors.ExitNotFound,
+			clierrors.WithResource(skillName),
+			clierrors.WithRemediation("Run `scribe sync` before explaining this skill."),
+		)
+	}
+	if os.IsPermission(err) {
+		return clierrors.Wrap(err, "SKILL_READ_PERMISSION_DENIED", clierrors.ExitPerm,
+			clierrors.WithResource(skillName),
+			clierrors.WithRemediation("Check file permissions for the skill directory."),
+		)
+	}
+	return err
 }
 
 // detectLLMCLI finds the first available LLM CLI on the machine.

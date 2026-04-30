@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	clienv "github.com/Naoray/scribe/internal/cli/env"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/prereq"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -55,7 +56,10 @@ func runGuide(cmd *cobra.Command, _ []string) error {
 	}
 
 	if !mode.Interactive {
-		return fmt.Errorf("scribe guide requires an interactive terminal — use --json for agent-friendly output")
+		err := fmt.Errorf("scribe guide requires an interactive terminal")
+		return clierrors.Wrap(err, "INTERACTIVE_TERMINAL_REQUIRED", clierrors.ExitUsage,
+			clierrors.WithRemediation("Use `scribe guide --json` for agent-friendly output."),
+		)
 	}
 
 	return runGuideInteractive(cmd)
