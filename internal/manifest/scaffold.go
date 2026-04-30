@@ -10,9 +10,9 @@ var packageNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // PackageMeta contains the package-level fields collected by scribe init.
 type PackageMeta struct {
-	Name        string
-	Description string
-	Author      string
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Author      string `json:"author"`
 }
 
 // Skill describes a local skill directory to include in a package manifest.
