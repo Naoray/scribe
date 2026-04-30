@@ -176,7 +176,7 @@ func newRootCmd() *cobra.Command {
 				}
 			}
 			if len(naorayRemoved) > 0 {
-				fmt.Fprintf(c.ErrOrStderr(), "scribe: removed Naoray/scribe from connected registries (scribe-agent is now managed by the binary)\n")
+				fmt.Fprintf(c.ErrOrStderr(), "scribe: removed Naoray/scribe from connected registries (scribe is now managed by the binary)\n")
 				if err := cfg.Save(); err != nil {
 					return err
 				}
@@ -193,15 +193,15 @@ func newRootCmd() *cobra.Command {
 				}
 			}
 
-			// Auto-install or refresh the embedded scribe-agent skill on every run.
+			// Auto-install or refresh the embedded scribe skill on every run.
 			// EnsureScribeAgent is idempotent — it skips the write when the content
 			// matches the embedded version, so there is no meaningful overhead.
 			if storeDir, sdErr := tools.StoreDir(); sdErr == nil {
 				if changed, ensureErr := agent.EnsureScribeAgent(storeDir, st, cfg); ensureErr != nil {
-					fmt.Fprintf(c.ErrOrStderr(), "scribe: scribe-agent bootstrap warning: %v\n", ensureErr)
+					fmt.Fprintf(c.ErrOrStderr(), "scribe: scribe bootstrap warning: %v\n", ensureErr)
 				} else if changed {
 					if err := st.Save(); err != nil {
-						fmt.Fprintf(c.ErrOrStderr(), "scribe: scribe-agent state save warning: %v\n", err)
+						fmt.Fprintf(c.ErrOrStderr(), "scribe: scribe state save warning: %v\n", err)
 					}
 				}
 			}

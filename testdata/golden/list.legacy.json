@@ -2,11 +2,11 @@
   "packages": [],
   "skills": [
     {
-      "content_hash": "e70437e5",
+      "content_hash": "33ca0040",
       "description": "Use when the user wants to install, list, sync, remove, or manage AI...",
       "managed": true,
-      "name": "scribe-agent",
-      "path": "$HOME/.scribe/skills/scribe-agent",
+      "name": "scribe",
+      "path": "$HOME/.scribe/skills/scribe",
       "revision": 1,
       "targets": []
     }

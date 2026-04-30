@@ -111,7 +111,7 @@ func TestDiffAcceptsNonTeamRegistryWithSkills(t *testing.T) {
 		Client: &diffTestFetcher{},
 		Provider: &nonTeamProvider{
 			entries: []manifest.Entry{{
-				Name:   "scribe-agent",
+				Name:   "scribe",
 				Path:   "SKILL.md",
 				Source: "github:Naoray/scribe@main",
 			}},

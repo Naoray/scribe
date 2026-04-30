@@ -200,8 +200,8 @@ func normalizeListLegacyData(t *testing.T, raw json.RawMessage, home string) any
 	skills, _ := data["skills"].([]any)
 	for _, item := range skills {
 		skill, _ := item.(map[string]any)
-		if path, _ := skill["path"].(string); path == filepath.Join(home, ".scribe", "skills", "scribe-agent") {
-			skill["path"] = "$HOME/.scribe/skills/scribe-agent"
+		if path, _ := skill["path"].(string); path == filepath.Join(home, ".scribe", "skills", "scribe") {
+			skill["path"] = "$HOME/.scribe/skills/scribe"
 		}
 	}
 	return data

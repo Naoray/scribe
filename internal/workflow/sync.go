@@ -145,7 +145,7 @@ func StepEnsureScribeAgent(_ context.Context, b *Bag) error {
 
 	changed, err := agent.EnsureScribeAgent(storeDir, b.State, b.Config)
 	if err != nil {
-		return fmt.Errorf("ensure scribe-agent: %w", err)
+		return fmt.Errorf("ensure scribe: %w", err)
 	}
 	if !changed {
 		return nil

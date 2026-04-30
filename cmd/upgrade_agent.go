@@ -26,7 +26,7 @@ type upgradeAgentClient interface {
 func newUpgradeAgentCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upgrade-agent",
-		Short: "Refresh the embedded scribe-agent skill from Naoray/scribe",
+		Short: "Refresh the embedded scribe skill from Naoray/scribe",
 		Args:  cobra.NoArgs,
 		RunE:  runUpgradeAgent,
 	}
@@ -72,7 +72,7 @@ func runUpgradeAgentWithDeps(
 
 	tmpl, err := client.FetchFile(ctx, "Naoray", "scribe", "SKILL.md.tmpl", tag)
 	if err != nil {
-		return fmt.Errorf("fetch scribe-agent template at %s: %w", tag, err)
+		return fmt.Errorf("fetch scribe template at %s: %w", tag, err)
 	}
 
 	storeDir, err := tools.StoreDir()
@@ -82,7 +82,7 @@ func runUpgradeAgentWithDeps(
 
 	content, err := agent.RenderSkillTemplate(tmpl, storeDir, st)
 	if err != nil {
-		return fmt.Errorf("render scribe-agent template: %w", err)
+		return fmt.Errorf("render scribe template: %w", err)
 	}
 
 	changed, err := agent.InstallScribeAgent(storeDir, st, content, tag)

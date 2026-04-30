@@ -39,16 +39,16 @@ func TestUpgradeAgentCommandRefreshesFromNetwork(t *testing.T) {
 	if err := runUpgradeAgentWithDeps(context.Background(), cfg, st, fakeUpgradeAgentClient{
 		authenticated: true,
 		tag:           "v1.2.3",
-		content:       []byte("---\nname: scribe-agent\ndescription: test\n---\nbody\n"),
+		content:       []byte("---\nname: scribe\ndescription: test\n---\nbody\n"),
 	}); err != nil {
 		t.Fatalf("runUpgradeAgentWithDeps() error = %v", err)
 	}
 
-	storePath := filepath.Join(os.Getenv("HOME"), ".scribe", "skills", "scribe-agent", "SKILL.md")
+	storePath := filepath.Join(os.Getenv("HOME"), ".scribe", "skills", "scribe", "SKILL.md")
 	if _, err := os.Stat(storePath); err != nil {
 		t.Fatalf("expected store file at %s: %v", storePath, err)
 	}
-	if got := st.Installed["scribe-agent"].Sources[0].Ref; got != "v1.2.3" {
+	if got := st.Installed["scribe"].Sources[0].Ref; got != "v1.2.3" {
 		t.Fatalf("source ref = %q, want v1.2.3", got)
 	}
 }
@@ -73,7 +73,7 @@ func TestUpgradeAgentCommandRequiresAuth(t *testing.T) {
 	err := runUpgradeAgentWithDeps(context.Background(), &config.Config{}, &state.State{Installed: map[string]state.InstalledSkill{}}, fakeUpgradeAgentClient{
 		authenticated: false,
 		tag:           "v1.2.3",
-		content:       []byte("---\nname: scribe-agent\n---\n"),
+		content:       []byte("---\nname: scribe\n---\n"),
 	})
 	if !errors.Is(err, errAuthRequired) {
 		t.Fatalf("err = %v, want errAuthRequired", err)
@@ -90,8 +90,8 @@ func TestEnsureScribeAgentNotCalledByVersionCommand(t *testing.T) {
 		t.Fatalf("--version execute: %v", err)
 	}
 
-	storePath := filepath.Join(home, ".scribe", "skills", "scribe-agent", "SKILL.md")
+	storePath := filepath.Join(home, ".scribe", "skills", "scribe", "SKILL.md")
 	if _, err := os.Stat(storePath); !os.IsNotExist(err) {
-		t.Fatalf("version command should not bootstrap scribe-agent; stat err = %v", err)
+		t.Fatalf("version command should not bootstrap scribe; stat err = %v", err)
 	}
 }

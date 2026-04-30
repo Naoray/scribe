@@ -77,7 +77,7 @@ func TestApplyBuiltins_FirstRunAddsAllAndMarksVersion(t *testing.T) {
 		t.Errorf("first run should add 3 builtins, got %d: %v", len(added), added)
 	}
 	if cfg.FindRegistry("Naoray/scribe") != nil {
-		t.Error("Naoray/scribe must not be added as a builtin (scribe-agent is binary-managed)")
+		t.Error("Naoray/scribe must not be added as a builtin (scribe is binary-managed)")
 	}
 	if cfg.FindRegistry("mattpocock/skills") == nil {
 		t.Error("mattpocock/skills should be a builtin")

@@ -13,7 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// EnsureScribeAgent installs or refreshes the embedded scribe-agent skill in
+// EnsureScribeAgent installs or refreshes the embedded scribe skill in
 // the canonical store. It never performs network I/O.
 func EnsureScribeAgent(store string, st *state.State, cfg *config.Config) (bool, error) {
 	if cfg != nil && !cfg.ScribeAgent.Enabled {
@@ -25,11 +25,11 @@ func EnsureScribeAgent(store string, st *state.State, cfg *config.Config) (bool,
 	// cooldown window flips and the rendered content no longer hash-matches.
 	// We still verify both files exist and the base file passes frontmatter
 	// validation so that corruption or manual edits are repaired.
-	if installed, ok := st.Installed["scribe-agent"]; ok &&
+	if installed, ok := st.Installed["scribe"]; ok &&
 		installed.Origin == state.OriginBootstrap &&
 		len(installed.Sources) > 0 &&
 		installed.Sources[0].Ref == EmbeddedVersion {
-		skillDir := filepath.Join(store, "scribe-agent")
+		skillDir := filepath.Join(store, "scribe")
 		_, skillErr := os.Stat(filepath.Join(skillDir, "SKILL.md"))
 		_, claudeErr := os.Stat(filepath.Join(skillDir, "CLAUDE.md"))
 		baseContent, baseErr := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
@@ -44,14 +44,14 @@ func EnsureScribeAgent(store string, st *state.State, cfg *config.Config) (bool,
 	return InstallScribeAgent(store, st, content, EmbeddedVersion)
 }
 
-// InstallScribeAgent validates and installs a scribe-agent skill payload into
+// InstallScribeAgent validates and installs a scribe skill payload into
 // the canonical store and state using the provided version string.
 func InstallScribeAgent(store string, st *state.State, content []byte, version string) (bool, error) {
 	if err := validateSkillContent(content); err != nil {
 		return false, err
 	}
 
-	skillDir := filepath.Join(store, "scribe-agent")
+	skillDir := filepath.Join(store, "scribe")
 	skillPath := filepath.Join(skillDir, "SKILL.md")
 	claudePath := filepath.Join(skillDir, "CLAUDE.md")
 	basePath := filepath.Join(skillDir, ".scribe-base.md")
@@ -62,7 +62,7 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 			claudeErr == nil &&
 			skillMatches(existingBaseContent, content) &&
 			skillMatches(existingClaudeContent, EmbeddedClaudeTemplate) {
-			if installed, ok := st.Installed["scribe-agent"]; ok && installed.Origin == state.OriginBootstrap {
+			if installed, ok := st.Installed["scribe"]; ok && installed.Origin == state.OriginBootstrap {
 				if len(installed.Sources) > 0 && installed.Sources[0].Ref == version {
 					return false, nil
 				}
@@ -83,7 +83,7 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 		return false, fmt.Errorf("write bootstrap base: %w", err)
 	}
 
-	existing := st.Installed["scribe-agent"]
+	existing := st.Installed["scribe"]
 	revision := existing.Revision
 	if revision == 0 {
 		revision = 1
@@ -95,7 +95,7 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 		installedAt = time.Now().UTC()
 	}
 
-	st.Installed["scribe-agent"] = state.InstalledSkill{
+	st.Installed["scribe"] = state.InstalledSkill{
 		Revision:      revision,
 		InstalledHash: isync.ComputeFileHash(content),
 		Sources: []state.SkillSource{{
@@ -140,17 +140,17 @@ func validateSkillContent(content []byte) error {
 	}
 	var raw frontmatter
 	if len(content) == 0 {
-		return fmt.Errorf("validate scribe-agent skill: empty content")
+		return fmt.Errorf("validate scribe skill: empty content")
 	}
 	parts := bytes.SplitN(content, []byte("---\n"), 3)
 	if len(parts) < 3 {
-		return fmt.Errorf("validate scribe-agent skill: missing frontmatter")
+		return fmt.Errorf("validate scribe skill: missing frontmatter")
 	}
 	if err := yaml.Unmarshal(parts[1], &raw); err != nil {
-		return fmt.Errorf("validate scribe-agent skill: parse frontmatter: %w", err)
+		return fmt.Errorf("validate scribe skill: parse frontmatter: %w", err)
 	}
-	if raw.Name != "scribe-agent" {
-		return fmt.Errorf("validate scribe-agent skill: unexpected name %q", raw.Name)
+	if raw.Name != "scribe" {
+		return fmt.Errorf("validate scribe skill: unexpected name %q", raw.Name)
 	}
 	return nil
 }

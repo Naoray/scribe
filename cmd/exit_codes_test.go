@@ -17,7 +17,7 @@ func TestSemanticExitCodesSubprocessMatrix(t *testing.T) {
 		{name: "cobra parse usage", args: []string{"--json", "nonsense-cmd"}, wantCode: 2, wantErr: "USAGE"},
 		{name: "schema command not found", args: []string{"--json", "schema", "nonsense-cmd"}, wantCode: 3, wantErr: "SCHEMA_COMMAND_NOT_FOUND"},
 		{name: "skill not found", args: []string{"--json", "explain", "nonsense-skill"}, wantCode: 3, wantErr: "SKILL_NOT_FOUND"},
-		{name: "auth failure", args: []string{"--json", "add", "Naoray/scribe:scribe-agent"}, wantCode: 4, wantErr: "GH_AUTH_FAILED"},
+		{name: "auth failure", args: []string{"--json", "add", "Naoray/scribe:scribe"}, wantCode: 4, wantErr: "GH_AUTH_FAILED"},
 		{name: "usage validation", args: []string{"--json", "connect"}, wantCode: 2, wantErr: "USAGE_CONNECT_REPO_REQUIRED"},
 		{name: "plain operational error", args: []string{"--json", "list"}, wantCode: 1, wantErr: "GENERAL", badHome: true},
 	}

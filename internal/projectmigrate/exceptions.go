@@ -1,7 +1,7 @@
 package projectmigrate
 
 var globalSkillExceptions = map[string]struct{}{
-	"scribe-agent": {},
+	"scribe": {},
 }
 
 func isGlobalSkillException(skill string) bool {
