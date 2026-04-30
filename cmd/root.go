@@ -199,10 +199,7 @@ func newRootCmd() *cobra.Command {
 	aliasConnect.Deprecated = "use 'scribe registry connect' instead"
 	cmd.AddCommand(aliasConnect)
 
-	aliasMigrate := newMigrateCommand()
-	aliasMigrate.Hidden = true
-	aliasMigrate.Deprecated = "use 'scribe registry migrate' instead"
-	cmd.AddCommand(aliasMigrate)
+	cmd.AddCommand(newMigrateCommand())
 
 	cmd.AddCommand(
 		newListCommand(),

@@ -28,16 +28,19 @@ var (
 )
 
 func newMigrateCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "migrate [owner/repo]",
-		Short: "Convert a scribe.toml registry to scribe.yaml",
-		Long: `Fetches the existing scribe.toml from a registry, converts it to the
-new scribe.yaml format, and pushes the change as a single commit
-(deleting scribe.toml and creating scribe.yaml).`,
-		Args:       cobra.MaximumNArgs(1),
-		RunE:       runMigrate,
-		Deprecated: "use 'scribe registry migrate' instead",
+		Short: "Run migration commands",
+		Long: `Run Scribe migrations.
+
+The legacy "scribe migrate [owner/repo]" registry migration is still accepted
+for compatibility; prefer "scribe registry migrate [owner/repo]" for registry
+manifest migrations.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runMigrate,
 	}
+	cmd.AddCommand(newGlobalToProjectsCommand())
+	return cmd
 }
 
 func runMigrate(cmd *cobra.Command, args []string) error {
