@@ -141,9 +141,11 @@ ArtistfyHQ/team-skills/
 |---|---|
 | `scribe` | Open the local skill manager |
 | `scribe list` | Show all skills on this machine (managed + unmanaged) |
-| `scribe add [query]` | Find and install skills from registries |
+| `scribe browse` | Discover and install skills from connected registries |
+| `scribe add [query]` | Find and install skills from registries (legacy; prefer `browse`) |
+| `scribe install --all` | Install every catalog entry from a registry in one shot |
 | `scribe adopt [name]` | Import hand-rolled skills from `~/.claude/skills` etc. into the store |
-| `scribe remove <skill>` | Remove a skill from this machine |
+| `scribe remove <skill>` | Remove a skill from this machine (records a deny-list entry) |
 | `scribe sync` | Reconcile local skill state, tool installs, and connected registries |
 | `scribe doctor` | Inspect managed skills and projections for repairable issues |
 | `scribe doctor --fix` | Normalize canonical skill metadata and repair affected projections |
@@ -152,6 +154,7 @@ ArtistfyHQ/team-skills/
 | `scribe status` | Show connected registries, installed count, and last sync |
 | `scribe tools` | List detected AI tools, enable/disable |
 | `scribe explain <skill>` | AI-powered skill explanation (or `--raw` for rendered SKILL.md) |
+| `scribe upgrade-agent` | Refresh the embedded scribe-agent bootstrap skill |
 
 ### Registry management
 
@@ -169,6 +172,7 @@ ArtistfyHQ/team-skills/
 | Command | What it does |
 |---|---|
 | `scribe guide` | Interactive setup guide |
+| `scribe schema <command> --json` | Print the JSON Schema for a command's `--json` envelope |
 | `scribe --version` | Show version |
 
 ### What `scribe list` looks like
@@ -275,26 +279,68 @@ Auth fallback chain: `gh auth token` → `GITHUB_TOKEN` env → `~/.scribe/confi
 
 ## CI and agent use
 
-Scribe auto-detects non-TTY environments. Use `--json` for structured output in CI pipelines or agent scripts:
-
-```bash
-scribe list --json
-scribe status --json
-scribe add --json skillname --yes
-```
-
-Example output:
+Scribe auto-detects non-TTY environments. Use `--json` for structured output in CI pipelines or agent scripts. Migrated commands now wrap their payload in a versioned envelope:
 
 ```json
 {
-  "team_repos": ["ArtistfyHQ/team-skills"],
-  "skills": [
-    { "name": "gstack", "action": "skipped", "status": "current", "version": "v0.12.9.0" },
-    { "name": "laravel-init", "action": "updated", "version": "v1.1.0" }
-  ],
-  "summary": { "installed": 0, "updated": 1, "skipped": 1, "failed": 0 }
+  "status": "ok",
+  "format_version": "1",
+  "data": { /* command payload */ },
+  "meta": {
+    "duration_ms": 12,
+    "bootstrap_ms": 3,
+    "command": "scribe sync",
+    "scribe_version": "..."
+  }
 }
 ```
+
+Migration: previously top-level keys are now under `data`. Update parsers from `jq '.foo'` to `jq '.data.foo'`. When `data.summary.failed > 0`, `status` becomes `"partial_success"` and the process exits with code `10`.
+
+Use `scribe schema <command> --json` to fetch the JSON Schema (2020-12) for a migrated command's input flags and output envelope before composing calls. Use `--fields name,version` on read-only tabular commands to project specific columns.
+
+```bash
+scribe list --json
+scribe list --json --fields name,status
+scribe status --json
+scribe sync --json | jq '.data.summary'
+scribe schema sync --json
+scribe add --json owner/repo:skill --yes
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---:|---|
+| 0 | success |
+| 1 | general operational failure |
+| 2 | usage or invalid flags |
+| 3 | not found (command, registry, skill, schema) |
+| 4 | permission or authentication failure |
+| 5 | conflict requiring user action |
+| 6 | network or remote service failure |
+| 7 | temporarily unavailable local dependency |
+| 8 | validation failure |
+| 9 | user canceled |
+| 10 | partial success — inspect `data.summary.failed` |
+
+## Project config
+
+A `.scribe.yaml` at a project root declares which kits, snippets, or extra skills that project wants. The parser and schema have shipped; CLI surfaces that act on them ride on top as they land.
+
+```yaml
+# .scribe.yaml — all keys optional, omit what you don't need
+kits:
+  - laravel-baseline
+snippets:
+  - commit-discipline
+add:
+  - owner/repo:extra-skill
+remove:
+  - skill-this-project-doesnt-want
+```
+
+Empty or missing files are treated as no project-level intent.
 
 ## Health checks
 
