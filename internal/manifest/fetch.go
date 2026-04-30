@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 )
 
 // FileFetcher abstracts fetching a single file from a remote repository.
@@ -23,7 +25,10 @@ func FetchWithFallback(ctx context.Context, f FileFetcher, owner, repo string, c
 	if err == nil {
 		m, parseErr := Parse(raw)
 		if parseErr != nil {
-			return nil, false, fmt.Errorf("parse %s/%s manifest: %w", owner, repo, parseErr)
+			return nil, false, clierrors.Wrap(parseErr, "MANIFEST_INVALID", clierrors.ExitValid,
+				clierrors.WithMessage(fmt.Sprintf("parse %s/%s manifest: %v", owner, repo, parseErr)),
+				clierrors.WithResource(owner+"/"+repo),
+			)
 		}
 		return m, false, nil
 	}
@@ -31,12 +36,19 @@ func FetchWithFallback(ctx context.Context, f FileFetcher, owner, repo string, c
 	// YAML failed — try legacy TOML.
 	raw, legacyErr := f.FetchFile(ctx, owner, repo, LegacyManifestFilename, "HEAD")
 	if legacyErr != nil {
-		return nil, false, fmt.Errorf("fetch manifest from %s/%s: %w", owner, repo, errors.Join(err, legacyErr))
+		joined := errors.Join(err, legacyErr)
+		return nil, false, clierrors.Wrap(joined, "REGISTRY_NOT_FOUND", clierrors.ExitNotFound,
+			clierrors.WithMessage(fmt.Sprintf("fetch manifest from %s/%s: %v", owner, repo, joined)),
+			clierrors.WithResource(owner+"/"+repo),
+		)
 	}
 
 	m, convertErr := convert(raw)
 	if convertErr != nil {
-		return nil, false, fmt.Errorf("convert legacy manifest from %s/%s: %w", owner, repo, convertErr)
+		return nil, false, clierrors.Wrap(convertErr, "MANIFEST_INVALID", clierrors.ExitValid,
+			clierrors.WithMessage(fmt.Sprintf("convert legacy manifest from %s/%s: %v", owner, repo, convertErr)),
+			clierrors.WithResource(owner+"/"+repo),
+		)
 	}
 	return m, true, nil
 }
