@@ -6,9 +6,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Naoray/scribe/internal/paths"
 )
 
 const projectFileName = ".scribe.yaml"
+
+const LegacyGlobalProjectionCompatBanner = "scribe: legacy global-projection compatibility mode is active; run `scribe migrate global-to-projects` to move to project-local `.scribe.yaml` projection before v1.0."
 
 // LegacyGlobalProjectionCompat describes whether Scribe should preserve the
 // pre-project global projection behavior for this invocation.
@@ -60,6 +66,44 @@ func (s *State) HasLegacyGlobalProjections() bool {
 		}
 	}
 	return false
+}
+
+// ShouldEmitLegacyGlobalProjectionCompatBanner applies the per-user daily
+// throttle for the legacy global-projection deprecation banner.
+func ShouldEmitLegacyGlobalProjectionCompatBanner(now time.Time) (bool, error) {
+	path, err := LegacyGlobalProjectionCompatBannerPath()
+	if err != nil {
+		return false, err
+	}
+	return ShouldEmitLegacyGlobalProjectionCompatBannerAt(path, now)
+}
+
+func LegacyGlobalProjectionCompatBannerPath() (string, error) {
+	dir, err := paths.ScribeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "legacy-global-projection-banner.date"), nil
+}
+
+// ShouldEmitLegacyGlobalProjectionCompatBannerAt returns true at most once per
+// local calendar day, updating timestampPath when the banner should be shown.
+func ShouldEmitLegacyGlobalProjectionCompatBannerAt(timestampPath string, now time.Time) (bool, error) {
+	today := now.Format("2006-01-02")
+	data, err := os.ReadFile(timestampPath)
+	if err == nil && strings.TrimSpace(string(data)) == today {
+		return false, nil
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, fmt.Errorf("read compat banner timestamp: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(timestampPath), 0o755); err != nil {
+		return false, fmt.Errorf("create compat banner timestamp dir: %w", err)
+	}
+	if err := os.WriteFile(timestampPath, []byte(today+"\n"), 0o644); err != nil {
+		return false, fmt.Errorf("write compat banner timestamp: %w", err)
+	}
+	return true, nil
 }
 
 func findProjectFile(startDir string) (string, error) {

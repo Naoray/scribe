@@ -132,6 +132,15 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			c.SetContext(context.WithValue(c.Context(), legacyGlobalProjectionCompatKey{}, compat))
+			if compat.Enabled {
+				emit, err := state.ShouldEmitLegacyGlobalProjectionCompatBanner(time.Now())
+				if err != nil {
+					return err
+				}
+				if emit {
+					fmt.Fprintln(c.ErrOrStderr(), state.LegacyGlobalProjectionCompatBanner)
+				}
+			}
 
 			added, builtinsFirstRun := firstrun.ApplyBuiltins(cfg)
 			removed, removedRan := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
