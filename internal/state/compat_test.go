@@ -100,3 +100,63 @@ func TestShouldEmitLegacyGlobalProjectionCompatBannerAt(t *testing.T) {
 		t.Fatalf("next-day emit = false, want true")
 	}
 }
+
+func TestShouldEmitLegacyGlobalProjectionCompatBannerAtFailOpen(t *testing.T) {
+	now := time.Date(2026, 4, 30, 9, 0, 0, 0, time.Local)
+
+	t.Run("unreadable timestamp path", func(t *testing.T) {
+		timestampPath := filepath.Join(t.TempDir(), "legacy-global-projection-banner.date")
+		if err := os.Mkdir(timestampPath, 0o755); err != nil {
+			t.Fatalf("mkdir timestamp path: %v", err)
+		}
+
+		emit, err := state.ShouldEmitLegacyGlobalProjectionCompatBannerAt(timestampPath, now)
+		if err != nil {
+			t.Fatalf("ShouldEmitLegacyGlobalProjectionCompatBannerAt() error = %v", err)
+		}
+		if !emit {
+			t.Fatalf("emit = false, want true")
+		}
+	})
+
+	t.Run("unwritable timestamp path", func(t *testing.T) {
+		parentFile := filepath.Join(t.TempDir(), "not-a-directory")
+		if err := os.WriteFile(parentFile, []byte("file blocks timestamp dir\n"), 0o644); err != nil {
+			t.Fatalf("write parent file: %v", err)
+		}
+		timestampPath := filepath.Join(parentFile, "legacy-global-projection-banner.date")
+
+		emit, err := state.ShouldEmitLegacyGlobalProjectionCompatBannerAt(timestampPath, now)
+		if err != nil {
+			t.Fatalf("ShouldEmitLegacyGlobalProjectionCompatBannerAt() error = %v", err)
+		}
+		if !emit {
+			t.Fatalf("emit = false, want true")
+		}
+	})
+
+	t.Run("corrupted timestamp file", func(t *testing.T) {
+		timestampPath := filepath.Join(t.TempDir(), ".scribe", "legacy-global-projection-banner.date")
+		if err := os.MkdirAll(filepath.Dir(timestampPath), 0o755); err != nil {
+			t.Fatalf("mkdir timestamp dir: %v", err)
+		}
+		if err := os.WriteFile(timestampPath, []byte("not-a-date\n"), 0o644); err != nil {
+			t.Fatalf("write corrupt timestamp: %v", err)
+		}
+
+		emit, err := state.ShouldEmitLegacyGlobalProjectionCompatBannerAt(timestampPath, now)
+		if err != nil {
+			t.Fatalf("ShouldEmitLegacyGlobalProjectionCompatBannerAt() error = %v", err)
+		}
+		if !emit {
+			t.Fatalf("emit = false, want true")
+		}
+		got, err := os.ReadFile(timestampPath)
+		if err != nil {
+			t.Fatalf("read repaired timestamp: %v", err)
+		}
+		if string(got) != "2026-04-30\n" {
+			t.Fatalf("timestamp = %q, want repaired date", got)
+		}
+	})
+}

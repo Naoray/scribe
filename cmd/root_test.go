@@ -8,6 +8,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/Naoray/scribe/internal/state"
 )
 
 func TestResolveVersion(t *testing.T) {
@@ -238,4 +240,96 @@ builtins_version: 3
 	if !strings.Contains(configText, "anthropics/skills") {
 		t.Fatalf("renamed anthropics/skills entry missing:\n%s", configText)
 	}
+}
+
+func TestRoot_LegacyCompatBannerThrottleFailureDoesNotBlockCommand(t *testing.T) {
+	home := setupLegacyCompatBannerHome(t)
+	timestampPath := filepath.Join(home, ".scribe", "legacy-global-projection-banner.date")
+	if err := os.Mkdir(timestampPath, 0o755); err != nil {
+		t.Fatalf("mkdir timestamp path: %v", err)
+	}
+
+	stdout, stderr := executeRootForLegacyCompatBannerTest(t, home, []string{"list", "--json"})
+	if !strings.Contains(stderr, state.LegacyGlobalProjectionCompatBanner) {
+		t.Fatalf("stderr missing compat banner:\n%s", stderr)
+	}
+	var anyJSON interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &anyJSON); err != nil {
+		t.Fatalf("stdout not clean JSON: %v\nstdout=%q\nstderr=%q", err, stdout, stderr)
+	}
+}
+
+func TestRoot_LegacyCompatBannerCorruptTimestampDoesNotBlockCommand(t *testing.T) {
+	home := setupLegacyCompatBannerHome(t)
+	timestampPath := filepath.Join(home, ".scribe", "legacy-global-projection-banner.date")
+	if err := os.WriteFile(timestampPath, []byte("not-a-date\n"), 0o644); err != nil {
+		t.Fatalf("write corrupt timestamp: %v", err)
+	}
+
+	stdout, stderr := executeRootForLegacyCompatBannerTest(t, home, []string{"list", "--json"})
+	if !strings.Contains(stderr, state.LegacyGlobalProjectionCompatBanner) {
+		t.Fatalf("stderr missing compat banner:\n%s", stderr)
+	}
+	var anyJSON interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &anyJSON); err != nil {
+		t.Fatalf("stdout not clean JSON: %v\nstdout=%q\nstderr=%q", err, stdout, stderr)
+	}
+}
+
+func setupLegacyCompatBannerHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cwd := filepath.Join(home, "workspace")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatalf("mkdir cwd: %v", err)
+	}
+	t.Chdir(cwd)
+
+	configDir := filepath.Join(home, ".scribe")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(`registries:
+  - repo: anthropics/skills
+    enabled: true
+    builtin: true
+    type: community
+builtins_version: 3
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	st := &state.State{
+		SchemaVersion: 5,
+		Installed: map[string]state.InstalledSkill{
+			"recap": {
+				Revision:      1,
+				InstalledHash: "hash",
+				Projections: []state.ProjectionEntry{{
+					Project: "",
+					Tools:   []string{"claude"},
+				}},
+			},
+		},
+		Kits:     map[string]state.InstalledKit{},
+		Snippets: map[string]state.InstalledSnippet{},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+	return home
+}
+
+func executeRootForLegacyCompatBannerTest(t *testing.T, home string, args []string) (string, string) {
+	t.Helper()
+	t.Setenv("PATH", home)
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs(args)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute(%v): %v\nstdout=%s\nstderr=%s", args, err, stdout.String(), stderr.String())
+	}
+	return stdout.String(), stderr.String()
 }

@@ -73,7 +73,8 @@ func (s *State) HasLegacyGlobalProjections() bool {
 func ShouldEmitLegacyGlobalProjectionCompatBanner(now time.Time) (bool, error) {
 	path, err := LegacyGlobalProjectionCompatBannerPath()
 	if err != nil {
-		return false, err
+		debugLegacyGlobalProjectionCompatBannerThrottle("resolve timestamp path: %v", err)
+		return true, nil
 	}
 	return ShouldEmitLegacyGlobalProjectionCompatBannerAt(path, now)
 }
@@ -95,15 +96,25 @@ func ShouldEmitLegacyGlobalProjectionCompatBannerAt(timestampPath string, now ti
 		return false, nil
 	}
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return false, fmt.Errorf("read compat banner timestamp: %w", err)
+		debugLegacyGlobalProjectionCompatBannerThrottle("read timestamp: %v", err)
+		return true, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(timestampPath), 0o755); err != nil {
-		return false, fmt.Errorf("create compat banner timestamp dir: %w", err)
+		debugLegacyGlobalProjectionCompatBannerThrottle("create timestamp dir: %v", err)
+		return true, nil
 	}
 	if err := os.WriteFile(timestampPath, []byte(today+"\n"), 0o644); err != nil {
-		return false, fmt.Errorf("write compat banner timestamp: %w", err)
+		debugLegacyGlobalProjectionCompatBannerThrottle("write timestamp: %v", err)
+		return true, nil
 	}
 	return true, nil
+}
+
+func debugLegacyGlobalProjectionCompatBannerThrottle(format string, args ...any) {
+	if os.Getenv("SCRIBE_DEBUG") == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "scribe: debug: compat banner throttle: "+format+"\n", args...)
 }
 
 func findProjectFile(startDir string) (string, error) {
