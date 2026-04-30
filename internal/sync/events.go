@@ -159,6 +159,13 @@ type SkillErrorMsg struct {
 	Err  error
 }
 
+// BudgetWarningMsg is emitted when a post-change projected skill set enters
+// an agent's warning band but remains below the hard refusal limit.
+type BudgetWarningMsg struct {
+	Agent   string
+	Message string
+}
+
 // SkillAdoptionNeededMsg is sent when install refused to overwrite a real
 // (non-Scribe) directory at a tool projection path. Run `scribe adopt <name>`
 // to import the existing content, then re-sync.

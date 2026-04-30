@@ -17,6 +17,7 @@ func newSyncCommand() *cobra.Command {
 	cmd.Flags().String("registry", "", "Sync only this registry (owner/repo or repo name)")
 	cmd.Flags().Bool("trust-all", false, "Approve all package install commands without prompting")
 	cmd.Flags().Bool("all", false, "Sync all registries (default behavior)")
+	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
 	cmd.Flags().MarkHidden("all")
 	return markJSONSupported(cmd)
 }
@@ -25,13 +26,20 @@ func runSync(cmd *cobra.Command, args []string) error {
 	jsonFlag := jsonFlagPassed(cmd)
 	repoFlag, _ := cmd.Flags().GetString("registry")
 	trustAllFlag, _ := cmd.Flags().GetBool("trust-all")
+	forceBudget, _ := cmd.Flags().GetBool("force")
+	factory := commandFactory()
+
+	if err := enforceCurrentBudget(factory, forceBudget); err != nil {
+		return err
+	}
 
 	bag := &workflow.Bag{
 		Args:             args,
 		JSONFlag:         jsonFlag,
 		RepoFlag:         repoFlag,
 		TrustAllFlag:     trustAllFlag,
-		Factory:          commandFactory(),
+		ForceBudget:      forceBudget,
+		Factory:          factory,
 		FilterRegistries: filterRegistries,
 	}
 	if err := workflow.Run(cmd.Context(), workflow.SyncSteps(), bag); err != nil {

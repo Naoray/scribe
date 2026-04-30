@@ -277,6 +277,8 @@ func autoSync(ctx context.Context, targetRepo string, st *state.State, client *g
 				fmt.Printf("  %-20s %s\n", m.Name, verb)
 			case sync.SkillErrorMsg:
 				fmt.Fprintf(os.Stderr, "  %-20s error: %v\n", m.Name, m.Err)
+			case sync.BudgetWarningMsg:
+				fmt.Fprintf(os.Stderr, "warning: %s\n", m.Message)
 			}
 		},
 	}

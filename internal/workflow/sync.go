@@ -288,6 +288,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		Tools:       b.Tools,
 		Executor:    &sync.ShellExecutor{},
 		TrustAll:    b.TrustAllFlag,
+		ForceBudget: b.ForceBudget,
 		SkillFilter: b.SkillFilter,
 		ProjectRoot: b.ProjectRoot,
 		// Skip missing skills when no explicit filter/--all: scribe sync only updates
@@ -309,6 +310,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 				b.Formatter.OnSkillInstalled(m.Name, m.Updated)
 			case sync.SkillErrorMsg:
 				b.Formatter.OnSkillError(m.Name, m.Err)
+			case sync.BudgetWarningMsg:
+				b.Formatter.OnBudgetWarning(m.Agent, m.Message)
 			case sync.SkillAdoptionNeededMsg:
 				// Handled implicitly by the SkillErrorMsg that follows it.
 			case sync.LegacyFormatMsg:

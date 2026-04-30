@@ -135,6 +135,8 @@ func (f *jsonFormatter) OnSkillError(name string, err error) {
 	})
 }
 
+func (f *jsonFormatter) OnBudgetWarning(_, _ string) {}
+
 func (f *jsonFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	f.summary.Installed += summary.Installed
 	f.summary.Updated += summary.Updated

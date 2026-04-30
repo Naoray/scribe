@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	ibudget "github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/provider"
@@ -59,6 +60,10 @@ type Syncer struct {
 
 	// TrustAll skips approval prompts for packages (--trust-all flag).
 	TrustAll bool
+
+	// ForceBudget allows projection even when an agent description-byte budget
+	// would otherwise be exceeded.
+	ForceBudget bool
 
 	// ApprovalFunc is called when a package needs interactive approval.
 	// Returns true if approved, false if denied.
@@ -437,6 +442,14 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			// selection; inherit mode uses every globally-enabled tool).
 			effectiveTools := selectEffectiveTools(s.Tools, installed)
 
+			if !s.ForceBudget {
+				if err := s.checkBudgetBeforeProjection(st, sk.Name, tFiles, effectiveTools); err != nil {
+					s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
+					summary.Failed++
+					continue
+				}
+			}
+
 			var paths []string
 			var toolNames []string
 			toolFailed := false
@@ -604,6 +617,117 @@ func selectEffectiveTools(global []tools.Tool, installed *state.InstalledSkill) 
 		}
 	}
 	return out
+}
+
+func (s *Syncer) checkBudgetBeforeProjection(st *state.State, incomingName string, files []tools.SkillFile, effectiveTools []tools.Tool) error {
+	incomingContent, ok := skillMDContent(files)
+	if !ok {
+		return nil
+	}
+
+	agents := budgetedToolNames(effectiveTools)
+	if len(agents) == 0 {
+		return nil
+	}
+
+	for _, agent := range agents {
+		skills, err := budgetSkillsForProjection(st, incomingName, incomingContent, s.ProjectRoot, agent)
+		if err != nil {
+			return err
+		}
+		result := ibudget.CheckBudget(skills, agent)
+		switch result.Status {
+		case ibudget.StatusRefuse:
+			return fmt.Errorf("%s\nTry removing one kit, or rerun with --force to project anyway.", ibudget.FormatOverflow(result))
+		case ibudget.StatusWarn:
+			s.emit(BudgetWarningMsg{Agent: agent, Message: ibudget.FormatResult(result)})
+		}
+	}
+	return nil
+}
+
+func skillMDContent(files []tools.SkillFile) ([]byte, bool) {
+	for _, file := range files {
+		if file.Path == "SKILL.md" {
+			return file.Content, true
+		}
+	}
+	return nil, false
+}
+
+func budgetedToolNames(toolSet []tools.Tool) []string {
+	seen := map[string]bool{}
+	var agents []string
+	for _, tool := range toolSet {
+		name := tool.Name()
+		if _, ok := ibudget.AgentBudgets[name]; !ok || seen[name] {
+			continue
+		}
+		seen[name] = true
+		agents = append(agents, name)
+	}
+	sort.Strings(agents)
+	return agents
+}
+
+func budgetSkillsForProjection(st *state.State, incomingName string, incomingContent []byte, projectRoot, agent string) ([]ibudget.Skill, error) {
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve store dir: %w", err)
+	}
+
+	seen := map[string]bool{}
+	for name, installed := range st.Installed {
+		if installed.Kind == state.KindPackage {
+			continue
+		}
+		if name == incomingName || !projectedToAgent(installed, projectRoot, agent) {
+			continue
+		}
+		seen[name] = true
+	}
+	seen[incomingName] = true
+
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	skills := make([]ibudget.Skill, 0, len(names))
+	for _, name := range names {
+		if name == incomingName {
+			skills = append(skills, ibudget.Skill{Name: name, Content: incomingContent})
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(storeDir, name, "SKILL.md"))
+		if err != nil {
+			continue
+		}
+		skills = append(skills, ibudget.Skill{Name: name, Content: content})
+	}
+	return skills, nil
+}
+
+func projectedToAgent(installed state.InstalledSkill, projectRoot, agent string) bool {
+	for _, projection := range installed.Projections {
+		if projection.Project == projectRoot && containsString(projection.Tools, agent) {
+			return true
+		}
+	}
+	if projectRoot != "" || len(installed.Projections) > 0 {
+		return false
+	}
+	return containsString(installed.Tools, agent)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeProjection(installed *state.InstalledSkill, projectRoot string, toolNames []string) []state.ProjectionEntry {

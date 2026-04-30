@@ -67,6 +67,7 @@ Examples:
 	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
+	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
 	return markJSONSupported(cmd)
 }
 
@@ -74,6 +75,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
 	jsonFlag := jsonFlagPassed(cmd)
 	registryFilter, _ := cmd.Flags().GetString("registry")
+	forceBudget, _ := cmd.Flags().GetBool("force")
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
@@ -87,6 +89,9 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
+	}
+	if err := enforceCurrentBudget(factory, forceBudget); err != nil {
+		return err
 	}
 
 	ctx := cmd.Context()
@@ -113,7 +118,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
 			)
 		}
-		return runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets), true, useJSON, skipConfirm)
+		return runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets, forceBudget), true, useJSON, skipConfirm)
 	}
 
 	// Need at least one connected registry to search/browse.
@@ -185,7 +190,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return installSelected(ctx, selected, cfg, st, client, targets, skipConfirm)
+	return installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget)
 }
 
 // parseSkillRef parses "owner/repo:skillname" into its parts.
@@ -317,6 +322,7 @@ func installSelected(
 	client *gh.Client,
 	targets []tools.Tool,
 	skipConfirm bool,
+	forceBudget bool,
 ) error {
 	// Group by registry.
 	byRegistry := map[string][]sync.SkillStatus{}
@@ -350,7 +356,7 @@ func installSelected(
 		}
 	}
 
-	syncer := newInstallSyncer(client, targets)
+	syncer := newInstallSyncer(client, targets, forceBudget)
 
 	var installErr error
 	for _, registryRepo := range order {
@@ -387,13 +393,18 @@ func installSelected(
 }
 
 // newInstallSyncer constructs a Syncer ready to install skills.
-func newInstallSyncer(client *gh.Client, targets []tools.Tool) *sync.Syncer {
+func newInstallSyncer(client *gh.Client, targets []tools.Tool, forceBudgetOpt ...bool) *sync.Syncer {
+	forceBudget := false
+	if len(forceBudgetOpt) > 0 {
+		forceBudget = forceBudgetOpt[0]
+	}
 	return &sync.Syncer{
 		Client:      sync.WrapGitHubClient(client),
 		Provider:    provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
 		Tools:       targets,
 		Executor:    &sync.ShellExecutor{},
 		ProjectRoot: resolveCurrentProjectRoot(),
+		ForceBudget: forceBudget,
 	}
 }
 
@@ -438,6 +449,10 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 				})
 			} else {
 				fmt.Fprintf(os.Stderr, "  ✗ %-24s error: %v\n", m.Name, m.Err)
+			}
+		case sync.BudgetWarningMsg:
+			if !useJSON {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", m.Message)
 			}
 		}
 	}
