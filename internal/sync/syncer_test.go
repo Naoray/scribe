@@ -603,6 +603,59 @@ func TestRunWithDiff_BudgetUsesCurrentProjectProjection(t *testing.T) {
 	}
 }
 
+func TestRunWithDiff_EmitsBudgetWarningForPostChangeProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		t.Fatalf("store dir: %v", err)
+	}
+	projectRoot := t.TempDir()
+	writeStoredSkill(t, storeDir, "existing", strings.Repeat("x", 3600))
+
+	var events []any
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: skillContent("incoming", strings.Repeat("y", 220))}},
+		},
+		Tools:       []tools.Tool{tools.CodexTool{}},
+		ProjectRoot: projectRoot,
+		Emit:        func(msg any) { events = append(events, msg) },
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"existing": {
+			Tools: []string{"codex"},
+			Projections: []state.ProjectionEntry{{
+				Project: projectRoot,
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+	statuses := []sync.SkillStatus{{
+		Name:   "incoming",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "incoming", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	for _, event := range events {
+		if msg, ok := event.(sync.BudgetWarningMsg); ok {
+			if msg.Agent != "codex" {
+				t.Fatalf("Agent = %q, want codex", msg.Agent)
+			}
+			if !strings.Contains(msg.Message, "Codex budget") {
+				t.Fatalf("Message = %q, want Codex budget warning", msg.Message)
+			}
+			return
+		}
+	}
+	t.Fatal("expected BudgetWarningMsg")
+}
+
 // TestApply_RealDirectoryAtProjectionPath verifies that sync emits an actionable
 // SkillErrorMsg and preserves the real directory when a non-scribe directory
 // exists at the tool projection path.

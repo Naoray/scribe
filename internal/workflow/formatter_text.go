@@ -64,6 +64,10 @@ func (f *textFormatter) OnSkillError(name string, err error) {
 	fmt.Fprintf(f.errOut, "  %-20s error: %v\n", name, err)
 }
 
+func (f *textFormatter) OnBudgetWarning(_, message string) {
+	fmt.Fprintf(f.errOut, "warning: %s\n", message)
+}
+
 func (f *textFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	f.totalSummary.Installed += summary.Installed
 	f.totalSummary.Updated += summary.Updated

@@ -450,6 +450,10 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 			} else {
 				fmt.Fprintf(os.Stderr, "  ✗ %-24s error: %v\n", m.Name, m.Err)
 			}
+		case sync.BudgetWarningMsg:
+			if !useJSON {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", m.Message)
+			}
 		}
 	}
 	return results
