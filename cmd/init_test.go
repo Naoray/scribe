@@ -7,6 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	clischema "github.com/Naoray/scribe/internal/cli/schema"
 )
 
 func TestDiscoverPackageSkillsFindsNestedSkillFiles(t *testing.T) {
@@ -68,6 +71,19 @@ func TestNewInitCommandHasForceFlag(t *testing.T) {
 	}
 }
 
+func TestRootIncludesInitCommand(t *testing.T) {
+	root := newRootCmd()
+	if got, _, err := root.Find([]string{"init"}); err != nil || got == nil || got.Name() != "init" {
+		t.Fatalf("root.Find(init) = %v, %v", got, err)
+	}
+}
+
+func TestInitOutputSchemaRegistered(t *testing.T) {
+	if _, ok := clischema.Get("scribe init"); !ok {
+		t.Fatal("missing output schema for scribe init")
+	}
+}
+
 func TestRunInitNonTTYWritesJSONEnvelope(t *testing.T) {
 	dir := t.TempDir()
 	writeInitSkill(t, dir, "review", "---\nname: review\n---\n# Review\n")
@@ -105,6 +121,25 @@ func TestRunInitNonTTYWritesJSONEnvelope(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "scribe.yaml")); err != nil {
 		t.Fatalf("scribe.yaml not written: %v", err)
+	}
+}
+
+func TestRunInitRefusesExistingLegacyManifestWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "scribe.toml"), []byte("[package]\nname = \"old\"\n"), 0o644); err != nil {
+		t.Fatalf("write scribe.toml: %v", err)
+	}
+	withInitWorkingDir(t, dir)
+
+	cmd := newInitCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute returned nil error for existing scribe.toml")
+	}
+	if got := clierrors.ExitCode(err); got != 5 {
+		t.Fatalf("exit code = %d, want 5; err=%v", got, err)
 	}
 }
 
