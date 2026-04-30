@@ -77,6 +77,8 @@ scribe list                                       # verify
 
 Run `scribe sync` again anytime to pick up new skills. Setting up a registry from scratch? `scribe registry create` scaffolds the repo, `scribe.yaml`, and connection in one prompt.
 
+For a default starter set, connect `Naoray/scribe-skills-essentials` and run `scribe sync --registry Naoray/scribe-skills-essentials`.
+
 ## What you get
 
 `scribe list` opens an interactive TUI on a terminal. Piped or in CI, it emits the JSON envelope:
