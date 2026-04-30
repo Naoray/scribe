@@ -109,15 +109,12 @@ func PushSkill(ctx context.Context, client GitHubPusher, skillName, skillDir str
 			clierrors.WithResource(skillName),
 		)
 	}
-	if remoteSHA, found := skillBlobSHA(tree, remoteDir); !found || remoteSHA != source.LastSHA {
-		return PushResult{}, clierrors.Wrap(errors.New("remote skill has changed since it was installed"), "PUSH_CONFLICT", clierrors.ExitConflict,
-			clierrors.WithRemediation("run `scribe sync` and reapply your local edits before pushing"),
-			clierrors.WithResource(skillName),
-		)
-	}
 
 	files, err := collectSkillFiles(skillDir, remoteDir)
 	if err != nil {
+		return PushResult{}, err
+	}
+	if err := verifyRemoteBaseline(skillName, tree, files, source, remoteDir); err != nil {
 		return PushResult{}, err
 	}
 	commit, err := client.PushFilesAtomic(ctx, owner, repo, branch, files, fmt.Sprintf("Update %s skill", skillName), headSHA)
@@ -172,4 +169,42 @@ func skillBlobSHA(tree []TreeEntry, remoteDir string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func verifyRemoteBaseline(skillName string, tree []TreeEntry, files map[string][]byte, source state.SkillSource, remoteDir string) error {
+	current := blobSHAsByPath(tree)
+	if len(source.BlobSHAs) == 0 {
+		if remoteSHA, found := skillBlobSHA(tree, remoteDir); !found || remoteSHA != source.LastSHA {
+			return pushConflict(skillName)
+		}
+		return nil
+	}
+	for filePath := range files {
+		expectedSHA, hadBaseline := source.BlobSHAs[filePath]
+		currentSHA, exists := current[filePath]
+		switch {
+		case hadBaseline && (!exists || currentSHA != expectedSHA):
+			return pushConflict(skillName)
+		case !hadBaseline && exists:
+			return pushConflict(skillName)
+		}
+	}
+	return nil
+}
+
+func blobSHAsByPath(tree []TreeEntry) map[string]string {
+	blobs := make(map[string]string, len(tree))
+	for _, entry := range tree {
+		if entry.Type == "blob" {
+			blobs[entry.Path] = entry.SHA
+		}
+	}
+	return blobs
+}
+
+func pushConflict(skillName string) error {
+	return clierrors.Wrap(errors.New("remote skill has changed since it was installed"), "PUSH_CONFLICT", clierrors.ExitConflict,
+		clierrors.WithRemediation("run `scribe sync` and reapply your local edits before pushing"),
+		clierrors.WithResource(skillName),
+	)
 }

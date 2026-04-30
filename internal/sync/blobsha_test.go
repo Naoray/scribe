@@ -77,3 +77,23 @@ func TestResolveSkillBlobSHA(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveSkillBlobSHAs(t *testing.T) {
+	tree := []provider.TreeEntry{
+		{Path: "skills/deploy/SKILL.md", Type: "blob", SHA: "skillblob"},
+		{Path: "skills/deploy/scripts/foo.sh", Type: "blob", SHA: "scriptblob"},
+		{Path: "skills/deploy", Type: "tree", SHA: "treeblob"},
+		{Path: "skills/other/SKILL.md", Type: "blob", SHA: "otherblob"},
+	}
+
+	got := resolveSkillBlobSHAs(tree, manifest.Entry{Name: "deploy", Path: "skills/deploy"})
+	if got["skills/deploy/SKILL.md"] != "skillblob" {
+		t.Fatalf("SKILL.md SHA = %q", got["skills/deploy/SKILL.md"])
+	}
+	if got["skills/deploy/scripts/foo.sh"] != "scriptblob" {
+		t.Fatalf("script SHA = %q", got["skills/deploy/scripts/foo.sh"])
+	}
+	if _, ok := got["skills/other/SKILL.md"]; ok {
+		t.Fatalf("included blob outside skill subtree: %#v", got)
+	}
+}

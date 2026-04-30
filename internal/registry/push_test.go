@@ -93,6 +93,37 @@ func TestPushSkillRefusesRemoteDivergence(t *testing.T) {
 	}
 }
 
+func TestPushSkillRefusesPartialRemoteDivergence(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "---\nname: deploy\ndescription: Deploy things\n---\n")
+	writeFile(t, filepath.Join(dir, "scripts", "foo.sh"), "echo local\n")
+
+	client := &fakePusher{
+		tree: []TreeEntry{
+			{Path: "deploy/SKILL.md", Type: "blob", SHA: "base-sha"},
+			{Path: "deploy/scripts/foo.sh", Type: "blob", SHA: "remote-script-sha"},
+		},
+		head: "head-sha",
+	}
+
+	_, err := PushSkill(context.Background(), client, "deploy", dir, state.SkillSource{
+		Registry: "acme/skills",
+		Path:     "deploy",
+		Ref:      "main",
+		LastSHA:  "base-sha",
+		BlobSHAs: map[string]string{
+			"deploy/SKILL.md":       "base-sha",
+			"deploy/scripts/foo.sh": "base-script-sha",
+		},
+	})
+	if clierrors.ExitCode(err) != clierrors.ExitConflict {
+		t.Fatalf("exit = %d, want conflict; err=%v", clierrors.ExitCode(err), err)
+	}
+	if client.pushCalled {
+		t.Fatal("push should not be called on partial divergence")
+	}
+}
+
 func TestPushSkillPropagatesNetworkFailure(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "SKILL.md"), "---\nname: deploy\ndescription: Deploy things\n---\n")
