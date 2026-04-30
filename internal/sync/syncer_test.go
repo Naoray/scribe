@@ -95,6 +95,84 @@ func TestRunWithDiff_DoesNotOverwriteTargetReadme(t *testing.T) {
 	}
 }
 
+func TestRunWithDiff_SkipsRemovedByUser(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var events []any
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}},
+		},
+		Emit: func(msg any) { events = append(events, msg) },
+	}
+	st := &state.State{
+		Installed:     map[string]state.InstalledSkill{},
+		RemovedByUser: []state.RemovedSkill{{Name: "recap", Registry: "acme/skills", RemovedAt: time.Now()}},
+	}
+	statuses := []sync.SkillStatus{{
+		Name:   "recap",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+	if _, ok := st.Installed["recap"]; ok {
+		t.Fatal("recap should not be installed when deny-listed")
+	}
+
+	found := false
+	for _, ev := range events {
+		if msg, ok := ev.(sync.SkillSkippedByDenyListMsg); ok {
+			found = true
+			if msg.Name != "recap" || msg.Registry != "acme/skills" {
+				t.Fatalf("deny-list skip msg = %+v", msg)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected SkillSkippedByDenyListMsg")
+	}
+}
+
+func TestRunWithDiff_RemovedByUserIsRegistryScoped(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}},
+		},
+	}
+	st := &state.State{
+		Installed:     map[string]state.InstalledSkill{},
+		RemovedByUser: []state.RemovedSkill{{Name: "recap", Registry: "acme/skills", RemovedAt: time.Now()}},
+	}
+	statuses := []sync.SkillStatus{{
+		Name:   "recap",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "recap", Source: "github:example/registry@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff acme: %v", err)
+	}
+	if _, ok := st.Installed["recap"]; ok {
+		t.Fatal("recap should not install from deny-listed acme/skills")
+	}
+
+	if err := syncer.RunWithDiff(context.Background(), "other/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff other: %v", err)
+	}
+	installed, ok := st.Installed["recap"]
+	if !ok {
+		t.Fatal("recap should install from other/skills")
+	}
+	if len(installed.Sources) != 1 || installed.Sources[0].Registry != "other/skills" {
+		t.Fatalf("installed sources = %+v, want other/skills", installed.Sources)
+	}
+}
+
 func TestApply_PackageMissing_Approved(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

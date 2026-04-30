@@ -269,6 +269,11 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			summary.Skipped++
 
 		case StatusMissing, StatusOutdated:
+			if st.IsRemovedByUser(teamRepo, sk.Name) {
+				s.emit(SkillSkippedByDenyListMsg{Name: sk.Name, Registry: teamRepo})
+				summary.Skipped++
+				continue
+			}
 			if sk.Status == StatusMissing && s.SkipMissing {
 				s.emit(SkillSkippedMsg{Name: sk.Name})
 				summary.Skipped++

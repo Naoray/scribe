@@ -62,6 +62,7 @@ func forgetRegistry(repo string) error {
 	}
 	cfg.Registries = kept
 	st.ClearRegistryFailure(resolved)
+	st.ClearRemovedByRegistry(resolved)
 
 	if err := cfg.Save(); err != nil {
 		return err

@@ -29,8 +29,8 @@ func newRemoveCommand() *cobra.Command {
 		Long: `Remove a skill by name or full key (e.g. "deploy" or "Artistfy-hq/deploy").
 
 If the bare name is ambiguous across registries, an interactive picker is shown
-(or an error in non-TTY mode). Skills managed by a registry will be re-installed
-on the next sync unless the registry is disconnected.`,
+(or an error in non-TTY mode). Removing a registry-managed skill records that
+intent so future syncs keep it removed until you install it again.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runRemove,
 	}
@@ -83,16 +83,15 @@ func runRemove(cmd *cobra.Command, args []string) error {
 
 	installed := st.Installed[key]
 
-	// Check if managed by a registry.
+	// Load config for tool resolution.
 	cfg, err := factory.Config()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	managedBy := findManagingRegistries(key, cfg.Registries)
+	managedBy := registriesFromSources(installed.Sources)
 
-	// Warn about registry re-install.
 	if len(managedBy) > 0 && !useJSON {
-		fmt.Fprintf(os.Stderr, "⚠  %s is managed by %s — it will re-install on next sync\n",
+		fmt.Fprintf(os.Stderr, "⚠  %s is managed by %s — future syncs will keep it removed until you install it again\n",
 			key, strings.Join(managedBy, ", "))
 	}
 
@@ -167,7 +166,8 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Remove from state and save.
+	// Remove from state, record registry removal intent, and save.
+	st.RecordRemovedByUser(key, installed.Sources)
 	st.Remove(key)
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("save state: %w", err)
@@ -195,6 +195,20 @@ func runRemove(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Removed %s\n", key)
 	return nil
+}
+
+func registriesFromSources(sources []state.SkillSource) []string {
+	seen := map[string]bool{}
+	var registries []string
+	for _, src := range sources {
+		if src.Registry == "" || seen[src.Registry] {
+			continue
+		}
+		seen[src.Registry] = true
+		registries = append(registries, src.Registry)
+	}
+	sort.Strings(registries)
+	return registries
 }
 
 // resolveRemoveTarget matches input against installed skill keys.

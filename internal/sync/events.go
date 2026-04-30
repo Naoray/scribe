@@ -146,6 +146,13 @@ type SkillInstalledMsg struct {
 // SkillSkippedMsg is sent when a skill is already current — no action needed.
 type SkillSkippedMsg struct{ Name string }
 
+// SkillSkippedByDenyListMsg is sent when a user removed a registry skill and
+// sync is preserving that removal intent.
+type SkillSkippedByDenyListMsg struct {
+	Name     string
+	Registry string
+}
+
 // SkillErrorMsg is sent when a skill fails to install. Sync continues.
 type SkillErrorMsg struct {
 	Name string

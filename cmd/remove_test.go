@@ -182,3 +182,45 @@ func TestRunPackageUninstall_NoManifestNoop(t *testing.T) {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
 }
+
+func TestRemoveRecordsRemovalIntentForAllSources(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	st := &state.State{
+		SchemaVersion: 5,
+		Installed: map[string]state.InstalledSkill{
+			"recap": {
+				Revision: 1,
+				Sources: []state.SkillSource{
+					{Registry: "acme/skills", Ref: "main"},
+					{Registry: "other/skills", Ref: "main"},
+				},
+				Tools: []string{},
+			},
+		},
+		RemovedByUser: []state.RemovedSkill{},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newRemoveCommand()
+	cmd.SetArgs([]string{"recap", "--yes", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := loaded.Installed["recap"]; ok {
+		t.Fatal("recap should be removed from installed state")
+	}
+	if !loaded.IsRemovedByUser("acme/skills", "recap") {
+		t.Fatal("recap should be deny-listed for acme/skills")
+	}
+	if !loaded.IsRemovedByUser("other/skills", "recap") {
+		t.Fatal("recap should be deny-listed for other/skills")
+	}
+}

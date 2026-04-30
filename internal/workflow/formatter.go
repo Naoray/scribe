@@ -17,6 +17,7 @@ type Formatter interface {
 	OnSkillDownloading(name string)
 	OnSkillInstalled(name string, updated bool)
 	OnSkillSkipped(name string, status sync.SkillStatus)
+	OnSkillSkippedByDenyList(name, registry string)
 	OnSkillError(name string, err error)
 	OnSyncComplete(summary sync.SyncCompleteMsg)
 	OnReconcileConflict(name string, conflict state.ProjectionConflict)

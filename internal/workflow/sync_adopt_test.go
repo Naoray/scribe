@@ -47,6 +47,7 @@ func (r *adoptRecorder) OnSkillResolved(_ string, _ isync.SkillStatus)          
 func (r *adoptRecorder) OnSkillDownloading(_ string)                              {}
 func (r *adoptRecorder) OnSkillInstalled(_ string, _ bool)                        {}
 func (r *adoptRecorder) OnSkillSkipped(_ string, _ isync.SkillStatus)             {}
+func (r *adoptRecorder) OnSkillSkippedByDenyList(_, _ string)                     {}
 func (r *adoptRecorder) OnSkillError(_ string, _ error)                           {}
 func (r *adoptRecorder) OnSyncComplete(_ isync.SyncCompleteMsg)                   {}
 func (r *adoptRecorder) OnReconcileConflict(_ string, _ state.ProjectionConflict) {}
