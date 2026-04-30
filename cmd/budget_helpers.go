@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/kit"
@@ -101,4 +102,31 @@ func budgetAgents(_ *config.Config) []string {
 	}
 	sort.Strings(agents)
 	return agents
+}
+
+func enforceCurrentBudget(factory *app.Factory, force bool) error {
+	cfg, err := factory.Config()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	st, err := factory.State()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	set, err := resolveBudgetSet(st)
+	if err != nil {
+		return err
+	}
+	for _, agent := range budgetAgents(cfg) {
+		result := budget.CheckBudget(set.Skills, agent)
+		switch result.Status {
+		case budget.StatusRefuse:
+			if !force {
+				return fmt.Errorf("%s\nTry removing one kit, or rerun with --force to project anyway.", budget.FormatOverflow(result))
+			}
+		case budget.StatusWarn:
+			fmt.Fprintf(os.Stderr, "warning: %s\n", budget.FormatResult(result))
+		}
+	}
+	return nil
 }

@@ -24,6 +24,7 @@ type Bag struct {
 	InitialQuery   string // initial search/filter text for TUI surfaces
 	TrustAllFlag   bool   // --trust-all: approve all package commands without prompting
 	InstallAllFlag bool   // --all: install all available skills without prompting
+	ForceBudget    bool   // --force: allow projection over agent description-byte budgets
 	LazyGitHub     bool   // skip eager GitHub client/provider setup for local-only flows
 	Factory        *app.Factory
 

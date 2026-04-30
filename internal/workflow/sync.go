@@ -288,6 +288,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		Tools:       b.Tools,
 		Executor:    &sync.ShellExecutor{},
 		TrustAll:    b.TrustAllFlag,
+		ForceBudget: b.ForceBudget,
 		SkillFilter: b.SkillFilter,
 		ProjectRoot: b.ProjectRoot,
 		// Skip missing skills when no explicit filter/--all: scribe sync only updates
