@@ -30,7 +30,7 @@ Examples:
 		RunE: runGuide,
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON (for CI/agents)")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 // Styles for guide output — kept local to cmd/ per architecture.

@@ -63,7 +63,7 @@ Examples:
 	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {

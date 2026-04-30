@@ -16,7 +16,7 @@ func newRegistryListCommand() *cobra.Command {
 		RunE:  runRegistryList,
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runRegistryList(cmd *cobra.Command, args []string) error {

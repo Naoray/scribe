@@ -45,7 +45,7 @@ func newSchemaCommand(root *cobra.Command) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "Print schemas for all commands")
 	cmd.Flags().BoolVar(&markdown, "markdown", false, "Render command schema summary as Markdown")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func writeAllSchemas(cmd *cobra.Command, root *cobra.Command) error {

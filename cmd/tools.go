@@ -37,7 +37,7 @@ Examples:
 	cmd.AddCommand(newToolsAddCommand())
 	cmd.AddCommand(newToolsEnableCommand())
 	cmd.AddCommand(newToolsDisableCommand())
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func newToolsAddCommand() *cobra.Command {

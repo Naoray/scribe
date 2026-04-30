@@ -17,7 +17,7 @@ func newSyncCommand() *cobra.Command {
 	cmd.Flags().Bool("trust-all", false, "Approve all package install commands without prompting")
 	cmd.Flags().Bool("all", false, "Sync all registries (default behavior)")
 	cmd.Flags().MarkHidden("all")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runSync(cmd *cobra.Command, args []string) error {

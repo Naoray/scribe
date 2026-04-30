@@ -36,7 +36,7 @@ intent so future syncs keep it removed until you install it again.`,
 	}
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 // removeResult is the JSON output for `scribe remove`.

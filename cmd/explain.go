@@ -49,7 +49,7 @@ Falls back to rendering the SKILL.md directly if no LLM is available.`,
 	}
 	cmd.Flags().Bool("json", false, "Output structured JSON (for agents/scripts)")
 	cmd.Flags().Bool("raw", false, "Show rendered SKILL.md directly, skip AI explanation")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runExplain(cmd *cobra.Command, args []string) error {

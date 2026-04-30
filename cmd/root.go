@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -48,6 +49,8 @@ func newCommandFactory() *app.Factory {
 
 var rootCmd = newRootCmd()
 
+const jsonSupportedAnnotation = "json_supported"
+
 func Execute() {
 	err := rootCmd.Execute()
 	mode := envFromArgs(os.Args)
@@ -82,6 +85,15 @@ func newRootCmd() *cobra.Command {
 			ctx = context.WithValue(ctx, envelope.ScribeVersionKey, resolveVersion(Version, readBuildInfo()))
 			ctx = context.WithValue(ctx, envelope.CommandPathKey, c.CommandPath())
 			c.SetContext(ctx)
+
+			if jsonFlagPassed(c) && !commandSupportsJSON(c) {
+				return &clierrors.Error{
+					Code:        "JSON_NOT_SUPPORTED",
+					Message:     c.CommandPath() + " does not support --json yet",
+					Remediation: "scribe schema --all --json | jq 'keys' lists JSON-capable commands; this command is on the wave-3 migration list (see solo todo #469)",
+					Exit:        clierrors.ExitUsage,
+				}
+			}
 
 			if c.Name() == "help" || c.Name() == "version" || c.Name() == "migrate" || c.Name() == "upgrade" {
 				return nil
@@ -173,6 +185,7 @@ func newRootCmd() *cobra.Command {
 	}
 
 	cmd.RunE = runDefault
+	markJSONSupported(cmd)
 	cmd.PersistentFlags().Bool("json", false, "Output machine-readable JSON")
 	cmd.CompletionOptions = cobra.CompletionOptions{HiddenDefaultCmd: true}
 
@@ -224,7 +237,54 @@ func classifyExecuteError(err error) error {
 	if stderrors.As(err, &ce) {
 		return err
 	}
-	return clierrors.Wrap(err, "USAGE", clierrors.ExitUsage, clierrors.WithRemediation("run `scribe --help`"))
+	if isCobraUsageErr(err) {
+		return clierrors.Wrap(err, "USAGE", clierrors.ExitUsage,
+			clierrors.WithMessage(err.Error()),
+			clierrors.WithRemediation("scribe --help"),
+		)
+	}
+	return clierrors.Wrap(err, "GENERAL", clierrors.ExitGeneral, clierrors.WithMessage(err.Error()))
+}
+
+func isCobraUsageErr(err error) bool {
+	msg := err.Error()
+	for _, prefix := range []string{
+		"unknown command ",
+		"unknown flag ",
+		"unknown flag:",
+		"unknown shorthand flag",
+		"flag provided but not defined",
+		"required flag(s) ",
+		"accepts ",
+		"requires ",
+	} {
+		if strings.HasPrefix(msg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func markJSONSupported(cmd *cobra.Command) *cobra.Command {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[jsonSupportedAnnotation] = "true"
+	return cmd
+}
+
+func jsonFlagPassed(cmd *cobra.Command) bool {
+	if root := cmd.Root(); root != nil {
+		if flag := root.PersistentFlags().Lookup("json"); flag != nil && flag.Changed {
+			return true
+		}
+	}
+	flag := cmd.Flag("json")
+	return flag != nil && flag.Changed
+}
+
+func commandSupportsJSON(cmd *cobra.Command) bool {
+	return cmd.Annotations[jsonSupportedAnnotation] == "true"
 }
 
 func wrapRunECommands(cmd *cobra.Command) {

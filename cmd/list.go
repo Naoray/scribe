@@ -31,7 +31,7 @@ Examples:
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().Bool("remote", false, "Show available skills from registries (not installed)")
 	cmd.Flags().String("registry", "", "Show only this registry (owner/repo or repo name)")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runList(cmd *cobra.Command, args []string) error {
