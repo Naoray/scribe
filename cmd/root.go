@@ -115,6 +115,34 @@ func newRootCmd() *cobra.Command {
 
 			factory := commandFactory()
 			if commandReadOnly(c) {
+				stateFileExists, err := state.FileExists()
+				if err != nil {
+					return err
+				}
+				if !stateFileExists {
+					return nil
+				}
+			}
+			st, err := factory.State()
+			if err != nil {
+				return err
+			}
+			migrationResult, err := state.MigrateEmbeddedSkillRename(st)
+			if err != nil {
+				return err
+			}
+			if migrationResult.Conflict {
+				fmt.Fprintf(c.ErrOrStderr(), "scribe: embedded skill rename warning: both %q and %q exist in state; leaving both unchanged\n", state.OldEmbeddedSkillName, state.EmbeddedSkillName)
+			}
+			for _, warning := range migrationResult.Warnings {
+				fmt.Fprintf(c.ErrOrStderr(), "scribe: embedded skill rename warning: %s\n", warning)
+			}
+			if migrationResult.Changed {
+				if err := st.Save(); err != nil {
+					return err
+				}
+			}
+			if commandReadOnly(c) {
 				return nil
 			}
 			if err := runStoreMigration(factory); err != nil {
@@ -124,10 +152,6 @@ func newRootCmd() *cobra.Command {
 			isFirstRun := firstrun.IsFirstRun()
 
 			cfg, err := factory.Config()
-			if err != nil {
-				return err
-			}
-			st, err := factory.State()
 			if err != nil {
 				return err
 			}

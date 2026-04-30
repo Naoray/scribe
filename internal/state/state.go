@@ -725,6 +725,20 @@ func statePath() (string, error) {
 	return paths.StatePath()
 }
 
+func FileExists() (bool, error) {
+	path, err := statePath()
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true, nil
+	} else if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else {
+		return false, err
+	}
+}
+
 func normalizeBranchSourceSHAs(s *State) {
 	storeDir, err := paths.StoreDir()
 	if err != nil {
