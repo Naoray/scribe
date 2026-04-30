@@ -31,14 +31,17 @@ func runSync(cmd *cobra.Command, args []string) error {
 		JSONFlag:         jsonFlag,
 		RepoFlag:         repoFlag,
 		TrustAllFlag:     trustAllFlag,
-		Factory:          newCommandFactory(),
+		Factory:          commandFactory(),
 		FilterRegistries: filterRegistries,
 	}
 	if err := workflow.Run(cmd.Context(), workflow.SyncSteps(), bag); err != nil {
 		return err
 	}
 	if bag.Partial {
-		return clierrors.Wrap(clierrors.ErrPartialSuccess, "SYNC_PARTIAL", clierrors.ExitPartial)
+		if err := saveWorkflowState(bag); err != nil {
+			return err
+		}
+		return clierrors.Wrap(clierrors.ErrPartialSuccess, "SYNC_PARTIAL", clierrors.ExitPartial, clierrors.WithRendered(true))
 	}
 	return saveWorkflowState(bag)
 }

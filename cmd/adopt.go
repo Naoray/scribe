@@ -53,7 +53,7 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 
-	factory := newCommandFactory()
+	factory := commandFactory()
 
 	cfg, err := factory.Config()
 	if err != nil {
@@ -160,6 +160,7 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 			fmt.Errorf("adoption completed with %d failure(s)", len(result.Failed)),
 			"ADOPT_PARTIAL",
 			clierrors.ExitPartial,
+			clierrors.WithRendered(true),
 		)
 	}
 

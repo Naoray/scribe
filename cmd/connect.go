@@ -45,7 +45,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		RepoArg:        repo,
 		JSONFlag:       jsonFlag,
 		InstallAllFlag: installAll,
-		Factory:        newCommandFactory(),
+		Factory:        commandFactory(),
 	}
 	steps := workflow.ConnectSteps()
 	if installAll {
@@ -53,6 +53,12 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 	if err := workflow.Run(cmd.Context(), steps, bag); err != nil {
 		return err
+	}
+	if bag.Partial {
+		if err := saveWorkflowState(bag); err != nil {
+			return err
+		}
+		return clierrors.Wrap(clierrors.ErrPartialSuccess, "CONNECT_PARTIAL", clierrors.ExitPartial, clierrors.WithRendered(true))
 	}
 	return saveWorkflowState(bag)
 }
