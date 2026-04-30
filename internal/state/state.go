@@ -17,15 +17,38 @@ import (
 
 // State is the contents of ~/.scribe/state.json.
 type State struct {
-	SchemaVersion int                       `json:"schema_version"`
-	LastSync      time.Time                 `json:"last_sync,omitempty"`
-	Installed     map[string]InstalledSkill `json:"installed"`
+	SchemaVersion int                         `json:"schema_version"`
+	LastSync      time.Time                   `json:"last_sync,omitempty"`
+	Installed     map[string]InstalledSkill   `json:"installed"`
+	Kits          map[string]InstalledKit     `json:"kits"`
+	Snippets      map[string]InstalledSnippet `json:"snippets"`
 	// Schema v5 is shared with the kits/snippets pivot; its projection, kit,
 	// and snippet indexes are additive siblings of this deny-list.
 	RemovedByUser      []RemovedSkill               `json:"removed_by_user"`
 	Migrations         map[string]bool              `json:"migrations,omitempty"`
 	RegistryFailures   map[string]RegistryFailure   `json:"registry_failures,omitempty"`
 	BinaryUpdateChecks map[string]BinaryUpdateCheck `json:"binary_update_checks,omitempty"`
+}
+
+// ProjectionEntry records the set of tool projections currently linked for a
+// project. An empty Project is the legacy global projection.
+type ProjectionEntry struct {
+	Project string   `json:"project"`
+	Tools   []string `json:"tools"`
+}
+
+// InstalledKit indexes an installed kit definition in the local state file.
+type InstalledKit struct {
+	Source  string   `json:"source,omitempty"`
+	Version string   `json:"version,omitempty"`
+	Skills  []string `json:"skills,omitempty"`
+}
+
+// InstalledSnippet indexes an installed snippet definition in the local state file.
+type InstalledSnippet struct {
+	Source  string   `json:"source,omitempty"`
+	Version string   `json:"version,omitempty"`
+	Targets []string `json:"targets,omitempty"`
 }
 
 // RemovedSkill records a user's intent not to reinstall a registry skill.
@@ -90,16 +113,21 @@ const (
 
 // InstalledSkill records everything needed to detect updates and uninstall.
 type InstalledSkill struct {
-	Revision      int                  `json:"revision"`
-	InstalledHash string               `json:"installed_hash"`
-	Sources       []SkillSource        `json:"sources,omitempty"`
-	InstalledAt   time.Time            `json:"installed_at"`
-	Tools         []string             `json:"tools"`
-	ToolsMode     ToolsMode            `json:"tools_mode,omitempty"`
-	Paths         []string             `json:"paths"`
-	ManagedPaths  []string             `json:"managed_paths,omitempty"`
-	Conflicts     []ProjectionConflict `json:"projection_conflicts,omitempty"`
-	Origin        Origin               `json:"origin,omitempty"`
+	Revision      int           `json:"revision"`
+	InstalledHash string        `json:"installed_hash"`
+	Sources       []SkillSource `json:"sources,omitempty"`
+	InstalledAt   time.Time     `json:"installed_at"`
+	// Deprecated in schema v5: projections replace the single global tools set.
+	// Kept through v5 for parsing and compatibility with existing commands.
+	Tools     []string  `json:"tools"`
+	ToolsMode ToolsMode `json:"tools_mode,omitempty"`
+	// Deprecated in schema v5: managed paths are superseded by projections.
+	// Kept through v5 for parsing and compatibility with existing commands.
+	Paths        []string             `json:"paths"`
+	Projections  []ProjectionEntry    `json:"projections,omitempty"`
+	ManagedPaths []string             `json:"managed_paths,omitempty"`
+	Conflicts    []ProjectionConflict `json:"projection_conflicts,omitempty"`
+	Origin       Origin               `json:"origin,omitempty"`
 
 	// Kind distinguishes auto-detected tree packages (files under
 	// ~/.scribe/packages/<name>/) from regular skills. Missing value on
@@ -146,6 +174,8 @@ type legacyState struct {
 	Team               *legacyTeamState             `json:"team,omitempty"`
 	LastSync           *time.Time                   `json:"last_sync,omitempty"`
 	Installed          map[string]json.RawMessage   `json:"installed"`
+	Kits               map[string]InstalledKit      `json:"kits,omitempty"`
+	Snippets           map[string]InstalledSnippet  `json:"snippets,omitempty"`
 	RemovedByUser      []RemovedSkill               `json:"removed_by_user,omitempty"`
 	BinaryUpdateChecks map[string]BinaryUpdateCheck `json:"binary_update_checks,omitempty"`
 }
@@ -171,12 +201,13 @@ type legacyInstalledSkill struct {
 	ApprovedAt  time.Time `json:"approved_at,omitempty"`
 
 	// New v2 fields that may already exist in state (if re-loaded after partial migration)
-	Revision      int           `json:"revision,omitempty"`
-	InstalledHash string        `json:"installed_hash,omitempty"`
-	Sources       []SkillSource `json:"sources,omitempty"`
-	Origin        Origin        `json:"origin,omitempty"`
-	ToolsMode     ToolsMode     `json:"tools_mode,omitempty"`
-	Kind          Kind          `json:"kind,omitempty"`
+	Revision      int               `json:"revision,omitempty"`
+	InstalledHash string            `json:"installed_hash,omitempty"`
+	Sources       []SkillSource     `json:"sources,omitempty"`
+	Origin        Origin            `json:"origin,omitempty"`
+	ToolsMode     ToolsMode         `json:"tools_mode,omitempty"`
+	Kind          Kind              `json:"kind,omitempty"`
+	Projections   []ProjectionEntry `json:"projections,omitempty"`
 }
 
 // DisplayVersion returns the version string shown in `scribe list`.
@@ -223,15 +254,28 @@ func Load() (*State, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &State{SchemaVersion: 5, Installed: make(map[string]InstalledSkill), RemovedByUser: []RemovedSkill{}, Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}, BinaryUpdateChecks: map[string]BinaryUpdateCheck{}}, nil
+		return emptyState(), nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return &State{SchemaVersion: 5, Installed: make(map[string]InstalledSkill), RemovedByUser: []RemovedSkill{}, Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}, BinaryUpdateChecks: map[string]BinaryUpdateCheck{}}, nil
+		return emptyState(), nil
 	}
 	return parseAndMigrate(data)
+}
+
+func emptyState() *State {
+	return &State{
+		SchemaVersion:      5,
+		Installed:          make(map[string]InstalledSkill),
+		Kits:               map[string]InstalledKit{},
+		Snippets:           map[string]InstalledSnippet{},
+		RemovedByUser:      []RemovedSkill{},
+		Migrations:         map[string]bool{},
+		RegistryFailures:   map[string]RegistryFailure{},
+		BinaryUpdateChecks: map[string]BinaryUpdateCheck{},
+	}
 }
 
 // parseAndMigrate handles migrations:
@@ -252,10 +296,18 @@ func parseAndMigrate(data []byte) (*State, error) {
 	s := &State{
 		SchemaVersion:      legacy.SchemaVersion,
 		Installed:          make(map[string]InstalledSkill, len(legacy.Installed)),
+		Kits:               map[string]InstalledKit{},
+		Snippets:           map[string]InstalledSnippet{},
 		RemovedByUser:      append([]RemovedSkill(nil), legacy.RemovedByUser...),
 		Migrations:         map[string]bool{},
 		RegistryFailures:   map[string]RegistryFailure{},
 		BinaryUpdateChecks: map[string]BinaryUpdateCheck{},
+	}
+	if len(legacy.Kits) > 0 {
+		s.Kits = legacy.Kits
+	}
+	if len(legacy.Snippets) > 0 {
+		s.Snippets = legacy.Snippets
 	}
 	if len(legacy.BinaryUpdateChecks) > 0 {
 		s.BinaryUpdateChecks = legacy.BinaryUpdateChecks
@@ -626,6 +678,7 @@ func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
 		Tools:         ls.Tools,
 		ToolsMode:     ls.ToolsMode,
 		Paths:         ls.Paths,
+		Projections:   append([]ProjectionEntry(nil), ls.Projections...),
 		ManagedPaths:  append([]string(nil), ls.Paths...),
 		Origin:        ls.Origin,
 		Kind:          kind,
