@@ -19,6 +19,10 @@ type projectSelector interface {
 
 type huhProjectSelector struct{}
 
+var globalToProjectsIsTerminal = func() bool {
+	return isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
+}
+
 func newGlobalToProjectsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "global-to-projects",
@@ -73,8 +77,7 @@ func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector pr
 	}
 
 	selected := projectFlags
-	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
-	if len(selected) == 0 && !jsonFlag && isTTY {
+	if len(selected) == 0 && !jsonFlag && globalToProjectsIsTerminal() {
 		selected, err = selector.SelectProjects(discovery.Projects)
 		if err != nil {
 			return err
