@@ -19,6 +19,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	clienv "github.com/Naoray/scribe/internal/cli/env"
 	"github.com/Naoray/scribe/internal/discovery"
 )
 
@@ -47,13 +48,12 @@ Falls back to rendering the SKILL.md directly if no LLM is available.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runExplain,
 	}
-	cmd.Flags().Bool("json", false, "Output structured JSON (for agents/scripts)")
 	cmd.Flags().Bool("raw", false, "Show rendered SKILL.md directly, skip AI explanation")
 	return markJSONSupported(cmd)
 }
 
 func runExplain(cmd *cobra.Command, args []string) error {
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 	rawFlag, _ := cmd.Flags().GetBool("raw")
 	if jsonFlag && rawFlag {
 		return fmt.Errorf("if any flags in the group [json raw] are set none of the others can be; [json raw] were all set")
@@ -84,14 +84,18 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	isTTY := isatty.IsTerminal(os.Stdout.Fd())
+	mode := clienv.Detect(os.Stdout, os.Stdin, jsonFlag)
 	w := cmd.OutOrStdout()
 
-	if jsonFlag {
-		return explainJSON(w, skill, content)
+	if mode.Format == clienv.FormatJSON {
+		r := jsonRendererForCommand(cmd, jsonFlag)
+		if err := r.Result(buildExplainOutput(skill, content)); err != nil {
+			return err
+		}
+		return r.Flush()
 	}
 
-	if !isTTY {
+	if mode.Format != clienv.FormatText {
 		return renderSkillBody(w, content)
 	}
 
@@ -180,14 +184,22 @@ func stripFrontmatter(s string) string {
 }
 
 func explainJSON(w io.Writer, skill discovery.Skill, content string) error {
-	out := struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description,omitempty"`
-		Revision    int      `json:"revision,omitempty"`
-		Targets     []string `json:"targets,omitempty"`
-		Path        string   `json:"path,omitempty"`
-		Content     string   `json:"content"`
-	}{
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(buildExplainOutput(skill, content))
+}
+
+type explainOutput struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Revision    int      `json:"revision,omitempty"`
+	Targets     []string `json:"targets,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Content     string   `json:"content"`
+}
+
+func buildExplainOutput(skill discovery.Skill, content string) explainOutput {
+	return explainOutput{
 		Name:        skill.Name,
 		Description: skill.Description,
 		Revision:    skill.Revision,
@@ -195,9 +207,6 @@ func explainJSON(w io.Writer, skill discovery.Skill, content string) error {
 		Path:        skill.LocalPath,
 		Content:     content,
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
 }
 
 func printSkillHeader(w io.Writer, skill discovery.Skill) {
