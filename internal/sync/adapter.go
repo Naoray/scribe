@@ -15,6 +15,9 @@ type TreeEntry = provider.TreeEntry
 // WrapGitHubClient returns a GitHubFetcher backed by a real gh.Client.
 // Delegates to provider.WrapGitHubClient — provider.GitHubClient is a superset of GitHubFetcher.
 func WrapGitHubClient(c *gh.Client) GitHubFetcher {
+	if c == nil {
+		return &NoopFetcher{}
+	}
 	return provider.WrapGitHubClient(c)
 }
 

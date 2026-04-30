@@ -11,6 +11,8 @@ import (
 	"time"
 
 	ibudget "github.com/Naoray/scribe/internal/budget"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/provider"
@@ -77,6 +79,25 @@ type Syncer struct {
 	// NameConflictResolver is called when a real directory already exists at
 	// the incoming skill name. Nil means non-interactive conflict.
 	NameConflictResolver func(NameConflict) (NameConflictResolution, error)
+}
+
+type LockRefusal struct {
+	Name         string `json:"name"`
+	ExpectedHash string `json:"expected_hash"`
+	ActualHash   string `json:"actual_hash"`
+	Reason       string `json:"reason"`
+}
+
+type LockMismatchError struct {
+	Registry string        `json:"registry"`
+	Refused  []LockRefusal `json:"refused"`
+}
+
+func (e *LockMismatchError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s: local skill content diverges from %s", e.Registry, lockfile.Filename)
 }
 
 // ModifiedStrategy controls how sync treats outdated skills with local edits.
@@ -256,6 +277,10 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	if err != nil {
 		return fmt.Errorf("sync %s: %w", teamRepo, err)
 	}
+	lf, err := s.FetchLockfile(ctx, teamRepo)
+	if err != nil {
+		return err
+	}
 	if len(s.SkillFilter) > 0 {
 		allowed := make(map[string]bool, len(s.SkillFilter))
 		for _, n := range s.SkillFilter {
@@ -269,7 +294,100 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 		}
 		statuses = filtered
 	}
+	if lf != nil {
+		if err := s.validateInstalledAgainstLock(teamRepo, statuses, lf); err != nil {
+			return err
+		}
+		applyLockPins(statuses, lf)
+	}
 	return s.apply(ctx, teamRepo, statuses, st)
+}
+
+func (s *Syncer) FetchLockfile(ctx context.Context, teamRepo string) (*lockfile.Lockfile, error) {
+	if s.Client == nil {
+		return nil, nil
+	}
+	if _, ok := s.Client.(*NoopFetcher); ok {
+		return nil, nil
+	}
+	owner, repo, err := manifest.ParseOwnerRepo(teamRepo)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := s.Client.FetchFile(ctx, owner, repo, lockfile.Filename, "HEAD")
+	if err != nil {
+		// Existing registries may not have adopted scribe.lock yet. The update
+		// command creates it; sync enforces it whenever present.
+		if clierrors.ExitCode(err) == clierrors.ExitNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	lf, err := lockfile.Parse(raw)
+	if err != nil {
+		return nil, clierrors.Wrap(err, "LOCKFILE_INVALID", clierrors.ExitValid,
+			clierrors.WithMessage(fmt.Sprintf("invalid %s for %s: %v", lockfile.Filename, teamRepo, err)),
+			clierrors.WithResource(teamRepo),
+		)
+	}
+	if lf.Registry != teamRepo {
+		return nil, clierrors.Wrap(fmt.Errorf("registry is %q", lf.Registry), "LOCKFILE_INVALID", clierrors.ExitValid,
+			clierrors.WithMessage(fmt.Sprintf("invalid %s for %s: registry is %q", lockfile.Filename, teamRepo, lf.Registry)),
+			clierrors.WithResource(teamRepo),
+		)
+	}
+	return lf, nil
+}
+
+func (s *Syncer) validateInstalledAgainstLock(teamRepo string, statuses []SkillStatus, lf *lockfile.Lockfile) error {
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		return err
+	}
+	var refused []LockRefusal
+	for _, sk := range statuses {
+		pin, ok := lf.Entry(sk.Name)
+		if !ok || sk.IsPackage || sk.Installed == nil || sk.Status == StatusMissing || sk.Status == StatusExtra {
+			continue
+		}
+		hash, err := lockfile.HashDir(filepath.Join(storeDir, sk.Name))
+		if err != nil {
+			refused = append(refused, LockRefusal{Name: sk.Name, ExpectedHash: pin.ContentHash, Reason: err.Error()})
+			continue
+		}
+		if hash != pin.ContentHash {
+			refused = append(refused, LockRefusal{
+				Name:         sk.Name,
+				ExpectedHash: pin.ContentHash,
+				ActualHash:   hash,
+				Reason:       "local content hash differs from lockfile pin",
+			})
+		}
+	}
+	if len(refused) > 0 {
+		return &LockMismatchError{Registry: teamRepo, Refused: refused}
+	}
+	return nil
+}
+
+func applyLockPins(statuses []SkillStatus, lf *lockfile.Lockfile) {
+	for i := range statuses {
+		pin, ok := lf.Entry(statuses[i].Name)
+		if !ok || statuses[i].Entry == nil {
+			continue
+		}
+		entry := *statuses[i].Entry
+		statuses[i].LockEntry = &pin
+		if src, err := manifest.ParseSource(entry.Source); err == nil && pin.RegistryCommitSHA != "" {
+			src.Ref = pin.RegistryCommitSHA
+			entry.Source = src.String()
+			statuses[i].LatestSHA = pin.RegistryCommitSHA
+			statuses[i].Entry = &entry
+		}
+	}
 }
 
 func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillStatus, st *state.State) error {
@@ -354,8 +472,14 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			// only when the manifest already declared a command-only
 			// package (handled above via sk.IsPackage).
 			if DetectKind(tFiles) == KindPackage {
+				if err := validateFetchedLockHash(sk, tFiles); err != nil {
+					return err
+				}
 				s.applyTreePackage(ctx, sk, teamRepo, tFiles, st, &summary)
 				continue
+			}
+			if err := validateFetchedLockHash(sk, tFiles); err != nil {
+				return err
 			}
 
 			// Check for local modifications before writing.
@@ -586,6 +710,32 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 	s.emit(summary)
 	return nil
+}
+
+func validateFetchedLockHash(sk SkillStatus, files []tools.SkillFile) error {
+	if sk.LockEntry == nil {
+		return nil
+	}
+	hashFiles := make([]lockfile.File, 0, len(files))
+	for _, file := range files {
+		hashFiles = append(hashFiles, lockfile.File{Path: file.Path, Content: file.Content})
+	}
+	hash, err := lockfile.HashFiles(hashFiles)
+	if err != nil {
+		return err
+	}
+	if hash == sk.LockEntry.ContentHash {
+		return nil
+	}
+	return &LockMismatchError{
+		Registry: sk.LockEntry.SourceRegistry,
+		Refused: []LockRefusal{{
+			Name:         sk.Name,
+			ExpectedHash: sk.LockEntry.ContentHash,
+			ActualHash:   hash,
+			Reason:       "downloaded content hash differs from lockfile pin",
+		}},
+	}
 }
 
 func (s *Syncer) emit(msg any) {

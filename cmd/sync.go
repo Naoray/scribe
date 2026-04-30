@@ -1,9 +1,14 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/spf13/cobra"
 
+	"github.com/Naoray/scribe/internal/cli/envelope"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	isync "github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
@@ -46,6 +51,21 @@ func runSync(cmd *cobra.Command, args []string) error {
 		FilterRegistries: filterRegistries,
 	}
 	if err := workflow.Run(cmd.Context(), workflow.SyncSteps(), bag); err != nil {
+		var lockErr *isync.LockMismatchError
+		if errors.As(err, &lockErr) {
+			if jsonFlag {
+				_ = renderMutatorEnvelope(cmd, map[string]any{
+					"refused":  lockErr.Refused,
+					"registry": lockErr.Registry,
+				}, envelope.StatusError)
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "refused by scribe.lock for %s\n", lockErr.Registry)
+				for _, item := range lockErr.Refused {
+					fmt.Fprintf(cmd.ErrOrStderr(), "- %s: %s\n", item.Name, item.Reason)
+				}
+			}
+			return clierrors.Wrap(err, "LOCKFILE_MISMATCH", clierrors.ExitConflict, clierrors.WithRendered(jsonFlag))
+		}
 		return handleNameConflictError(cmd, err)
 	}
 	if bag.Partial {
