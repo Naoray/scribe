@@ -20,6 +20,7 @@ import (
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/cli/output"
 	"github.com/Naoray/scribe/internal/firstrun"
+	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/storemigrate"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -54,6 +55,8 @@ var commandFactory = newCommandFactory
 var rootCmd = newRootCmd()
 
 const jsonSupportedAnnotation = "json_supported"
+
+type legacyGlobalProjectionCompatKey struct{}
 
 func Execute() {
 	err := rootCmd.Execute()
@@ -120,6 +123,15 @@ func newRootCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
+			compat, err := state.DetectLegacyGlobalProjectionCompat(st, wd)
+			if err != nil {
+				return err
+			}
+			c.SetContext(context.WithValue(c.Context(), legacyGlobalProjectionCompatKey{}, compat))
 
 			added, builtinsFirstRun := firstrun.ApplyBuiltins(cfg)
 			removed, removedRan := firstrun.ApplyBuiltinsRemove(cfg, st, []string{"openai/codex-skills"})
