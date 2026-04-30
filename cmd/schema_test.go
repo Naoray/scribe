@@ -24,8 +24,8 @@ func TestSchemaCommandListInputsOnly(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v\n%s", err, out.String())
 	}
-	if got.OutputSchema != nil {
-		t.Fatalf("output_schema = %s, want null", string(*got.OutputSchema))
+	if got.OutputSchema == nil {
+		t.Fatalf("output_schema = nil, want list schema")
 	}
 	var input map[string]any
 	if err := json.Unmarshal(got.InputSchema, &input); err != nil {

@@ -6,9 +6,9 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	clienv "github.com/Naoray/scribe/internal/cli/env"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
@@ -28,14 +28,13 @@ Examples:
   scribe list --json         # machine-readable output`,
 		RunE: runList,
 	}
-	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().Bool("remote", false, "Show available skills from registries (not installed)")
 	cmd.Flags().String("registry", "", "Show only this registry (owner/repo or repo name)")
+	attachListFields(cmd)
 	return markJSONSupported(cmd)
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	jsonFlag, _ := cmd.Flags().GetBool("json")
 	remoteFlag, _ := cmd.Flags().GetBool("remote")
 	repoFlag, _ := cmd.Flags().GetString("registry")
 
@@ -44,7 +43,9 @@ func runList(cmd *cobra.Command, args []string) error {
 		remoteFlag = true
 	}
 
-	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
+	jsonFlag := jsonFlagPassed(cmd)
+	mode := clienv.Detect(os.Stdout, os.Stdin, jsonFlag)
+	useJSON := mode.Format == clienv.FormatJSON
 
 	bag := &workflow.Bag{
 		Args:             args,
@@ -57,7 +58,25 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if useJSON {
-		if err := workflow.Run(cmd.Context(), workflow.ListJSONSteps(), bag); err != nil {
+		if err := workflow.Run(cmd.Context(), workflow.ListJSONSteps()[:2], bag); err != nil {
+			return err
+		}
+		out, stateDirty, err := workflow.BuildListJSONData(cmd.Context(), bag)
+		if stateDirty {
+			bag.MarkStateDirty()
+		}
+		if err != nil {
+			return err
+		}
+		projected, err := projectListOutput(cmd, out)
+		if err != nil {
+			return err
+		}
+		r := jsonRendererForCommand(cmd, jsonFlag)
+		if err := r.Result(projected); err != nil {
+			return err
+		}
+		if err := r.Flush(); err != nil {
 			return err
 		}
 		return saveWorkflowState(bag)
