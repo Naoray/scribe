@@ -56,6 +56,27 @@ skills:
 
 Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits union; the project may add or remove individual skills on top with `add:` / `remove:`.
 
+### Authoring kits and snippets (today)
+
+A user-facing `scribe kit` / `scribe snippet` CLI is on the v1.1 roadmap. Until it ships, the embedded scribe skill (installed automatically the first time you run scribe in a Claude Code, Codex, or Cursor session) knows how to scaffold kits and snippets directly. **Ask your AI agent.**
+
+Examples:
+
+```text
+You: Create a kit called web-baseline with tdd, code-review, and commit-message.
+Agent: <writes ~/.scribe/kits/web-baseline.yaml, runs `scribe sync`>
+
+You: Add a snippet that enforces commit discipline, target Claude and Codex.
+Agent: <writes ~/.scribe/snippets/commit-discipline.md, lists targets in frontmatter>
+
+You: Wire web-baseline into this project.
+Agent: <edits .scribe.yaml in the repo root, runs `scribe sync`>
+```
+
+The agent uses the schema documented above (kit YAML) and the snippet schema below (markdown frontmatter), then runs `scribe sync` to apply changes. No separate CLI is required — the storage format and resolver are stable contracts as of v1.0.
+
+If you want to author by hand, the YAML files at `~/.scribe/kits/<name>.yaml` and `~/.scribe/snippets/<name>.md` are the source of truth — `scribe sync` picks them up on every run.
+
 Kits are **not** personas. The forward path for role specialization (adversarial review, security/a11y experts, context isolation) is subagent routing metadata inside kits — not a separate primitive. That metadata is not in the v1 surface.
 
 ### Codex budget guardrail
