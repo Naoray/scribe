@@ -27,6 +27,10 @@ func TestForgetRegistryRemovesConfigAndFailureState(t *testing.T) {
 		t.Fatalf("state.Load(): %v", err)
 	}
 	st.RecordRegistryFailure("acme/skills", nil, 3)
+	st.RemovedByUser = []state.RemovedSkill{
+		{Name: "recap", Registry: "acme/skills"},
+		{Name: "recap", Registry: "other/skills"},
+	}
 	if err := st.Save(); err != nil {
 		t.Fatalf("st.Save(): %v", err)
 	}
@@ -49,6 +53,12 @@ func TestForgetRegistryRemovesConfigAndFailureState(t *testing.T) {
 	}
 	if got := loadedState.RegistryFailure("acme/skills"); got.Consecutive != 0 {
 		t.Fatalf("registry failure not cleared: %+v", got)
+	}
+	if loadedState.IsRemovedByUser("acme/skills", "recap") {
+		t.Fatal("acme/skills deny-list entries should be cleared")
+	}
+	if !loadedState.IsRemovedByUser("other/skills", "recap") {
+		t.Fatal("other/skills deny-list entry should remain")
 	}
 }
 
