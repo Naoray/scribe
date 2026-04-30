@@ -27,6 +27,7 @@ type Error struct {
 	Remediation string `json:"remediation,omitempty"`
 	Resource    string `json:"resource,omitempty"`
 	Exit        int    `json:"exit_code,omitempty"`
+	Rendered    bool   `json:"-"`
 	err         error
 }
 
@@ -73,6 +74,12 @@ func WithRemediation(remediation string) Option {
 func WithResource(resource string) Option {
 	return func(e *Error) {
 		e.Resource = resource
+	}
+}
+
+func WithRendered(rendered bool) Option {
+	return func(e *Error) {
+		e.Rendered = rendered
 	}
 }
 

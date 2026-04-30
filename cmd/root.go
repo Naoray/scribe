@@ -49,6 +49,8 @@ func newCommandFactory() *app.Factory {
 	return app.NewFactory()
 }
 
+var commandFactory = newCommandFactory
+
 var rootCmd = newRootCmd()
 
 const jsonSupportedAnnotation = "json_supported"
@@ -61,7 +63,9 @@ func Execute() {
 		err = classifyExecuteError(err)
 		var ce *clierrors.Error
 		if stderrors.As(err, &ce) {
-			_ = r.Error(ce)
+			if !ce.Rendered {
+				_ = r.Error(ce)
+			}
 			if ce.Exit == clierrors.ExitOK {
 				ce.Exit = clierrors.ExitGeneral
 			}
@@ -101,7 +105,7 @@ func newRootCmd() *cobra.Command {
 				return nil
 			}
 
-			factory := newCommandFactory()
+			factory := commandFactory()
 			if err := runStoreMigration(factory); err != nil {
 				return err
 			}
