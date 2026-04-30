@@ -34,28 +34,33 @@ type snippetFrontmatter struct {
 }
 
 func (fm *snippetFrontmatter) UnmarshalYAML(value *yaml.Node) error {
-	type plain snippetFrontmatter
-	var raw struct {
-		plain   `yaml:",inline"`
-		Targets yaml.Node `yaml:"targets"`
+	type noTargets struct {
+		Name        string  `yaml:"name"`
+		Description string  `yaml:"description,omitempty"`
+		Source      *Source `yaml:"source,omitempty"`
 	}
+	var raw noTargets
 	if err := value.Decode(&raw); err != nil {
 		return err
 	}
 
-	*fm = snippetFrontmatter(raw.plain)
-	if raw.Targets.Kind == 0 {
+	fm.Name = raw.Name
+	fm.Description = raw.Description
+	fm.Source = raw.Source
+
+	targetsNode := mappingValue(value, "targets")
+	if targetsNode == nil {
 		return nil
 	}
-	switch raw.Targets.Kind {
+	switch targetsNode.Kind {
 	case yaml.ScalarNode:
-		if raw.Targets.Value != "all" {
+		if targetsNode.Value != "all" {
 			return fmt.Errorf("targets scalar must be %q", "all")
 		}
 		fm.Targets = []string{"all"}
 	case yaml.SequenceNode:
-		targets := make([]string, 0, len(raw.Targets.Content))
-		for _, item := range raw.Targets.Content {
+		targets := make([]string, 0, len(targetsNode.Content))
+		for _, item := range targetsNode.Content {
 			if item.Kind != yaml.ScalarNode {
 				return errors.New("targets entries must be strings")
 			}
@@ -64,6 +69,18 @@ func (fm *snippetFrontmatter) UnmarshalYAML(value *yaml.Node) error {
 		fm.Targets = targets
 	default:
 		return errors.New("targets must be a list or all")
+	}
+	return nil
+}
+
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
 	}
 	return nil
 }
