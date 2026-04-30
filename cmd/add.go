@@ -25,6 +25,7 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 // skillRefPattern matches "owner/repo:skillname" — direct install reference.
@@ -36,6 +37,11 @@ type installResult struct {
 	Registry string `json:"registry"`
 	Status   string `json:"status"`
 	Error    string `json:"error,omitempty"`
+}
+
+type installRunResults struct {
+	Installed  []installResult
+	Resolution *nameConflictResolutionPayload
 }
 
 // browseEntry pairs a SkillStatus with the registry it came from.
@@ -68,6 +74,7 @@ Examples:
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
 	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
+	cmd.Flags().String("alias", "", "Install incoming skill under this name when a local directory conflicts")
 	return markJSONSupported(cmd)
 }
 
@@ -76,9 +83,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	jsonFlag := jsonFlagPassed(cmd)
 	registryFilter, _ := cmd.Flags().GetString("registry")
 	forceBudget, _ := cmd.Flags().GetBool("force")
+	aliasName, _ := cmd.Flags().GetString("alias")
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
-	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
+	conflictMode := workflow.ConflictModeForProcess(jsonFlag)
+	useJSON := workflow.UseJSONOutputForProcess(jsonFlag)
 	factory := newCommandFactory()
 
 	cfg, err := factory.Config()
@@ -118,7 +127,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
 			)
 		}
-		return runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets, forceBudget), true, useJSON, skipConfirm)
+		syncer := newInstallSyncerWithOptions(client, targets, forceBudget, aliasName)
+		configureInstallNameConflictResolver(syncer, conflictMode, aliasName)
+		if err := runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, syncer, true, useJSON, skipConfirm); err != nil {
+			return handleNameConflictError(cmd, err)
+		}
+		return nil
 	}
 
 	// Need at least one connected registry to search/browse.
@@ -190,7 +204,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget)
+	if err := installSelected(ctx, selected, cfg, st, client, targets, skipConfirm, forceBudget, aliasName, conflictMode); err != nil {
+		return handleNameConflictError(cmd, err)
+	}
+	return nil
 }
 
 // parseSkillRef parses "owner/repo:skillname" into its parts.
@@ -280,7 +297,7 @@ func runAddDirectInstallForCommand(
 		if useJSON {
 			return emitInstallJSON([]installResult{{
 				Name: target.Name, Registry: registryRepo, Status: "already-installed",
-			}}, cmd)
+			}}, nil, cmd)
 		}
 		fmt.Printf("%s is already installed (current).\n", skillName)
 		return nil
@@ -307,7 +324,7 @@ func runAddDirectInstallForCommand(
 	}
 
 	if useJSON {
-		return emitInstallJSON(*results, cmd)
+		return emitInstallJSON(results.Installed, results.Resolution, cmd)
 	}
 	return nil
 }
@@ -323,6 +340,8 @@ func installSelected(
 	targets []tools.Tool,
 	skipConfirm bool,
 	forceBudget bool,
+	aliasName string,
+	conflictMode workflow.ConflictMode,
 ) error {
 	// Group by registry.
 	byRegistry := map[string][]sync.SkillStatus{}
@@ -356,7 +375,8 @@ func installSelected(
 		}
 	}
 
-	syncer := newInstallSyncer(client, targets, forceBudget)
+	syncer := newInstallSyncerWithOptions(client, targets, forceBudget, aliasName)
+	configureInstallNameConflictResolver(syncer, conflictMode, aliasName)
 
 	var installErr error
 	for _, registryRepo := range order {
@@ -398,6 +418,10 @@ func newInstallSyncer(client *gh.Client, targets []tools.Tool, forceBudgetOpt ..
 	if len(forceBudgetOpt) > 0 {
 		forceBudget = forceBudgetOpt[0]
 	}
+	return newInstallSyncerWithOptions(client, targets, forceBudget, "")
+}
+
+func newInstallSyncerWithOptions(client *gh.Client, targets []tools.Tool, forceBudget bool, aliasName string) *sync.Syncer {
 	return &sync.Syncer{
 		Client:      sync.WrapGitHubClient(client),
 		Provider:    provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
@@ -405,6 +429,13 @@ func newInstallSyncer(client *gh.Client, targets []tools.Tool, forceBudgetOpt ..
 		Executor:    &sync.ShellExecutor{},
 		ProjectRoot: resolveCurrentProjectRoot(),
 		ForceBudget: forceBudget,
+		AliasName:   aliasName,
+	}
+}
+
+func configureInstallNameConflictResolver(syncer *sync.Syncer, conflictMode workflow.ConflictMode, aliasName string) {
+	if syncer != nil && conflictMode == workflow.ConflictModeInteractive && aliasName == "" {
+		syncer.NameConflictResolver = workflow.PromptNameConflictResolution
 	}
 }
 
@@ -422,8 +453,8 @@ func resolveCurrentProjectRoot() string {
 
 // wireInstallSyncer attaches an Emit callback that prints progress (or
 // collects results for JSON output) and returns the result slice pointer.
-func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *[]installResult {
-	results := &[]installResult{}
+func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *installRunResults {
+	results := &installRunResults{}
 	syncer.Emit = func(msg any) {
 		switch m := msg.(type) {
 		case sync.SkillInstalledMsg:
@@ -432,7 +463,7 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 				if m.Updated {
 					status = "updated"
 				}
-				*results = append(*results, installResult{
+				results.Installed = append(results.Installed, installResult{
 					Name: m.Name, Registry: registryRepo, Status: status,
 				})
 			} else {
@@ -444,7 +475,7 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 			}
 		case sync.SkillErrorMsg:
 			if useJSON {
-				*results = append(*results, installResult{
+				results.Installed = append(results.Installed, installResult{
 					Name: m.Name, Registry: registryRepo, Status: "error", Error: m.Err.Error(),
 				})
 			} else {
@@ -454,6 +485,9 @@ func wireInstallSyncer(syncer *sync.Syncer, registryRepo string, useJSON bool) *
 			if !useJSON {
 				fmt.Fprintf(os.Stderr, "warning: %s\n", m.Message)
 			}
+		case sync.NameConflictResolvedMsg:
+			payload := conflictResolutionPayload(m.Conflict, m.Resolution)
+			results.Resolution = &payload
 		}
 	}
 	return results
@@ -558,8 +592,11 @@ func emitBrowseJSONForCommand(cmd *cobra.Command, entries []browseEntry) error {
 }
 
 // emitInstallJSON emits per-skill install results as JSON.
-func emitInstallJSON(results []installResult, cmd *cobra.Command) error {
+func emitInstallJSON(results []installResult, resolution *nameConflictResolutionPayload, cmd *cobra.Command) error {
 	payload := map[string]any{"installed": results}
+	if resolution != nil {
+		payload["resolution"] = resolution
+	}
 	if cmd == nil {
 		return json.NewEncoder(os.Stdout).Encode(payload)
 	}

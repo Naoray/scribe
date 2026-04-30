@@ -68,6 +68,15 @@ func (f *textFormatter) OnBudgetWarning(_, message string) {
 	fmt.Fprintf(f.errOut, "warning: %s\n", message)
 }
 
+func (f *textFormatter) OnNameConflictResolved(conflict sync.NameConflict, resolution sync.NameConflictResolution) {
+	switch resolution.Action {
+	case sync.NameConflictActionAlias:
+		fmt.Fprintf(f.out, "  %-20s installed as %s\n", conflict.Name, resolution.Alias)
+	case sync.NameConflictActionSkip:
+		fmt.Fprintf(f.out, "  %-20s skipped (name conflict)\n", conflict.Name)
+	}
+}
+
 func (f *textFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 	f.totalSummary.Installed += summary.Installed
 	f.totalSummary.Updated += summary.Updated

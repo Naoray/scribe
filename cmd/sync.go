@@ -18,6 +18,7 @@ func newSyncCommand() *cobra.Command {
 	cmd.Flags().Bool("trust-all", false, "Approve all package install commands without prompting")
 	cmd.Flags().Bool("all", false, "Sync all registries (default behavior)")
 	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
+	cmd.Flags().String("alias", "", "Install incoming skill under this name when a local directory conflicts")
 	cmd.Flags().MarkHidden("all")
 	return markJSONSupported(cmd)
 }
@@ -27,6 +28,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	repoFlag, _ := cmd.Flags().GetString("registry")
 	trustAllFlag, _ := cmd.Flags().GetBool("trust-all")
 	forceBudget, _ := cmd.Flags().GetBool("force")
+	aliasName, _ := cmd.Flags().GetString("alias")
 	factory := commandFactory()
 
 	if err := enforceCurrentBudget(factory, forceBudget); err != nil {
@@ -39,11 +41,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 		RepoFlag:         repoFlag,
 		TrustAllFlag:     trustAllFlag,
 		ForceBudget:      forceBudget,
+		AliasName:        aliasName,
 		Factory:          factory,
 		FilterRegistries: filterRegistries,
 	}
 	if err := workflow.Run(cmd.Context(), workflow.SyncSteps(), bag); err != nil {
-		return err
+		return handleNameConflictError(cmd, err)
 	}
 	if bag.Partial {
 		if err := saveWorkflowState(bag); err != nil {

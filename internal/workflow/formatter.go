@@ -23,6 +23,7 @@ type Formatter interface {
 	OnSkillSkippedByDenyList(name, registry string)
 	OnSkillError(name string, err error)
 	OnBudgetWarning(agent, message string)
+	OnNameConflictResolved(conflict sync.NameConflict, resolution sync.NameConflictResolution)
 	OnSyncComplete(summary sync.SyncCompleteMsg)
 	OnReconcileConflict(name string, conflict state.ProjectionConflict)
 	OnReconcileComplete(summary sync.ReconcileCompleteMsg)

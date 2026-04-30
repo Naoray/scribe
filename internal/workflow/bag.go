@@ -25,6 +25,7 @@ type Bag struct {
 	TrustAllFlag   bool   // --trust-all: approve all package commands without prompting
 	InstallAllFlag bool   // --all: install all available skills without prompting
 	ForceBudget    bool   // --force: allow projection over agent description-byte budgets
+	AliasName      string // --alias: install incoming skill under another name on projection conflict
 	LazyGitHub     bool   // skip eager GitHub client/provider setup for local-only flows
 	Factory        *app.Factory
 

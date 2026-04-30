@@ -206,7 +206,7 @@ func StepResolveFormatter(ctx context.Context, b *Bag) error {
 	if b.Formatter != nil {
 		return nil
 	}
-	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
+	useJSON := UseJSONOutputForProcess(b.JSONFlag)
 	multiRegistry := len(b.Repos) > 1
 	b.Formatter = NewFormatterForContext(ctx, useJSON, multiRegistry)
 	return nil
@@ -289,6 +289,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		Executor:    &sync.ShellExecutor{},
 		TrustAll:    b.TrustAllFlag,
 		ForceBudget: b.ForceBudget,
+		AliasName:   b.AliasName,
 		SkillFilter: b.SkillFilter,
 		ProjectRoot: b.ProjectRoot,
 		// Skip missing skills when no explicit filter/--all: scribe sync only updates
@@ -312,6 +313,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 				b.Formatter.OnSkillError(m.Name, m.Err)
 			case sync.BudgetWarningMsg:
 				b.Formatter.OnBudgetWarning(m.Agent, m.Message)
+			case sync.NameConflictResolvedMsg:
+				b.Formatter.OnNameConflictResolved(m.Conflict, m.Resolution)
 			case sync.SkillAdoptionNeededMsg:
 				// Handled implicitly by the SkillErrorMsg that follows it.
 			case sync.LegacyFormatMsg:
@@ -366,6 +369,9 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 			return approved
 		}
 	}
+	if ConflictModeForProcess(b.JSONFlag) == ConflictModeInteractive && b.AliasName == "" {
+		syncer.NameConflictResolver = PromptNameConflictResolution
+	}
 
 	for _, teamRepo := range b.Repos {
 		if b.State.RegistryFailure(teamRepo).Muted {
@@ -390,4 +396,48 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	}
 
 	return nil
+}
+
+func PromptNameConflictResolution(conflict sync.NameConflict) (sync.NameConflictResolution, error) {
+	const (
+		adopt = "adopt"
+		alias = "alias"
+		skip  = "skip"
+	)
+	choice := adopt
+	err := huh.NewSelect[string]().
+		Title(fmt.Sprintf("Skill %q conflicts with an existing local directory", conflict.Name)).
+		Description(fmt.Sprintf("%s already exists at %s.", conflict.Tool, conflict.Path)).
+		Options(
+			huh.NewOption("Adopt existing first", adopt),
+			huh.NewOption("Install incoming under a different name", alias),
+			huh.NewOption("Skip incoming skill", skip),
+		).
+		Value(&choice).
+		Run()
+	if err != nil {
+		return sync.NameConflictResolution{}, err
+	}
+
+	switch choice {
+	case adopt:
+		return sync.NameConflictResolution{Action: sync.NameConflictActionAdopt}, nil
+	case skip:
+		return sync.NameConflictResolution{Action: sync.NameConflictActionSkip}, nil
+	case alias:
+		aliasName := ""
+		if err := huh.NewInput().
+			Title("Install incoming skill as").
+			Placeholder(conflict.Name + "-registry").
+			Value(&aliasName).
+			Run(); err != nil {
+			return sync.NameConflictResolution{}, err
+		}
+		return sync.NameConflictResolution{
+			Action: sync.NameConflictActionAlias,
+			Alias:  aliasName,
+		}, nil
+	default:
+		return sync.NameConflictResolution{Action: sync.NameConflictActionUnresolved}, nil
+	}
 }
