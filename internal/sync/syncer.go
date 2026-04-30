@@ -37,6 +37,9 @@ type Syncer struct {
 	Tools    []tools.Tool
 	Emit     func(any) // receives events defined in events.go
 	Executor CommandExecutor
+	// ProjectRoot scopes tool projections to a project-local agent directory.
+	// Empty preserves legacy global projections.
+	ProjectRoot string
 
 	// ModifiedStrategy controls what to do when an outdated skill also has
 	// unsynced local edits on disk.
@@ -438,7 +441,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			var toolNames []string
 			toolFailed := false
 			for _, t := range effectiveTools {
-				links, err := t.Install(sk.Name, canonicalDir)
+				links, err := t.Install(sk.Name, canonicalDir, s.ProjectRoot)
 				if err != nil {
 					if errors.Is(err, tools.ErrRealDirectoryExists) {
 						existing, pathErr := t.SkillPath(sk.Name)
@@ -498,14 +501,16 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				toolsMode = installed.ToolsMode
 			}
 
+			managedPaths := mergeManagedPaths(installed, paths)
 			st.RecordInstall(sk.Name, state.InstalledSkill{
 				Revision:      nextRevision(installed),
 				InstalledHash: installedHash,
 				Sources:       sources,
 				Tools:         toolNames,
 				ToolsMode:     toolsMode,
-				Paths:         paths,
-				ManagedPaths:  append([]string(nil), paths...),
+				Paths:         append([]string(nil), managedPaths...),
+				Projections:   mergeProjection(installed, s.ProjectRoot, toolNames),
+				ManagedPaths:  managedPaths,
 			})
 			// Save after each successful install — partial sync is safe.
 			if err := st.Save(); err != nil {
@@ -599,6 +604,47 @@ func selectEffectiveTools(global []tools.Tool, installed *state.InstalledSkill) 
 		}
 	}
 	return out
+}
+
+func mergeProjection(installed *state.InstalledSkill, projectRoot string, toolNames []string) []state.ProjectionEntry {
+	projections := []state.ProjectionEntry{}
+	if installed != nil {
+		projections = append(projections, installed.Projections...)
+	}
+	next := state.ProjectionEntry{
+		Project: projectRoot,
+		Tools:   append([]string(nil), toolNames...),
+	}
+	for i, projection := range projections {
+		if projection.Project == projectRoot {
+			projections[i] = next
+			return projections
+		}
+	}
+	return append(projections, next)
+}
+
+func mergeManagedPaths(installed *state.InstalledSkill, paths []string) []string {
+	pathSet := make(map[string]bool)
+	if installed != nil {
+		existing := installed.ManagedPaths
+		if len(existing) == 0 {
+			existing = installed.Paths
+		}
+		for _, path := range existing {
+			pathSet[path] = true
+		}
+	}
+	for _, path := range paths {
+		pathSet[path] = true
+	}
+
+	merged := make([]string, 0, len(pathSet))
+	for path := range pathSet {
+		merged = append(merged, path)
+	}
+	sort.Strings(merged)
+	return merged
 }
 
 // formatCmds formats tool commands for display in approval prompts.

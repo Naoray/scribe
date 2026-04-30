@@ -27,8 +27,9 @@ func (t ClaudeTool) Detect() bool {
 	return err == nil
 }
 
-func (t ClaudeTool) Install(skillName, canonicalDir string) ([]string, error) {
-	skillsDir, err := claudeSkillsDir()
+func (t ClaudeTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
+	projectRoot = projectionProjectRoot(skillName, projectRoot)
+	skillsDir, err := claudeSkillsDir(projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +45,7 @@ func (t ClaudeTool) Install(skillName, canonicalDir string) ([]string, error) {
 }
 
 func (t ClaudeTool) Uninstall(skillName string) error {
-	skillsDir, err := claudeSkillsDir()
+	skillsDir, err := claudeSkillsDir("")
 	if err != nil {
 		return err
 	}
@@ -61,7 +62,7 @@ func (t ClaudeTool) Uninstall(skillName string) error {
 }
 
 func (t ClaudeTool) SkillPath(skillName string) (string, error) {
-	skillsDir, err := claudeSkillsDir()
+	skillsDir, err := claudeSkillsDir("")
 	if err != nil {
 		return "", err
 	}
@@ -72,7 +73,10 @@ func (t ClaudeTool) CanonicalTarget(canonicalDir string) (string, bool) {
 	return canonicalDir, true
 }
 
-func claudeSkillsDir() (string, error) {
+func claudeSkillsDir(projectRoot string) (string, error) {
+	if projectRoot != "" {
+		return filepath.Join(projectRoot, ".claude", "skills"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("home dir: %w", err)

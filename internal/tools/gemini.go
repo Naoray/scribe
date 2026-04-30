@@ -19,7 +19,7 @@ func (t GeminiTool) Detect() bool {
 	return err == nil
 }
 
-func (t GeminiTool) Install(skillName, canonicalDir string) ([]string, error) {
+func (t GeminiTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
 	cmd := exec.Command(toolGemini, "skills", "link", canonicalDir, "--scope", "user", "--consent")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

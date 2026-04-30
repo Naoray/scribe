@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
@@ -13,6 +14,7 @@ import (
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/state"
@@ -31,6 +33,7 @@ func SyncSteps() []Step {
 		{"FilterRegistries", StepFilterRegistries},
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
+		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
@@ -44,6 +47,7 @@ func SyncTail() []Step {
 	return []Step{
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
+		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
@@ -69,6 +73,23 @@ func StepReconcileSystem(_ context.Context, b *Bag) error {
 	}
 	b.Formatter.OnReconcileComplete(sync.ReconcileCompleteMsg{Summary: summary})
 	b.MarkStateDirty()
+	return nil
+}
+
+func StepResolveProjectRoot(_ context.Context, b *Bag) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	projectFile, err := projectfile.Find(wd)
+	if err != nil {
+		return err
+	}
+	if projectFile == "" {
+		b.ProjectRoot = ""
+		return nil
+	}
+	b.ProjectRoot = filepath.Dir(projectFile)
 	return nil
 }
 
@@ -268,6 +289,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		Executor:    &sync.ShellExecutor{},
 		TrustAll:    b.TrustAllFlag,
 		SkillFilter: b.SkillFilter,
+		ProjectRoot: b.ProjectRoot,
 		// Skip missing skills when no explicit filter/--all: scribe sync only updates
 		// what's already installed. scribe install sets SkillFilter or InstallAllFlag
 		// to opt-in to installing new skills.

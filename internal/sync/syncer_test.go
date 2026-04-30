@@ -173,6 +173,120 @@ func TestRunWithDiff_RemovedByUserIsRegistryScoped(t *testing.T) {
 	}
 }
 
+func TestRunWithDiff_RecordsProjectProjection(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	projectRoot := t.TempDir()
+
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}},
+		},
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot: projectRoot,
+	}
+	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
+	statuses := []sync.SkillStatus{{
+		Name:   "recap",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	installed := st.Installed["recap"]
+	if len(installed.Projections) != 1 {
+		t.Fatalf("Projections = %#v, want one entry", installed.Projections)
+	}
+	if installed.Projections[0].Project != projectRoot {
+		t.Fatalf("Projection project = %q, want %q", installed.Projections[0].Project, projectRoot)
+	}
+	if got := installed.Projections[0].Tools; len(got) != 1 || got[0] != "claude" {
+		t.Fatalf("Projection tools = %v, want [claude]", got)
+	}
+
+	wantPath := filepath.Join(projectRoot, ".claude", "skills", "recap")
+	if len(installed.ManagedPaths) != 1 || installed.ManagedPaths[0] != wantPath {
+		t.Fatalf("ManagedPaths = %v, want [%s]", installed.ManagedPaths, wantPath)
+	}
+}
+
+func TestRunWithDiff_RecordsGlobalProjectionWhenProjectRootEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}},
+		},
+		Tools: []tools.Tool{tools.ClaudeTool{}},
+	}
+	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
+	statuses := []sync.SkillStatus{{
+		Name:   "recap",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	installed := st.Installed["recap"]
+	if len(installed.Projections) != 1 || installed.Projections[0].Project != "" {
+		t.Fatalf("Projections = %#v, want one global entry", installed.Projections)
+	}
+	wantPath := filepath.Join(home, ".claude", "skills", "recap")
+	if len(installed.ManagedPaths) != 1 || installed.ManagedPaths[0] != wantPath {
+		t.Fatalf("ManagedPaths = %v, want [%s]", installed.ManagedPaths, wantPath)
+	}
+}
+
+func TestRunWithDiff_MultiProjectProjectionPathsAreIsolated(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	projectOne := t.TempDir()
+	projectTwo := t.TempDir()
+	files := []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}}
+	statuses := []sync.SkillStatus{{
+		Name:   "recap",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
+
+	for _, projectRoot := range []string{projectOne, projectTwo} {
+		syncer := &sync.Syncer{
+			Client:      &syncTestFetcher{files: files},
+			Tools:       []tools.Tool{tools.ClaudeTool{}},
+			ProjectRoot: projectRoot,
+		}
+		if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+			t.Fatalf("RunWithDiff %s: %v", projectRoot, err)
+		}
+	}
+
+	installed := st.Installed["recap"]
+	if len(installed.Projections) != 2 {
+		t.Fatalf("Projections = %#v, want two project entries", installed.Projections)
+	}
+	pathOne := filepath.Join(projectOne, ".claude", "skills", "recap")
+	pathTwo := filepath.Join(projectTwo, ".claude", "skills", "recap")
+	if _, err := os.Lstat(pathOne); err != nil {
+		t.Fatalf("project one projection missing: %v", err)
+	}
+	if _, err := os.Lstat(pathTwo); err != nil {
+		t.Fatalf("project two projection missing: %v", err)
+	}
+
+	if err := os.Remove(pathOne); err != nil {
+		t.Fatalf("remove project one projection: %v", err)
+	}
+	if _, err := os.Lstat(pathTwo); err != nil {
+		t.Fatalf("project two projection affected by project one removal: %v", err)
+	}
+}
+
 func TestApply_PackageMissing_Approved(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

@@ -85,8 +85,8 @@ func TestListLoadSteps_Composition(t *testing.T) {
 
 func TestListLoadStepsRemote_Composition(t *testing.T) {
 	steps := ListLoadStepsRemote()
-	if len(steps) != 4 {
-		t.Fatalf("ListLoadStepsRemote() = %d steps, want 4", len(steps))
+	if len(steps) != 5 {
+		t.Fatalf("ListLoadStepsRemote() = %d steps, want 5", len(steps))
 	}
 	if steps[0].Name != "LoadConfig" {
 		t.Errorf("step[0] = %s, want LoadConfig", steps[0].Name)
@@ -97,8 +97,11 @@ func TestListLoadStepsRemote_Composition(t *testing.T) {
 	if steps[2].Name != "ResolveTools" {
 		t.Errorf("step[2] = %s, want ResolveTools", steps[2].Name)
 	}
-	if steps[3].Name != "EnsureScribeAgent" {
-		t.Errorf("step[3] = %s, want EnsureScribeAgent", steps[3].Name)
+	if steps[3].Name != "ResolveProjectRoot" {
+		t.Errorf("step[3] = %s, want ResolveProjectRoot", steps[3].Name)
+	}
+	if steps[4].Name != "EnsureScribeAgent" {
+		t.Errorf("step[4] = %s, want EnsureScribeAgent", steps[4].Name)
 	}
 }
 

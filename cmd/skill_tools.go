@@ -123,7 +123,7 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 
 	for _, toolName := range added {
 		tool := availableByName[toolName]
-		paths, err := tool.Install(name, canonicalDir)
+		paths, err := tool.Install(name, canonicalDir, "")
 		if err != nil {
 			return skillEditResult{}, fmt.Errorf("install into %s: %w", toolName, err)
 		}

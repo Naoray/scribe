@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
@@ -387,11 +389,24 @@ func installSelected(
 // newInstallSyncer constructs a Syncer ready to install skills.
 func newInstallSyncer(client *gh.Client, targets []tools.Tool) *sync.Syncer {
 	return &sync.Syncer{
-		Client:   sync.WrapGitHubClient(client),
-		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
-		Tools:    targets,
-		Executor: &sync.ShellExecutor{},
+		Client:      sync.WrapGitHubClient(client),
+		Provider:    provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
+		Tools:       targets,
+		Executor:    &sync.ShellExecutor{},
+		ProjectRoot: resolveCurrentProjectRoot(),
 	}
+}
+
+func resolveCurrentProjectRoot() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	projectFile, err := projectfile.Find(wd)
+	if err != nil || projectFile == "" {
+		return ""
+	}
+	return filepath.Dir(projectFile)
 }
 
 // wireInstallSyncer attaches an Emit callback that prints progress (or

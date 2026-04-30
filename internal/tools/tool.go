@@ -5,6 +5,8 @@ package tools
 
 import "os"
 
+const bootstrapSkillName = "scribe-agent"
+
 // SkillFile represents a file to be written to the skill store.
 type SkillFile struct {
 	Path    string // relative to the skill root (e.g. "scripts/deploy.sh")
@@ -16,8 +18,10 @@ type Tool interface {
 	// Name returns the tool identifier (e.g. "claude", "cursor").
 	Name() string
 	// Install creates a link from the agent's expected directory into canonicalDir
-	// (~/.scribe/skills/<name>). Returns the paths of the links created.
-	Install(skillName, canonicalDir string) (paths []string, err error)
+	// (~/.scribe/skills/<name>). projectRoot scopes tools that support
+	// project-local projections; an empty projectRoot preserves legacy global
+	// projection behavior. Returns the paths of the links created.
+	Install(skillName, canonicalDir, projectRoot string) (paths []string, err error)
 	// Uninstall removes the links for a skill.
 	Uninstall(skillName string) error
 	// Detect reports whether this tool is installed on the machine.
@@ -57,4 +61,11 @@ func DetectTools() []Tool {
 func homeDirExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func projectionProjectRoot(skillName, projectRoot string) string {
+	if skillName == bootstrapSkillName {
+		return ""
+	}
+	return projectRoot
 }

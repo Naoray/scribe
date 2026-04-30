@@ -165,6 +165,7 @@ func (m listModel) runUpdate(choice updateChoice) tea.Cmd {
 			Tools:            bag.Tools,
 			Executor:         &sync.ShellExecutor{},
 			TrustAll:         bag.TrustAllFlag,
+			ProjectRoot:      bag.ProjectRoot,
 			ModifiedStrategy: sync.ModifiedStrategyMerge,
 		}
 		if choice == updateChoicePreferTheirs {

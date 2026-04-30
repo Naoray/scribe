@@ -261,8 +261,9 @@ func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *
 // autoSync runs a sync for the target registry after adding skills.
 func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) bool {
 	syncer := &sync.Syncer{
-		Client: sync.WrapGitHubClient(client),
-		Tools:  targets,
+		Client:      sync.WrapGitHubClient(client),
+		Tools:       targets,
+		ProjectRoot: resolveCurrentProjectRoot(),
 		Emit: func(msg any) {
 			if useJSON {
 				return

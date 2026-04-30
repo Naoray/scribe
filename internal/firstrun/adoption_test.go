@@ -22,12 +22,12 @@ type adoptMockTool struct {
 	name string
 }
 
-func (m *adoptMockTool) Name() string                            { return m.name }
-func (m *adoptMockTool) Detect() bool                            { return true }
-func (m *adoptMockTool) Install(_, _ string) ([]string, error)   { return nil, nil }
-func (m *adoptMockTool) Uninstall(_ string) error                { return nil }
-func (m *adoptMockTool) SkillPath(_ string) (string, error)      { return "", nil }
-func (m *adoptMockTool) CanonicalTarget(_ string) (string, bool) { return "", false }
+func (m *adoptMockTool) Name() string                             { return m.name }
+func (m *adoptMockTool) Detect() bool                             { return true }
+func (m *adoptMockTool) Install(_, _, _ string) ([]string, error) { return nil, nil }
+func (m *adoptMockTool) Uninstall(_ string) error                 { return nil }
+func (m *adoptMockTool) SkillPath(_ string) (string, error)       { return "", nil }
+func (m *adoptMockTool) CanonicalTarget(_ string) (string, bool)  { return "", false }
 
 var _ tools.Tool = (*adoptMockTool)(nil)
 

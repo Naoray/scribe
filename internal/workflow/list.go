@@ -31,6 +31,7 @@ func ListLoadStepsRemote() []Step {
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
 		{"ResolveTools", StepResolveTools},
+		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 	}
 }

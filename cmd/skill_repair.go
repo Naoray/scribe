@@ -49,7 +49,7 @@ func applySkillRepair(cfg *config.Config, st *state.State, name, toolName, sourc
 	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
 		return skillRepairResult{}, err
 	}
-	links, err := tool.Install(name, canonicalDir)
+	links, err := tool.Install(name, canonicalDir, "")
 	if err != nil {
 		return skillRepairResult{}, err
 	}

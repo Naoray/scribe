@@ -32,7 +32,8 @@ func (t CursorTool) Detect() bool {
 	return err == nil
 }
 
-func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
+func (t CursorTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
+	projectRoot = projectionProjectRoot(skillName, projectRoot)
 	// Generate .cursor.mdc from SKILL.md in the store.
 	skillMDPath := filepath.Join(canonicalDir, "SKILL.md")
 	skillMD, err := os.ReadFile(skillMDPath)
@@ -40,7 +41,7 @@ func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			mdcPath := filepath.Join(canonicalDir, ".cursor.mdc")
 			if _, statErr := os.Stat(mdcPath); statErr == nil {
-				return t.installFromMDC(skillName, mdcPath)
+				return t.installFromMDC(skillName, mdcPath, projectRoot)
 			}
 			return nil, fmt.Errorf("skill %q has no SKILL.md in store", skillName)
 		}
@@ -53,7 +54,7 @@ func (t CursorTool) Install(skillName, canonicalDir string) ([]string, error) {
 		return nil, fmt.Errorf("write .cursor.mdc for %q: %w", skillName, err)
 	}
 
-	return t.installFromMDC(skillName, mdcPath)
+	return t.installFromMDC(skillName, mdcPath, projectRoot)
 }
 
 func (t CursorTool) Uninstall(skillName string) error {
@@ -151,10 +152,21 @@ func stripFrontmatter(content []byte) []byte {
 	return []byte(strings.TrimLeft(rest[idx+4:], "\n"))
 }
 
-func (t CursorTool) installFromMDC(skillName, mdcPath string) ([]string, error) {
-	workDir, err := t.resolveWorkDir()
-	if err != nil {
-		return nil, err
+func (t CursorTool) installFromMDC(skillName, mdcPath, projectRoot string) ([]string, error) {
+	workDir := projectRoot
+	if skillName == bootstrapSkillName {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("home dir: %w", err)
+		}
+		workDir = home
+	}
+	if workDir == "" {
+		var err error
+		workDir, err = t.resolveWorkDir()
+		if err != nil {
+			return nil, err
+		}
 	}
 	rulesDir := filepath.Join(workDir, ".cursor", "rules")
 	mdcName := SlugifyRegistry(skillName) + ".mdc"

@@ -105,7 +105,7 @@ type mockAdoptTool struct {
 func (m *mockAdoptTool) Name() string             { return m.name }
 func (m *mockAdoptTool) Detect() bool             { return true }
 func (m *mockAdoptTool) Uninstall(_ string) error { return nil }
-func (m *mockAdoptTool) Install(skillName, _ string) ([]string, error) {
+func (m *mockAdoptTool) Install(skillName, _, _ string) ([]string, error) {
 	if m.installErr != nil {
 		return nil, m.installErr
 	}

@@ -51,7 +51,7 @@ func repairSkillProjections(cfg *config.Config, st *state.State, name string) (s
 				return skillProjectionRepairResult{}, fmt.Errorf("clear %s/%s: %w", toolName, name, err)
 			}
 		}
-		links, err := tool.Install(name, canonicalDir)
+		links, err := tool.Install(name, canonicalDir, "")
 		if err != nil {
 			return skillProjectionRepairResult{}, fmt.Errorf("repair %s/%s: %w", toolName, name, err)
 		}
