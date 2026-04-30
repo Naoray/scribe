@@ -1,15 +1,21 @@
 package cmd
 
 import (
+	"context"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"runtime/debug"
+	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/agent"
 	"github.com/Naoray/scribe/internal/app"
+	"github.com/Naoray/scribe/internal/cli/envelope"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	"github.com/Naoray/scribe/internal/cli/output"
 	"github.com/Naoray/scribe/internal/firstrun"
 	"github.com/Naoray/scribe/internal/storemigrate"
 	"github.com/Naoray/scribe/internal/tools"
@@ -43,10 +49,23 @@ func newCommandFactory() *app.Factory {
 var rootCmd = newRootCmd()
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	err := rootCmd.Execute()
+	mode := envFromArgs(os.Args)
+	r := output.New(mode, os.Stdout, os.Stderr)
+	if err != nil {
+		err = classifyExecuteError(err)
+		var ce *clierrors.Error
+		if stderrors.As(err, &ce) {
+			_ = r.Error(ce)
+			if ce.Exit == clierrors.ExitOK {
+				ce.Exit = clierrors.ExitGeneral
+			}
+			os.Exit(ce.Exit)
+		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(clierrors.ExitGeneral)
 	}
+	_ = r.Flush()
 }
 
 func newRootCmd() *cobra.Command {
@@ -59,6 +78,11 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(c *cobra.Command, args []string) error {
+			ctx := context.WithValue(c.Context(), envelope.BootstrapStartKey, time.Now())
+			ctx = context.WithValue(ctx, envelope.ScribeVersionKey, resolveVersion(Version, readBuildInfo()))
+			ctx = context.WithValue(ctx, envelope.CommandPathKey, c.CommandPath())
+			c.SetContext(ctx)
+
 			if c.Name() == "help" || c.Name() == "version" || c.Name() == "migrate" || c.Name() == "upgrade" {
 				return nil
 			}
@@ -149,7 +173,7 @@ func newRootCmd() *cobra.Command {
 	}
 
 	cmd.RunE = runDefault
-	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	cmd.PersistentFlags().Bool("json", false, "Output machine-readable JSON")
 	cmd.CompletionOptions = cobra.CompletionOptions{HiddenDefaultCmd: true}
 
 	aliasConnect := newConnectCommand()
@@ -189,7 +213,50 @@ func newRootCmd() *cobra.Command {
 		newUpgradeAgentCommand(),
 	)
 
+	wrapRunECommands(cmd)
+
 	return cmd
+}
+
+func classifyExecuteError(err error) error {
+	var ce *clierrors.Error
+	if stderrors.As(err, &ce) {
+		return err
+	}
+	return clierrors.Wrap(err, "USAGE", clierrors.ExitUsage, clierrors.WithRemediation("run `scribe --help`"))
+}
+
+func wrapRunECommands(cmd *cobra.Command) {
+	if cmd.RunE != nil {
+		cmd.RunE = wrapRunE(cmd.RunE)
+	}
+	for _, child := range cmd.Commands() {
+		wrapRunECommands(child)
+	}
+}
+
+func wrapRunE(fn func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		runStart := time.Now()
+		ctx := context.WithValue(cmd.Context(), envelope.RunEStartKey, runStart)
+		cmd.SetContext(ctx)
+
+		err := fn(cmd, args)
+
+		duration := time.Since(runStart).Milliseconds()
+		bootstrap := int64(0)
+		if start, ok := cmd.Context().Value(envelope.BootstrapStartKey).(time.Time); ok {
+			bootstrap = runStart.Sub(start).Milliseconds()
+			if bootstrap < 0 {
+				bootstrap = 0
+			}
+		}
+		ctx = context.WithValue(cmd.Context(), envelope.DurationMSKey, duration)
+		ctx = context.WithValue(ctx, envelope.BootstrapMSKey, bootstrap)
+		cmd.SetContext(ctx)
+
+		return err
+	}
 }
 
 // runStoreMigration executes the v1 → v2 on-disk migration if the marker is
