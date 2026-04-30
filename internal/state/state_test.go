@@ -24,8 +24,8 @@ func TestLoadMissing(t *testing.T) {
 	if len(s.Installed) != 0 {
 		t.Errorf("expected empty Installed, got %d entries", len(s.Installed))
 	}
-	if s.SchemaVersion != 4 {
-		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 5 {
+		t.Errorf("expected SchemaVersion=5, got %d", s.SchemaVersion)
 	}
 	if s.BinaryUpdateChecks == nil {
 		t.Fatal("expected BinaryUpdateChecks to be initialized")
@@ -63,8 +63,8 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.LastSync.IsZero() {
 		t.Error("expected LastSync to be set")
 	}
-	if loaded.SchemaVersion != 4 {
-		t.Errorf("expected SchemaVersion=4, got %d", loaded.SchemaVersion)
+	if loaded.SchemaVersion != 5 {
+		t.Errorf("expected SchemaVersion=5, got %d", loaded.SchemaVersion)
 	}
 
 	skill, ok := loaded.Installed["gstack"]
@@ -384,7 +384,85 @@ func TestRegistryFailureTracking(t *testing.T) {
 	}
 }
 
+func TestRemovedByUserRoundTripAndClear(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	st.RecordRemovedByUser("recap", []state.SkillSource{
+		{Registry: "acme/skills"},
+		{Registry: "other/skills"},
+	})
+	if !st.IsRemovedByUser("acme/skills", "recap") {
+		t.Fatal("expected recap to be removed for acme/skills")
+	}
+
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if len(loaded.RemovedByUser) != 2 {
+		t.Fatalf("RemovedByUser len = %d, want 2", len(loaded.RemovedByUser))
+	}
+	if !loaded.ClearRemovedByUser("recap", "acme/skills") {
+		t.Fatal("ClearRemovedByUser scoped to registry = false, want true")
+	}
+	if loaded.IsRemovedByUser("acme/skills", "recap") {
+		t.Fatal("acme/skills recap entry should be cleared")
+	}
+	if !loaded.IsRemovedByUser("other/skills", "recap") {
+		t.Fatal("other/skills recap entry should remain")
+	}
+	if !loaded.ClearRemovedByRegistry("other/skills") {
+		t.Fatal("ClearRemovedByRegistry = false, want true")
+	}
+	if len(loaded.RemovedByUser) != 0 {
+		t.Fatalf("RemovedByUser len = %d, want 0", len(loaded.RemovedByUser))
+	}
+}
+
 // --- Migration tests ---
+
+func TestStateMigrateV4ToV5InitializesRemovedByUser(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"schema_version": 4,
+		"installed": {
+			"recap": {
+				"revision": 2,
+				"installed_hash": "abc",
+				"sources": [{"registry": "acme/skills", "ref": "main"}],
+				"installed_at": "2026-01-01T00:00:00Z",
+				"tools": ["claude"],
+				"paths": []
+			}
+		}
+	}`), 0o644)
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if st.SchemaVersion != 5 {
+		t.Fatalf("SchemaVersion = %d, want 5", st.SchemaVersion)
+	}
+	if st.RemovedByUser == nil {
+		t.Fatal("RemovedByUser is nil, want empty slice")
+	}
+	if len(st.RemovedByUser) != 0 {
+		t.Fatalf("RemovedByUser len = %d, want 0", len(st.RemovedByUser))
+	}
+}
 
 func TestMigrationNamespacesKeys(t *testing.T) {
 	home := t.TempDir()
@@ -436,8 +514,8 @@ func TestMigrationNamespacesKeys(t *testing.T) {
 		t.Errorf("expected Revision=1, got %d", skill.Revision)
 	}
 
-	if s.SchemaVersion != 4 {
-		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 5 {
+		t.Errorf("expected SchemaVersion=5, got %d", s.SchemaVersion)
 	}
 }
 
@@ -627,8 +705,8 @@ func TestStateMigrateV2ToV3(t *testing.T) {
 	if skill.Sources[0].Registry != "ArtistfyHQ/team-skills" || skill.Sources[0].LastSHA != "def456" {
 		t.Errorf("unexpected migrated sources: %v", skill.Sources)
 	}
-	if s.SchemaVersion != 4 {
-		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 5 {
+		t.Errorf("expected SchemaVersion=5, got %d", s.SchemaVersion)
 	}
 }
 
@@ -665,8 +743,8 @@ func TestMigrationSchemaV2(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 4 {
-		t.Errorf("expected SchemaVersion=4, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 5 {
+		t.Errorf("expected SchemaVersion=5, got %d", s.SchemaVersion)
 	}
 
 	// Qualified key should become bare.
@@ -731,8 +809,8 @@ func TestMigrationPreservesRevisionAndHash(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 4 {
-		t.Errorf("SchemaVersion: got %d, want 4", s.SchemaVersion)
+	if s.SchemaVersion != 5 {
+		t.Errorf("SchemaVersion: got %d, want 5", s.SchemaVersion)
 	}
 	skill := s.Installed["gstack"]
 	if skill.Revision != 5 {
@@ -902,8 +980,8 @@ func TestMigrationBareKeyCollisionCollapses(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 4 {
-		t.Errorf("expected SchemaVersion 4, got %d", s.SchemaVersion)
+	if s.SchemaVersion != 5 {
+		t.Errorf("expected SchemaVersion 5, got %d", s.SchemaVersion)
 	}
 
 	// Should have exactly one "deploy" key, not two.
@@ -981,8 +1059,8 @@ func TestMigrationSchemaV4NormalizesBranchBlobSHA(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 4 {
-		t.Errorf("SchemaVersion: got %d, want 4", s.SchemaVersion)
+	if s.SchemaVersion != 5 {
+		t.Errorf("SchemaVersion: got %d, want 5", s.SchemaVersion)
 	}
 
 	xray, ok := s.Installed["xray"]
@@ -1034,7 +1112,7 @@ func TestMigrationSeedsManagedPathsFromPaths(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
-		"schema_version": 4,
+		"schema_version": 5,
 		"installed": {
 			"recap": {
 				"revision": 1,
@@ -1067,7 +1145,7 @@ func TestMigrationSchemaV4Idempotent(t *testing.T) {
 	dir := filepath.Join(home, ".scribe")
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
-		"schema_version": 4,
+		"schema_version": 5,
 		"last_sync": "2026-04-11T00:00:00Z",
 		"installed": {
 			"xray": {
@@ -1086,8 +1164,8 @@ func TestMigrationSchemaV4Idempotent(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 4 {
-		t.Errorf("SchemaVersion: got %d, want 4", s.SchemaVersion)
+	if s.SchemaVersion != 5 {
+		t.Errorf("SchemaVersion: got %d, want 5", s.SchemaVersion)
 	}
 	xray := s.Installed["xray"]
 	if len(xray.Sources) != 1 {
@@ -1176,7 +1254,7 @@ func TestOriginPreservedOnSchemaV4Load(t *testing.T) {
 	dir := filepath.Join(home, ".scribe")
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
-		"schema_version": 4,
+		"schema_version": 5,
 		"installed": {
 			"my-adopted-skill": {
 				"revision": 2,

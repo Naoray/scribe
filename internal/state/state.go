@@ -17,12 +17,22 @@ import (
 
 // State is the contents of ~/.scribe/state.json.
 type State struct {
-	SchemaVersion      int                          `json:"schema_version"`
-	LastSync           time.Time                    `json:"last_sync,omitempty"`
-	Installed          map[string]InstalledSkill    `json:"installed"`
+	SchemaVersion int                       `json:"schema_version"`
+	LastSync      time.Time                 `json:"last_sync,omitempty"`
+	Installed     map[string]InstalledSkill `json:"installed"`
+	// Schema v5 is shared with the kits/snippets pivot; its projection, kit,
+	// and snippet indexes are additive siblings of this deny-list.
+	RemovedByUser      []RemovedSkill               `json:"removed_by_user"`
 	Migrations         map[string]bool              `json:"migrations,omitempty"`
 	RegistryFailures   map[string]RegistryFailure   `json:"registry_failures,omitempty"`
 	BinaryUpdateChecks map[string]BinaryUpdateCheck `json:"binary_update_checks,omitempty"`
+}
+
+// RemovedSkill records a user's intent not to reinstall a registry skill.
+type RemovedSkill struct {
+	Name      string    `json:"name"`
+	Registry  string    `json:"registry"`
+	RemovedAt time.Time `json:"removed_at"`
 }
 
 type BinaryUpdateCheck struct {
@@ -136,6 +146,7 @@ type legacyState struct {
 	Team               *legacyTeamState             `json:"team,omitempty"`
 	LastSync           *time.Time                   `json:"last_sync,omitempty"`
 	Installed          map[string]json.RawMessage   `json:"installed"`
+	RemovedByUser      []RemovedSkill               `json:"removed_by_user,omitempty"`
 	BinaryUpdateChecks map[string]BinaryUpdateCheck `json:"binary_update_checks,omitempty"`
 }
 
@@ -212,13 +223,13 @@ func Load() (*State, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill), Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}, BinaryUpdateChecks: map[string]BinaryUpdateCheck{}}, nil
+		return &State{SchemaVersion: 5, Installed: make(map[string]InstalledSkill), RemovedByUser: []RemovedSkill{}, Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}, BinaryUpdateChecks: map[string]BinaryUpdateCheck{}}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return &State{SchemaVersion: 4, Installed: make(map[string]InstalledSkill), Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}, BinaryUpdateChecks: map[string]BinaryUpdateCheck{}}, nil
+		return &State{SchemaVersion: 5, Installed: make(map[string]InstalledSkill), RemovedByUser: []RemovedSkill{}, Migrations: map[string]bool{}, RegistryFailures: map[string]RegistryFailure{}, BinaryUpdateChecks: map[string]BinaryUpdateCheck{}}, nil
 	}
 	return parseAndMigrate(data)
 }
@@ -231,6 +242,7 @@ func Load() (*State, error) {
 //  5. Schema v3: bump the state schema while preserving existing Sources.
 //  6. Schema v4: normalize branch-backed LastSHA values to the locally cached
 //     SKILL.md blob SHA so blob-SHA diffs do not force needless reinstalls.
+//  7. Schema v5: initialize the user removal deny-list.
 func parseAndMigrate(data []byte) (*State, error) {
 	var legacy legacyState
 	if err := json.Unmarshal(data, &legacy); err != nil {
@@ -240,6 +252,7 @@ func parseAndMigrate(data []byte) (*State, error) {
 	s := &State{
 		SchemaVersion:      legacy.SchemaVersion,
 		Installed:          make(map[string]InstalledSkill, len(legacy.Installed)),
+		RemovedByUser:      append([]RemovedSkill(nil), legacy.RemovedByUser...),
 		Migrations:         map[string]bool{},
 		RegistryFailures:   map[string]RegistryFailure{},
 		BinaryUpdateChecks: map[string]BinaryUpdateCheck{},
@@ -356,6 +369,12 @@ func parseAndMigrate(data []byte) (*State, error) {
 		normalizeBranchSourceSHAs(s)
 		s.SchemaVersion = 4
 	}
+	if s.SchemaVersion < 5 {
+		if s.RemovedByUser == nil {
+			s.RemovedByUser = []RemovedSkill{}
+		}
+		s.SchemaVersion = 5
+	}
 	seedManagedPaths(s)
 
 	return s, nil
@@ -427,6 +446,86 @@ func (s *State) RecordInstall(name string, skill InstalledSkill) {
 // Remove deletes a skill from state (does not touch disk files).
 func (s *State) Remove(name string) {
 	delete(s.Installed, name)
+}
+
+// RecordRemovedByUser records user removal intent for each registry source.
+func (s *State) RecordRemovedByUser(name string, sources []SkillSource) {
+	if s.RemovedByUser == nil {
+		s.RemovedByUser = []RemovedSkill{}
+	}
+	now := time.Now().UTC()
+	for _, src := range sources {
+		if src.Registry == "" {
+			continue
+		}
+		replaced := false
+		for i := range s.RemovedByUser {
+			if s.RemovedByUser[i].Name == name && s.RemovedByUser[i].Registry == src.Registry {
+				s.RemovedByUser[i].RemovedAt = now
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			s.RemovedByUser = append(s.RemovedByUser, RemovedSkill{
+				Name:      name,
+				Registry:  src.Registry,
+				RemovedAt: now,
+			})
+		}
+	}
+}
+
+// IsRemovedByUser reports whether the registry/name pair is deny-listed.
+func (s *State) IsRemovedByUser(registry, name string) bool {
+	if s == nil {
+		return false
+	}
+	for _, removed := range s.RemovedByUser {
+		if removed.Registry == registry && removed.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ClearRemovedByUser removes deny-list entries for name. If registry is empty,
+// all registries for that name are cleared.
+func (s *State) ClearRemovedByUser(name, registry string) bool {
+	if s == nil || len(s.RemovedByUser) == 0 {
+		return false
+	}
+	kept := s.RemovedByUser[:0]
+	changed := false
+	for _, removed := range s.RemovedByUser {
+		matchName := removed.Name == name
+		matchRegistry := registry == "" || removed.Registry == registry
+		if matchName && matchRegistry {
+			changed = true
+			continue
+		}
+		kept = append(kept, removed)
+	}
+	s.RemovedByUser = kept
+	return changed
+}
+
+// ClearRemovedByRegistry removes all deny-list entries scoped to registry.
+func (s *State) ClearRemovedByRegistry(registry string) bool {
+	if s == nil || len(s.RemovedByUser) == 0 {
+		return false
+	}
+	kept := s.RemovedByUser[:0]
+	changed := false
+	for _, removed := range s.RemovedByUser {
+		if removed.Registry == registry {
+			changed = true
+			continue
+		}
+		kept = append(kept, removed)
+	}
+	s.RemovedByUser = kept
+	return changed
 }
 
 func (s *State) HasMigration(name string) bool {
