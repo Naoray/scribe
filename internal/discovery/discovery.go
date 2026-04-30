@@ -25,6 +25,14 @@ type SkillMeta struct {
 	Description string
 	Version     string
 	Author      string
+	Source      Source
+}
+
+// Source holds optional upstream attribution parsed from SKILL.md frontmatter.
+type Source struct {
+	URL    string `yaml:"url" json:"url,omitempty"`
+	Author string `yaml:"author" json:"author,omitempty"`
+	Note   string `yaml:"note" json:"note,omitempty"`
 }
 
 // rawFrontmatter maps the YAML frontmatter structure in SKILL.md files.
@@ -33,6 +41,7 @@ type rawFrontmatter struct {
 	Description string         `yaml:"description"`
 	Version     string         `yaml:"version"`
 	Author      string         `yaml:"author"`
+	Source      Source         `yaml:"source"`
 	Metadata    map[string]any `yaml:"metadata"`
 }
 
@@ -47,6 +56,7 @@ var reservedNames = map[string]bool{
 type Skill struct {
 	Name        string
 	Description string   // short description from SKILL.md frontmatter or first paragraph
+	Source      Source   // optional upstream attribution from SKILL.md frontmatter
 	Package     string   // parent package name if skill is a symlink sub-skill (e.g. "gstack")
 	LocalPath   string   // absolute path on disk
 	ContentHash string   // deterministic content fingerprint
@@ -336,6 +346,7 @@ func buildSkill(name, skillDir, scanBase, target string, st *state.State, scribe
 	sk := Skill{
 		Name:        name,
 		Description: meta.Description,
+		Source:      meta.Source,
 		LocalPath:   skillDir,
 		Package:     detectPackage(skillDir, scanBase),
 		ContentHash: hash,
@@ -440,6 +451,7 @@ func readSkillMetadata(skillDir string) SkillMeta {
 		Description: truncateDescription(raw.Description),
 		Version:     raw.Version,
 		Author:      raw.Author,
+		Source:      raw.Source,
 	}
 
 	// metadata.* overrides top-level (agentskills spec).
