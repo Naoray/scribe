@@ -124,6 +124,38 @@ func TestRunInitNonTTYWritesJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestRunInitJSONEnvelopeEmptyDirectorySerializesSkillsArray(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	withInitWorkingDir(t, dir)
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"init", "--json"})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute init --json: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+
+	var env testEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("stdout is not JSON envelope: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if env.Status != "ok" {
+		t.Fatalf("status = %q, want ok", env.Status)
+	}
+
+	var data map[string]json.RawMessage
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if string(data["skills"]) != "[]" {
+		t.Fatalf("data.skills = %s, want []", data["skills"])
+	}
+}
+
 func TestRunInitRefusesExistingLegacyManifestWithoutForce(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "scribe.toml"), []byte("[package]\nname = \"old\"\n"), 0o644); err != nil {

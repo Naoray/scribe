@@ -135,7 +135,7 @@ func gitConfigValue(wd, key string) string {
 }
 
 func discoverPackageSkills(root string) ([]manifest.Skill, error) {
-	var skills []manifest.Skill
+	skills := []manifest.Skill{}
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
