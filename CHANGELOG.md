@@ -1,3 +1,23 @@
+## SemVer commitment (from v1.0.0)
+
+Starting with v1.0.0 we follow [Semantic Versioning](https://semver.org).
+
+**Stable surface (breaking changes require a major version bump):**
+- The `--json` envelope shape (`status`, `format_version`, `data`, `meta` fields).
+- Documented exit codes per CLAUDE.md (0–10).
+- Command names and required flags listed in `scribe schema --all --json`.
+- The `SKILL.md` frontmatter fields scribe parses (`name`, `description`, `source`).
+- `scribe.toml` / `scribe.yaml` package manifest schema.
+- `scribe.lock` schema (`format_version: "1"`).
+
+**Not stable (may change in minor releases):**
+- Internal Go packages under `internal/`.
+- Text output formatting (the JSON envelope is the agent contract).
+- TUI behavior / keybindings.
+- Diagnostic messages and `scribe doctor` output.
+
+**Deprecation policy:** any breaking change to the stable surface gets a deprecation warning emitted via stderr for at least one minor version before removal in the next major.
+
 ## Unreleased
 
 The "agent-first foundation" wave. Scribe's `--json` output is now a versioned envelope, mutator commands have semantic exit codes, every migrated command exposes its JSON Schema, and the data layer for kits + snippets + project files is in place. Most of this is foundation — user-facing flows ride on top in follow-up releases.
