@@ -18,21 +18,36 @@ func jsonRendererForCommand(cmd *cobra.Command, jsonFlag bool) output.Renderer {
 	if version, ok := cmd.Context().Value(envelope.ScribeVersionKey).(string); ok {
 		r.SetMeta("scribe_version", version)
 	}
-	if start, ok := cmd.Context().Value(envelope.RunEStartKey).(time.Time); ok {
-		duration := time.Since(start).Milliseconds()
-		if duration < 1 {
-			duration = 1
-		}
-		r.SetMeta("duration_ms", duration)
+	return &timingRenderer{Renderer: r, cmd: cmd}
+}
+
+type timingRenderer struct {
+	output.Renderer
+	cmd *cobra.Command
+}
+
+func (r *timingRenderer) Flush() error {
+	ctx := r.cmd.Context()
+	if duration, ok := ctx.Value(envelope.DurationMSKey).(int64); ok {
+		r.SetMeta("duration_ms", positiveDuration(duration))
+	} else if start, ok := ctx.Value(envelope.RunEStartKey).(time.Time); ok {
+		r.SetMeta("duration_ms", positiveDuration(time.Since(start).Milliseconds()))
 	}
-	if bootstrapStart, ok := cmd.Context().Value(envelope.BootstrapStartKey).(time.Time); ok {
-		if runStart, ok := cmd.Context().Value(envelope.RunEStartKey).(time.Time); ok {
-			bootstrap := runStart.Sub(bootstrapStart).Milliseconds()
-			if bootstrap < 0 {
-				bootstrap = 0
-			}
-			r.SetMeta("bootstrap_ms", bootstrap)
+
+	if bootstrap, ok := ctx.Value(envelope.BootstrapMSKey).(int64); ok {
+		r.SetMeta("bootstrap_ms", positiveDuration(bootstrap))
+	} else if bootstrapStart, ok := ctx.Value(envelope.BootstrapStartKey).(time.Time); ok {
+		if runStart, ok := ctx.Value(envelope.RunEStartKey).(time.Time); ok {
+			r.SetMeta("bootstrap_ms", positiveDuration(runStart.Sub(bootstrapStart).Milliseconds()))
 		}
 	}
-	return r
+
+	return r.Renderer.Flush()
+}
+
+func positiveDuration(ms int64) int64 {
+	if ms < 1 {
+		return 1
+	}
+	return ms
 }
