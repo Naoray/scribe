@@ -58,6 +58,7 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe add` | --alias, --force, --json, --registry, --yes | yes |
 | `scribe adopt` | --dry-run, --json, --verbose, --yes | yes |
 | `scribe browse` | --install, --json, --query, --registry, --yes | no |
+| `scribe check` | --json | yes |
 | `scribe config adoption` | --add-path, --json, --mode, --remove-path | no |
 | `scribe config set editor` | --json | no |
 | `scribe config set` | --json | no |
@@ -100,6 +101,7 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe tools` | --json | no |
 | `scribe upgrade-agent` | --json | no |
 | `scribe upgrade` | --check, --json | no |
+| `scribe update` | --apply, --json | yes |
 | `scribe` |  | no |
 
 
