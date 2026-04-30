@@ -126,6 +126,7 @@ Run `scribe sync` again anytime to pick up new skills. Setting up a registry fro
 
 ## Documentation
 
+- [Comparison](docs/comparison.md) — how scribe compares with skills.sh, Superpowers, Anthropic skills, Cursor rules, Cline/Roo, and MCP
 - [Commands reference](docs/commands.md) — every subcommand grouped by use
 - [JSON envelope + agent contract](docs/json-envelope.md) — envelope shape, exit codes, `--fields`, schema introspection
 - [Projects, kits, and snippets](docs/projects-and-kits.md) — `.scribe.yaml`, kits, snippet rules
