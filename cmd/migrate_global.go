@@ -142,7 +142,11 @@ func printGlobalToProjectsResult(cmd *cobra.Command, result projectmigrate.Migra
 	}
 	fmt.Fprintf(out, "%sfound %d globally projected skill link(s) for %d skill(s)\n", prefix, result.FoundGlobalLinks, result.FoundSkills)
 	if len(result.ProjectFiles) > 0 {
-		fmt.Fprintf(out, "%swrote .scribe.yaml in %d project(s)\n", prefix, result.WroteProjectFiles)
+		projectWrites := result.WroteProjectFiles
+		if result.DryRun {
+			projectWrites = result.PlannedProjectFileWrites
+		}
+		fmt.Fprintf(out, "%swrote .scribe.yaml in %d project(s)\n", prefix, projectWrites)
 		for _, change := range result.ProjectFiles {
 			action := "unchanged"
 			if change.Changed {
@@ -151,7 +155,11 @@ func printGlobalToProjectsResult(cmd *cobra.Command, result projectmigrate.Migra
 			fmt.Fprintf(out, "  %s %s (%d skill%s)\n", action, change.Project, len(change.Skills), plural(len(change.Skills)))
 		}
 	}
-	fmt.Fprintf(out, "%sremoved %d global symlink(s)\n", prefix, result.RemovedGlobalLinks)
+	linkRemovals := result.RemovedGlobalLinks
+	if result.DryRun {
+		linkRemovals = result.PlannedGlobalLinkRemovals
+	}
+	fmt.Fprintf(out, "%sremoved %d global symlink(s)\n", prefix, linkRemovals)
 	if result.SkippedGlobalLinks > 0 {
 		fmt.Fprintf(out, "skipped %d global path(s) that were already gone or no longer symlinks\n", result.SkippedGlobalLinks)
 	}

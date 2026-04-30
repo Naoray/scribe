@@ -32,17 +32,19 @@ type MigrationPlan struct {
 
 // MigrationResult summarizes applied work.
 type MigrationResult struct {
-	DryRun             bool               `json:"dry_run"`
-	FoundGlobalLinks   int                `json:"found_global_links"`
-	FoundSkills        int                `json:"found_skills"`
-	SelectedProjects   int                `json:"selected_projects"`
-	WroteProjectFiles  int                `json:"wrote_project_files"`
-	RemovedGlobalLinks int                `json:"removed_global_links"`
-	SkippedGlobalLinks int                `json:"skipped_global_links"`
-	ProjectFiles       []ProjectChange    `json:"project_files"`
-	RemovedLinks       []GlobalSymlink    `json:"removed_links"`
-	SkippedLinks       []GlobalSymlink    `json:"skipped_links,omitempty"`
-	CandidateProjects  []ProjectCandidate `json:"candidate_projects"`
+	DryRun                    bool               `json:"dry_run"`
+	FoundGlobalLinks          int                `json:"found_global_links"`
+	FoundSkills               int                `json:"found_skills"`
+	SelectedProjects          int                `json:"selected_projects"`
+	PlannedProjectFileWrites  int                `json:"planned_project_file_writes"`
+	PlannedGlobalLinkRemovals int                `json:"planned_global_link_removals"`
+	WroteProjectFiles         int                `json:"wrote_project_files"`
+	RemovedGlobalLinks        int                `json:"removed_global_links"`
+	SkippedGlobalLinks        int                `json:"skipped_global_links"`
+	ProjectFiles              []ProjectChange    `json:"project_files"`
+	RemovedLinks              []GlobalSymlink    `json:"removed_links"`
+	SkippedLinks              []GlobalSymlink    `json:"skipped_links,omitempty"`
+	CandidateProjects         []ProjectCandidate `json:"candidate_projects"`
 }
 
 // BuildPlan creates an idempotent migration plan for selected projects.
@@ -75,21 +77,21 @@ func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool) (Mig
 // without mutating the filesystem.
 func Apply(plan MigrationPlan, candidates []ProjectCandidate) (MigrationResult, error) {
 	result := MigrationResult{
-		DryRun:            plan.DryRun,
-		FoundGlobalLinks:  len(plan.GlobalLinks),
-		FoundSkills:       len(uniqueSkills(plan.GlobalLinks)),
-		SelectedProjects:  len(plan.ProjectFiles),
-		ProjectFiles:      append([]ProjectChange(nil), plan.ProjectFiles...),
-		CandidateProjects: append([]ProjectCandidate(nil), candidates...),
+		DryRun:                    plan.DryRun,
+		FoundGlobalLinks:          len(plan.GlobalLinks),
+		FoundSkills:               len(uniqueSkills(plan.GlobalLinks)),
+		SelectedProjects:          len(plan.ProjectFiles),
+		PlannedGlobalLinkRemovals: len(plan.RemovedLinks),
+		ProjectFiles:              append([]ProjectChange(nil), plan.ProjectFiles...),
+		CandidateProjects:         append([]ProjectCandidate(nil), candidates...),
+	}
+	for _, change := range plan.ProjectFiles {
+		if change.Changed {
+			result.PlannedProjectFileWrites++
+		}
 	}
 
 	if plan.DryRun {
-		for _, change := range plan.ProjectFiles {
-			if change.Changed {
-				result.WroteProjectFiles++
-			}
-		}
-		result.RemovedGlobalLinks = len(plan.RemovedLinks)
 		result.RemovedLinks = append([]GlobalSymlink(nil), plan.RemovedLinks...)
 		return result, nil
 	}
