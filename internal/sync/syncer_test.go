@@ -555,6 +555,54 @@ func TestApply_PackageOutdated_NoUpdateCmd(t *testing.T) {
 	}
 }
 
+func TestRunWithDiff_BudgetUsesCurrentProjectProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		t.Fatalf("store dir: %v", err)
+	}
+	writeStoredSkill(t, storeDir, "unrelated", strings.Repeat("x", 6000))
+
+	projectRoot := t.TempDir()
+	var events []any
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: skillContent("incoming", "small")}},
+		},
+		Tools:       []tools.Tool{tools.CodexTool{}},
+		ProjectRoot: projectRoot,
+		Emit:        func(msg any) { events = append(events, msg) },
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"unrelated": {
+			Tools: []string{"codex"},
+			Projections: []state.ProjectionEntry{{
+				Project: t.TempDir(),
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+	statuses := []sync.SkillStatus{{
+		Name:   "incoming",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "incoming", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+	for _, event := range events {
+		if msg, ok := event.(sync.SkillErrorMsg); ok {
+			t.Fatalf("unexpected SkillErrorMsg: %v", msg.Err)
+		}
+	}
+	if _, ok := st.Installed["incoming"]; !ok {
+		t.Fatal("incoming skill was not installed")
+	}
+}
+
 // TestApply_RealDirectoryAtProjectionPath verifies that sync emits an actionable
 // SkillErrorMsg and preserves the real directory when a non-scribe directory
 // exists at the tool projection path.
@@ -624,4 +672,22 @@ func TestApply_RealDirectoryAtProjectionPath(t *testing.T) {
 	if _, ok := st.Installed["qa"]; ok {
 		t.Error("skill should not be in state when install failed")
 	}
+}
+
+func writeStoredSkill(t *testing.T, storeDir, name, description string) {
+	t.Helper()
+	skillDir := filepath.Join(storeDir, name)
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir stored skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), skillContent(name, description), 0o644); err != nil {
+		t.Fatalf("write stored skill: %v", err)
+	}
+}
+
+func skillContent(name, description string) []byte {
+	return []byte("---\n" +
+		"name: " + name + "\n" +
+		"description: " + description + "\n" +
+		"---\n")
 }

@@ -630,11 +630,11 @@ func (s *Syncer) checkBudgetBeforeProjection(st *state.State, incomingName strin
 		return nil
 	}
 
-	skills, err := budgetSkillsFromStore(st, incomingName, incomingContent)
-	if err != nil {
-		return err
-	}
 	for _, agent := range agents {
+		skills, err := budgetSkillsForProjection(st, incomingName, incomingContent, s.ProjectRoot, agent)
+		if err != nil {
+			return err
+		}
 		result := ibudget.CheckBudget(skills, agent)
 		if result.Status != ibudget.StatusRefuse {
 			continue
@@ -668,23 +668,27 @@ func budgetedToolNames(toolSet []tools.Tool) []string {
 	return agents
 }
 
-func budgetSkillsFromStore(st *state.State, incomingName string, incomingContent []byte) ([]ibudget.Skill, error) {
+func budgetSkillsForProjection(st *state.State, incomingName string, incomingContent []byte, projectRoot, agent string) ([]ibudget.Skill, error) {
 	storeDir, err := tools.StoreDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve store dir: %w", err)
 	}
 
-	names := make([]string, 0, len(st.Installed)+1)
 	seen := map[string]bool{}
 	for name, installed := range st.Installed {
 		if installed.Kind == state.KindPackage {
 			continue
 		}
-		names = append(names, name)
+		if name == incomingName || !projectedToAgent(installed, projectRoot, agent) {
+			continue
+		}
 		seen[name] = true
 	}
-	if !seen[incomingName] {
-		names = append(names, incomingName)
+	seen[incomingName] = true
+
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
 	}
 	sort.Strings(names)
 
@@ -701,6 +705,27 @@ func budgetSkillsFromStore(st *state.State, incomingName string, incomingContent
 		skills = append(skills, ibudget.Skill{Name: name, Content: content})
 	}
 	return skills, nil
+}
+
+func projectedToAgent(installed state.InstalledSkill, projectRoot, agent string) bool {
+	for _, projection := range installed.Projections {
+		if projection.Project == projectRoot && containsString(projection.Tools, agent) {
+			return true
+		}
+	}
+	if projectRoot != "" || len(installed.Projections) > 0 {
+		return false
+	}
+	return containsString(installed.Tools, agent)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeProjection(installed *state.InstalledSkill, projectRoot string, toolNames []string) []state.ProjectionEntry {
