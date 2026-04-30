@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -37,6 +38,34 @@ func TestDiscoverPackageSkillsEmptyDirectory(t *testing.T) {
 	}
 }
 
+func TestDefaultInitPackageMetaUsesCwdNameAndGitAuthor(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "my-skills-repo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGitForInitTest(t, dir, "init")
+	runGitForInitTest(t, dir, "config", "user.name", "Test Author")
+
+	meta := defaultInitPackageMeta(dir)
+
+	if meta.Name != "my-skills-repo" {
+		t.Fatalf("Name = %q, want my-skills-repo", meta.Name)
+	}
+	if meta.Author != "Test Author" {
+		t.Fatalf("Author = %q, want Test Author", meta.Author)
+	}
+}
+
+func TestNewInitCommandHasForceFlag(t *testing.T) {
+	cmd := newInitCommand()
+	if cmd.Use != "init" {
+		t.Fatalf("Use = %q, want init", cmd.Use)
+	}
+	if cmd.Flags().Lookup("force") == nil {
+		t.Fatal("init command missing --force flag")
+	}
+}
+
 func writeInitSkill(t *testing.T, root, name, content string) {
 	t.Helper()
 	dir := filepath.Join(root, name)
@@ -45,5 +74,14 @@ func writeInitSkill(t *testing.T, root, name, content string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write SKILL.md: %v", err)
+	}
+}
+
+func runGitForInitTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, string(out))
 	}
 }
