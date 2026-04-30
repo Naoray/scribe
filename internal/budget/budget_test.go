@@ -18,7 +18,7 @@ func TestEstimateDescriptionBytes(t *testing.T) {
 				"description: é\n" +
 				"---\n\n" +
 				"你好\n",
-			want: len([]byte("é")) + len([]byte("你好")),
+			want: len([]byte("é")) + len("\n\n") + len([]byte("你好")),
 		},
 		{
 			name: "empty description still counts first body paragraph",
@@ -38,7 +38,7 @@ func TestEstimateDescriptionBytes(t *testing.T) {
 				"First paragraph spans\n" +
 				"two lines.\n\n" +
 				"Second paragraph is ignored.\n",
-			want: len("Frontmatter description.") + len("First paragraph spans two lines."),
+			want: len("Frontmatter description.") + len("\n\n") + len("First paragraph spans two lines."),
 		},
 		{
 			name: "no frontmatter counts first body paragraph",

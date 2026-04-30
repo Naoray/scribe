@@ -47,8 +47,13 @@ func (r Result) Percent() int {
 
 func EstimateDescriptionBytes(skill Skill) int {
 	description, body := splitSkill(skill.Content)
+	description = strings.TrimSpace(description)
 	firstParagraph := extractFirstParagraph(body)
-	return len([]byte(strings.TrimSpace(description))) + len([]byte(firstParagraph))
+	used := len([]byte(description)) + len([]byte(firstParagraph))
+	if description != "" && firstParagraph != "" {
+		used += len("\n\n")
+	}
+	return used
 }
 
 func CheckBudget(skills []Skill, agent string) Result {
