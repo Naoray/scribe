@@ -31,8 +31,9 @@ func EnsureScribeAgent(store string, st *state.State, cfg *config.Config) (bool,
 		installed.Sources[0].Ref == EmbeddedVersion {
 		skillDir := filepath.Join(store, "scribe-agent")
 		_, skillErr := os.Stat(filepath.Join(skillDir, "SKILL.md"))
+		_, claudeErr := os.Stat(filepath.Join(skillDir, "CLAUDE.md"))
 		baseContent, baseErr := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
-		if skillErr == nil && baseErr == nil && validateSkillContent(baseContent) == nil {
+		if skillErr == nil && claudeErr == nil && baseErr == nil && validateSkillContent(baseContent) == nil {
 			return false, nil
 		}
 	}
@@ -52,10 +53,15 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 
 	skillDir := filepath.Join(store, "scribe-agent")
 	skillPath := filepath.Join(skillDir, "SKILL.md")
+	claudePath := filepath.Join(skillDir, "CLAUDE.md")
 	basePath := filepath.Join(skillDir, ".scribe-base.md")
 
 	if existingContent, err := os.ReadFile(skillPath); err == nil && skillMatches(existingContent, content) {
-		if existingBaseContent, err := os.ReadFile(basePath); err == nil && skillMatches(existingBaseContent, content) {
+		existingClaudeContent, claudeErr := os.ReadFile(claudePath)
+		if existingBaseContent, err := os.ReadFile(basePath); err == nil &&
+			claudeErr == nil &&
+			skillMatches(existingBaseContent, content) &&
+			skillMatches(existingClaudeContent, EmbeddedClaudeTemplate) {
 			if installed, ok := st.Installed["scribe-agent"]; ok && installed.Origin == state.OriginBootstrap {
 				if len(installed.Sources) > 0 && installed.Sources[0].Ref == version {
 					return false, nil
@@ -69,6 +75,9 @@ func InstallScribeAgent(store string, st *state.State, content []byte, version s
 	}
 	if err := os.WriteFile(skillPath, content, 0o644); err != nil {
 		return false, fmt.Errorf("write bootstrap skill: %w", err)
+	}
+	if err := os.WriteFile(claudePath, EmbeddedClaudeTemplate, 0o644); err != nil {
+		return false, fmt.Errorf("write bootstrap claude: %w", err)
 	}
 	if err := os.WriteFile(basePath, content, 0o644); err != nil {
 		return false, fmt.Errorf("write bootstrap base: %w", err)

@@ -7,13 +7,13 @@ import (
 
 func TestWrapPreservesErrorChainAndAs(t *testing.T) {
 	base := stderrors.New("boom")
-	err := Wrap(base, "NETWORK", ExitNetwork, WithRetryable(true), WithRemediation("retry"))
+	err := Wrap(base, "NETWORK", ExitNetwork, WithRetryable(true), WithRemediation("retry"), WithRendered(true))
 
 	var ce *Error
 	if !stderrors.As(err, &ce) {
 		t.Fatal("errors.As did not find *Error")
 	}
-	if ce.Code != "NETWORK" || ce.Exit != ExitNetwork || !ce.Retryable || ce.Remediation != "retry" {
+	if ce.Code != "NETWORK" || ce.Exit != ExitNetwork || !ce.Retryable || ce.Remediation != "retry" || !ce.Rendered {
 		t.Fatalf("wrapped error = %+v", ce)
 	}
 	if !stderrors.Is(err, base) {

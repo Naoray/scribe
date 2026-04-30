@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/go-github/v69/github"
 	"golang.org/x/oauth2"
+
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 )
 
 // ErrRepoExists is returned when CreateRepo encounters a 422 "name already exists" error.
@@ -366,16 +368,32 @@ func wrapErr(err error, operation string) error {
 	if errors.As(err, &ghErr) {
 		switch ghErr.Response.StatusCode {
 		case http.StatusNotFound:
-			return fmt.Errorf("%s: not found (check the repo/path exists and you have access): %w", operation, err)
+			return clierrors.Wrap(err, "GH_NOT_FOUND", clierrors.ExitNotFound,
+				clierrors.WithMessage(fmt.Sprintf("%s: not found (check the repo/path exists and you have access)", operation)),
+				clierrors.WithResource(operation),
+			)
 		case http.StatusUnauthorized, http.StatusForbidden:
 			if ghErr.Response.Header.Get("X-RateLimit-Remaining") == "0" {
 				reset := ghErr.Response.Header.Get("X-RateLimit-Reset")
-				return fmt.Errorf("%s: rate limit exceeded, resets at %s — set GITHUB_TOKEN for higher limits: %w", operation, formatReset(reset), err)
+				return clierrors.Wrap(err, "GH_RATE_LIMITED", clierrors.ExitNetwork,
+					clierrors.WithMessage(fmt.Sprintf("%s: rate limit exceeded, resets at %s", operation, formatReset(reset))),
+					clierrors.WithRetryable(true),
+					clierrors.WithRemediation("set GITHUB_TOKEN for higher limits"),
+					clierrors.WithResource(operation),
+				)
 			}
-			return fmt.Errorf("%s: authentication required — run `gh auth login` or set GITHUB_TOKEN: %w", operation, err)
+			return clierrors.Wrap(err, "GH_AUTH_FAILED", clierrors.ExitPerm,
+				clierrors.WithMessage(fmt.Sprintf("%s: authentication required", operation)),
+				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
+				clierrors.WithResource(operation),
+			)
 		}
 	}
-	return fmt.Errorf("%s: %w", operation, err)
+	return clierrors.Wrap(err, "GH_NETWORK_FAILED", clierrors.ExitNetwork,
+		clierrors.WithMessage(fmt.Sprintf("%s: %v", operation, err)),
+		clierrors.WithRetryable(true),
+		clierrors.WithResource(operation),
+	)
 }
 
 func formatReset(unixTimestamp string) string {

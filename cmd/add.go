@@ -14,6 +14,8 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/Naoray/scribe/internal/cli/envelope"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
@@ -63,12 +65,12 @@ Examples:
 	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 	registryFilter, _ := cmd.Flags().GetString("registry")
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
@@ -102,9 +104,14 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if !client.IsAuthenticated() {
-			return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
+			return clierrors.Wrap(
+				fmt.Errorf("authentication required"),
+				"GH_AUTH_FAILED",
+				clierrors.ExitPerm,
+				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
+			)
 		}
-		return runAddDirectInstall(ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets), true, useJSON, skipConfirm)
+		return runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets), true, useJSON, skipConfirm)
 	}
 
 	// Need at least one connected registry to search/browse.
@@ -112,7 +119,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
 	}
 	if !client.IsAuthenticated() {
-		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
+		return clierrors.Wrap(
+			fmt.Errorf("authentication required"),
+			"GH_AUTH_FAILED",
+			clierrors.ExitPerm,
+			clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
+		)
 	}
 
 	// Determine which registries to browse.
@@ -149,7 +161,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	// JSON or non-TTY: just emit results.
 	if useJSON {
-		return emitBrowseJSON(entries)
+		return emitBrowseJSONForCommand(cmd, entries)
 	}
 
 	if len(entries) == 0 {
@@ -178,15 +190,18 @@ func runAdd(cmd *cobra.Command, args []string) error {
 func parseSkillRef(ref string) (registryRepo, skillName string, err error) {
 	idx := strings.LastIndex(ref, ":")
 	if idx < 0 {
-		return "", "", fmt.Errorf("invalid skill reference %q: expected owner/repo:skillname", ref)
+		err := fmt.Errorf("invalid skill reference %q: expected owner/repo:skillname", ref)
+		return "", "", clierrors.Wrap(err, "USAGE_INVALID_SKILL_REF", clierrors.ExitUsage)
 	}
 	registryRepo = ref[:idx]
 	skillName = ref[idx+1:]
 	if _, _, perr := manifest.ParseOwnerRepo(registryRepo); perr != nil {
-		return "", "", fmt.Errorf("invalid skill reference %q: %w", ref, perr)
+		err := fmt.Errorf("invalid skill reference %q: %w", ref, perr)
+		return "", "", clierrors.Wrap(err, "USAGE_INVALID_SKILL_REF", clierrors.ExitUsage)
 	}
 	if skillName == "" {
-		return "", "", fmt.Errorf("invalid skill reference %q: skill name is empty", ref)
+		err := fmt.Errorf("invalid skill reference %q: skill name is empty", ref)
+		return "", "", clierrors.Wrap(err, "USAGE_INVALID_SKILL_REF", clierrors.ExitUsage)
 	}
 	return registryRepo, skillName, nil
 }
@@ -204,8 +219,27 @@ func runAddDirectInstall(
 	useJSON bool,
 	skipConfirm bool,
 ) error {
+	return runAddDirectInstallForCommand(nil, ctx, registryRepo, skillName, cfg, st, syncer, authenticated, useJSON, skipConfirm)
+}
+
+func runAddDirectInstallForCommand(
+	cmd *cobra.Command,
+	ctx context.Context,
+	registryRepo, skillName string,
+	cfg *config.Config,
+	st *state.State,
+	syncer *sync.Syncer,
+	authenticated bool,
+	useJSON bool,
+	skipConfirm bool,
+) error {
 	if !authenticated {
-		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
+		return clierrors.Wrap(
+			fmt.Errorf("authentication required"),
+			"GH_AUTH_FAILED",
+			clierrors.ExitPerm,
+			clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
+		)
 	}
 
 	statuses, _, err := syncer.Diff(ctx, registryRepo, st)
@@ -239,7 +273,7 @@ func runAddDirectInstall(
 		if useJSON {
 			return emitInstallJSON([]installResult{{
 				Name: target.Name, Registry: registryRepo, Status: "already-installed",
-			}})
+			}}, cmd)
 		}
 		fmt.Printf("%s is already installed (current).\n", skillName)
 		return nil
@@ -266,7 +300,7 @@ func runAddDirectInstall(
 	}
 
 	if useJSON {
-		return emitInstallJSON(*results)
+		return emitInstallJSON(*results, cmd)
 	}
 	return nil
 }
@@ -459,6 +493,10 @@ func sortEntries(entries []browseEntry) {
 
 // emitBrowseJSON emits the discovered entries as JSON for non-TTY/--json mode.
 func emitBrowseJSON(entries []browseEntry) error {
+	return emitBrowseJSONForCommand(nil, entries)
+}
+
+func emitBrowseJSONForCommand(cmd *cobra.Command, entries []browseEntry) error {
 	type row struct {
 		Name        string `json:"name"`
 		Registry    string `json:"registry"`
@@ -482,12 +520,27 @@ func emitBrowseJSON(entries []browseEntry) error {
 			Author:      e.Status.Maintainer,
 		})
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"results": rows})
+	payload := map[string]any{"results": rows}
+	if cmd == nil {
+		return json.NewEncoder(os.Stdout).Encode(payload)
+	}
+	return renderMutatorEnvelope(cmd, payload, envelope.StatusOK)
 }
 
 // emitInstallJSON emits per-skill install results as JSON.
-func emitInstallJSON(results []installResult) error {
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"installed": results})
+func emitInstallJSON(results []installResult, cmd *cobra.Command) error {
+	payload := map[string]any{"installed": results}
+	if cmd == nil {
+		return json.NewEncoder(os.Stdout).Encode(payload)
+	}
+	status := envelope.StatusOK
+	for _, result := range results {
+		if result.Status == "error" {
+			status = envelope.StatusPartialSuccess
+			break
+		}
+	}
+	return renderMutatorEnvelope(cmd, payload, status)
 }
 
 // runInstallBrowser launches the interactive install browser.

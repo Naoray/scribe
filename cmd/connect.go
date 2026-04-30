@@ -8,6 +8,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -29,7 +30,7 @@ Examples:
 		RunE: runConnect,
 	}
 	cmd.Flags().Bool("install-all", false, "Install every discovered skill from the connected registry")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
@@ -38,11 +39,13 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	installAll, _ := cmd.Flags().GetBool("install-all")
+	jsonFlag := jsonFlagPassed(cmd)
 
 	bag := &workflow.Bag{
 		RepoArg:        repo,
+		JSONFlag:       jsonFlag,
 		InstallAllFlag: installAll,
-		Factory:        newCommandFactory(),
+		Factory:        commandFactory(),
 	}
 	steps := workflow.ConnectSteps()
 	if installAll {
@@ -50,6 +53,12 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 	if err := workflow.Run(cmd.Context(), steps, bag); err != nil {
 		return err
+	}
+	if bag.Partial {
+		if err := saveWorkflowState(bag); err != nil {
+			return err
+		}
+		return clierrors.Wrap(clierrors.ErrPartialSuccess, "CONNECT_PARTIAL", clierrors.ExitPartial, clierrors.WithRendered(true))
 	}
 	return saveWorkflowState(bag)
 }
@@ -61,7 +70,11 @@ func resolveRepo(args []string) (string, error) {
 	}
 
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
-		return "", fmt.Errorf("no repo specified — usage: scribe connect <owner/repo>")
+		err := fmt.Errorf("no repo specified")
+		return "", clierrors.Wrap(err, "USAGE_CONNECT_REPO_REQUIRED", clierrors.ExitUsage,
+			clierrors.WithMessage(err.Error()),
+			clierrors.WithRemediation("usage: scribe connect <owner/repo>"),
+		)
 	}
 
 	var repo string

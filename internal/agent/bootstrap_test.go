@@ -44,6 +44,13 @@ func TestEnsureScribeAgentInstallsWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
 	}
+	gotClaude, err := os.ReadFile(filepath.Join(store, "scribe-agent", "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if string(gotClaude) != string(EmbeddedClaudeTemplate) {
+		t.Fatal("CLAUDE.md does not match embedded template")
+	}
 	if !strings.Contains(string(got), "===setup-start===") {
 		t.Fatal("bootstrap section missing from rendered skill")
 	}
@@ -77,6 +84,9 @@ func TestEnsureScribeAgentNoOpWhenPresent(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(skillDir, ".scribe-base.md"), steadyState, 0o644); err != nil {
 		t.Fatalf("write .scribe-base.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "CLAUDE.md"), EmbeddedClaudeTemplate, 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
 	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
@@ -117,6 +127,9 @@ func TestEnsureScribeAgentRepairsMissingBaseFile(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), steadyState, 0o644); err != nil {
 		t.Fatalf("write SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "CLAUDE.md"), EmbeddedClaudeTemplate, 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
 	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
@@ -172,6 +185,9 @@ func TestEnsureScribeAgentRepairsStaleBaseFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, ".scribe-base.md"), []byte("old"), 0o644); err != nil {
 		t.Fatalf("write .scribe-base.md: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(skillDir, "CLAUDE.md"), EmbeddedClaudeTemplate, 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
 		"scribe-agent": {
@@ -217,6 +233,9 @@ func TestEnsureScribeAgentReinstallsOnVersionMismatch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, ".scribe-base.md"), []byte("old"), 0o644); err != nil {
 		t.Fatalf("write .scribe-base.md: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(skillDir, "CLAUDE.md"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
 		"scribe-agent": {Revision: 2, Origin: state.OriginBootstrap},
@@ -244,6 +263,13 @@ func TestEnsureScribeAgentReinstallsOnVersionMismatch(t *testing.T) {
 	}
 	if strings.Contains(string(got), "===setup-start===") {
 		t.Fatal("bootstrap section should not be present in steady state")
+	}
+	gotClaude, err := os.ReadFile(filepath.Join(store, "scribe-agent", "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if string(gotClaude) != string(EmbeddedClaudeTemplate) {
+		t.Fatal("CLAUDE.md was not refreshed from embedded template")
 	}
 }
 

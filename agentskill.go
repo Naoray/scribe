@@ -7,3 +7,8 @@ import _ "embed"
 //
 //go:embed SKILL.md.tmpl
 var AgentSkillTemplate []byte
+
+// AgentClaudeTemplate is the generated agent-facing CLI contract embedded at build time.
+//
+//go:embed CLAUDE.md
+var AgentClaudeTemplate []byte
