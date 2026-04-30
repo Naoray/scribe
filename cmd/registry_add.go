@@ -47,7 +47,7 @@ Examples:
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Target registry (owner/repo)")
 	cmd.Flags().StringArray("install", nil, "Per-tool install command for package refs (tool=command, repeatable)")
-	return markJSONSupported(cmd)
+	return cmd
 }
 
 func runRegistryAdd(cmd *cobra.Command, args []string) error {

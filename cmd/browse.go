@@ -34,7 +34,7 @@ func newBrowseCommand() *cobra.Command {
 	cmd.Flags().String("install", "", "Install a skill by exact name or owner/repo:skill")
 	cmd.Flags().String("registry", "", "Limit browse/install to one connected registry")
 	cmd.Flags().Bool("yes", false, "Skip confirmation prompt")
-	return markJSONSupported(cmd)
+	return cmd
 }
 
 func runBrowse(cmd *cobra.Command, _ []string) error {

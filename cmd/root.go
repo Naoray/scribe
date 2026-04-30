@@ -185,7 +185,6 @@ func newRootCmd() *cobra.Command {
 	}
 
 	cmd.RunE = runDefault
-	markJSONSupported(cmd)
 	cmd.PersistentFlags().Bool("json", false, "Output machine-readable JSON")
 	cmd.CompletionOptions = cobra.CompletionOptions{HiddenDefaultCmd: true}
 

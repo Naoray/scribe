@@ -37,7 +37,7 @@ Examples:
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.MarkFlagsMutuallyExclusive("enable", "reset")
 	cmd.MarkFlagsMutuallyExclusive("disable", "reset")
-	return markJSONSupported(cmd)
+	return cmd
 }
 
 func runSkillTools(cmd *cobra.Command, args []string) error {
