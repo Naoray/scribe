@@ -195,6 +195,7 @@ func newRootCmd() *cobra.Command {
 		newSyncCommand(),
 		newAdoptCommand(),
 		newStatusCommand(),
+		newSchemaCommand(cmd),
 		newResolveCommand(),
 		newRestoreCommand(),
 		newSkillCommand(),
