@@ -103,15 +103,16 @@ func runHookScript(t *testing.T, pathEnv string, stdin []byte) []byte {
 	cmd.Env = append(os.Environ(), "PATH="+pathEnv)
 	cmd.Stdin = bytes.NewReader(stdin)
 
-	stdout, err := cmd.Output()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
 	if ctx.Err() != nil {
-		t.Fatalf("hook script timed out: %v", ctx.Err())
+		t.Fatalf("hook script timed out after 5s: %v\nstderr:\n%s", ctx.Err(), stderr.String())
 	}
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			t.Fatalf("hook script failed: %v\nstderr:\n%s", err, exitErr.Stderr)
-		}
-		t.Fatalf("hook script failed: %v", err)
+		t.Fatalf("hook script failed: %v\nstderr:\n%s", err, stderr.String())
 	}
-	return stdout
+	return stdout.Bytes()
 }
