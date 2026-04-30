@@ -21,10 +21,19 @@ var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // SkillMeta holds metadata parsed from SKILL.md frontmatter.
 type SkillMeta struct {
-	Name        string
-	Description string
-	Version     string
-	Author      string
+	Name           string
+	Description    string
+	RawDescription string
+	Version        string
+	Author         string
+	Source         Source
+}
+
+// Source holds optional upstream attribution parsed from SKILL.md frontmatter.
+type Source struct {
+	URL    string `yaml:"url" json:"url,omitempty"`
+	Author string `yaml:"author" json:"author,omitempty"`
+	Note   string `yaml:"note" json:"note,omitempty"`
 }
 
 // rawFrontmatter maps the YAML frontmatter structure in SKILL.md files.
@@ -33,6 +42,7 @@ type rawFrontmatter struct {
 	Description string         `yaml:"description"`
 	Version     string         `yaml:"version"`
 	Author      string         `yaml:"author"`
+	Source      Source         `yaml:"source"`
 	Metadata    map[string]any `yaml:"metadata"`
 }
 
@@ -45,16 +55,18 @@ var reservedNames = map[string]bool{
 
 // Skill represents a skill found on disk, optionally enriched with state info.
 type Skill struct {
-	Name        string
-	Description string   // short description from SKILL.md frontmatter or first paragraph
-	Package     string   // parent package name if skill is a symlink sub-skill (e.g. "gstack")
-	LocalPath   string   // absolute path on disk
-	ContentHash string   // deterministic content fingerprint
-	Targets     []string // from state if tracked, else inferred from location
-	Modified    bool     // SKILL.md hash differs from installed_hash in state
-	Conflicted  bool     // SKILL.md contains unresolved merge conflict markers
-	Revision    int      // from state
-	Managed     bool     // tracked in state AND LocalPath is inside ~/.scribe/skills/
+	Name           string
+	Description    string   // short description from SKILL.md frontmatter or first paragraph
+	RawDescription string   // untruncated description from SKILL.md frontmatter or first paragraph
+	Source         Source   // optional upstream attribution from SKILL.md frontmatter
+	Package        string   // parent package name if skill is a symlink sub-skill (e.g. "gstack")
+	LocalPath      string   // absolute path on disk
+	ContentHash    string   // deterministic content fingerprint
+	Targets        []string // from state if tracked, else inferred from location
+	Modified       bool     // SKILL.md hash differs from installed_hash in state
+	Conflicted     bool     // SKILL.md contains unresolved merge conflict markers
+	Revision       int      // from state
+	Managed        bool     // tracked in state AND LocalPath is inside ~/.scribe/skills/
 	// IsPackage reports whether this row represents a ~/.scribe/packages/<name>/
 	// tree package rather than a regular skill. Packages self-install and
 	// don't get projected into tool skill dirs.
@@ -334,12 +346,14 @@ func buildSkill(name, skillDir, scanBase, target string, st *state.State, scribe
 	}
 
 	sk := Skill{
-		Name:        name,
-		Description: meta.Description,
-		LocalPath:   skillDir,
-		Package:     detectPackage(skillDir, scanBase),
-		ContentHash: hash,
-		Conflicted:  conflicted,
+		Name:           name,
+		Description:    meta.Description,
+		RawDescription: meta.RawDescription,
+		Source:         meta.Source,
+		LocalPath:      skillDir,
+		Package:        detectPackage(skillDir, scanBase),
+		ContentHash:    hash,
+		Conflicted:     conflicted,
 	}
 
 	if installed, ok := st.Installed[name]; ok {
@@ -427,7 +441,8 @@ func readSkillMetadata(skillDir string) SkillMeta {
 
 	fm := extractFrontmatter(data)
 	if fm == "" {
-		return SkillMeta{Description: extractFirstParagraph(data)}
+		rawDescription := extractFirstParagraphRaw(data)
+		return SkillMeta{Description: truncateDescription(rawDescription), RawDescription: rawDescription}
 	}
 
 	var raw rawFrontmatter
@@ -436,10 +451,12 @@ func readSkillMetadata(skillDir string) SkillMeta {
 	}
 
 	meta := SkillMeta{
-		Name:        raw.Name,
-		Description: truncateDescription(raw.Description),
-		Version:     raw.Version,
-		Author:      raw.Author,
+		Name:           raw.Name,
+		Description:    truncateDescription(raw.Description),
+		RawDescription: strings.TrimSpace(raw.Description),
+		Version:        raw.Version,
+		Author:         raw.Author,
+		Source:         raw.Source,
 	}
 
 	// metadata.* overrides top-level (agentskills spec).
@@ -451,7 +468,8 @@ func readSkillMetadata(skillDir string) SkillMeta {
 	}
 
 	if meta.Description == "" {
-		meta.Description = extractFirstParagraph(data)
+		meta.RawDescription = extractFirstParagraphRaw(data)
+		meta.Description = truncateDescription(meta.RawDescription)
 	}
 
 	return meta
@@ -477,6 +495,10 @@ func extractFrontmatter(data []byte) string {
 
 // extractFirstParagraph returns the first non-empty line after a # heading.
 func extractFirstParagraph(data []byte) string {
+	return truncateDescription(extractFirstParagraphRaw(data))
+}
+
+func extractFirstParagraphRaw(data []byte) string {
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	pastTitle := false
 	for scanner.Scan() {
@@ -486,7 +508,7 @@ func extractFirstParagraph(data []byte) string {
 			continue
 		}
 		if pastTitle && strings.TrimSpace(line) != "" {
-			return truncateDescription(strings.TrimSpace(line))
+			return strings.TrimSpace(line)
 		}
 	}
 	return ""

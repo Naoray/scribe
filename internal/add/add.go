@@ -17,15 +17,16 @@ import (
 	"github.com/Naoray/scribe/internal/tools"
 )
 
-
 // Candidate represents a skill that can be added to a registry.
 type Candidate struct {
-	Name        string // skill name (directory basename)
-	Description string // short description from SKILL.md
-	Origin      string // "local" or "registry:owner/repo"
-	Package     string // parent package name if sub-skill (e.g. "gstack")
-	Source      string // "github:owner/repo@ref" or empty for local-only
-	LocalPath   string // absolute path on disk, empty for remote-only
+	Name           string // skill name (directory basename)
+	Description    string // short description from SKILL.md
+	RawDescription string // untruncated description from SKILL.md
+	Origin         string // "local" or "registry:owner/repo"
+	Package        string // parent package name if sub-skill (e.g. "gstack")
+	Source         string // "github:owner/repo@ref" or empty for local-only
+	Attribution    discovery.Source
+	LocalPath      string // absolute path on disk, empty for remote-only
 }
 
 // NeedsUpload reports whether this candidate requires uploading files to the
@@ -37,9 +38,9 @@ func (c Candidate) NeedsUpload() bool {
 // Adder wires discovery and GitHub push together.
 // Emits events via the Emit callback — the caller decides output format.
 type Adder struct {
-	Client  *gh.Client
-	Tools []tools.Tool
-	Emit    func(any)
+	Client *gh.Client
+	Tools  []tools.Tool
+	Emit   func(any)
 }
 
 func (a *Adder) emit(msg any) {
@@ -60,12 +61,14 @@ func (a *Adder) DiscoverLocal(st *state.State) ([]Candidate, error) {
 	for _, sk := range skills {
 		source := sourceFromState(st, sk.Name)
 		candidates = append(candidates, Candidate{
-			Name:        sk.Name,
-			Description: sk.Description,
-			Origin:      "local",
-			Package:     sk.Package,
-			LocalPath:   sk.LocalPath,
-			Source:      source,
+			Name:           sk.Name,
+			Description:    sk.Description,
+			RawDescription: sk.RawDescription,
+			Origin:         "local",
+			Package:        sk.Package,
+			LocalPath:      sk.LocalPath,
+			Source:         source,
+			Attribution:    sk.Source,
 		})
 	}
 
@@ -329,4 +332,3 @@ func (a *Adder) fetchManifest(ctx context.Context, owner, repo string) (*manifes
 	m, _, err := manifest.FetchWithFallback(ctx, a.Client, owner, repo, migrate.Convert)
 	return m, err
 }
-

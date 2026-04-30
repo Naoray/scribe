@@ -10,7 +10,7 @@ import (
 
 func TestReadSkillMetadata_FullFrontmatter(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: browse\nversion: 1.1.0\ndescription: Fast headless browser for QA testing.\n---\n\n# Browse\n\nContent here.\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: browse\nversion: 1.1.0\ndescription: Fast headless browser for QA testing.\nsource:\n  url: https://github.com/acme/browse\n  author: acme\n  note: upstream skill\n---\n\n# Browse\n\nContent here.\n"), 0o644)
 
 	meta := readSkillMetadata(dir)
 
@@ -22,6 +22,15 @@ func TestReadSkillMetadata_FullFrontmatter(t *testing.T) {
 	}
 	if meta.Description != "Fast headless browser for QA testing." {
 		t.Errorf("Description: got %q", meta.Description)
+	}
+	if meta.Source.URL != "https://github.com/acme/browse" {
+		t.Errorf("Source.URL: got %q", meta.Source.URL)
+	}
+	if meta.Source.Author != "acme" {
+		t.Errorf("Source.Author: got %q", meta.Source.Author)
+	}
+	if meta.Source.Note != "upstream skill" {
+		t.Errorf("Source.Note: got %q", meta.Source.Note)
 	}
 }
 
@@ -364,7 +373,7 @@ func TestOnDiskManagedField(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Store scan finds "bar" first; claude-dir symlink pass skips it as a duplicate.
-			// Result: exactly one entry, Managed=true because state tracks it.
+		// Result: exactly one entry, Managed=true because state tracks it.
 		var found *Skill
 		for i := range skills {
 			if skills[i].Name == "bar" {

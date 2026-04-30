@@ -181,6 +181,35 @@ func TestDiscoverLocal_SourceFromState(t *testing.T) {
 	}
 }
 
+func TestDiscoverLocal_AttributionFromFrontmatterSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(home, ".scribe", "skills", "upstreamed")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: upstreamed\ndescription: From https://github.com/acme/upstreamed\nsource:\n  url: https://github.com/acme/upstreamed\n  author: acme\n---\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adder := &add.Adder{}
+	candidates, err := adder.DiscoverLocal(&state.State{Installed: map[string]state.InstalledSkill{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("got %d candidates, want 1", len(candidates))
+	}
+	if candidates[0].Attribution.URL != "https://github.com/acme/upstreamed" {
+		t.Fatalf("Attribution.URL = %q", candidates[0].Attribution.URL)
+	}
+	if candidates[0].Attribution.Author != "acme" {
+		t.Fatalf("Attribution.Author = %q", candidates[0].Attribution.Author)
+	}
+}
+
 func TestDiscoverLocalSkipsEmptyDirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
