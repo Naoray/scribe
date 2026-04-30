@@ -393,3 +393,64 @@ func TestPrintLocalJSON(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildLocalRows_HidesBootstrapOrigin(t *testing.T) {
+	// Regression for #487: scribe-agent (Origin=Bootstrap) is auto-managed
+	// by the CLI and shouldn't appear in `scribe list`. It can't be removed
+	// — the next invocation re-installs it — so listing it just clutters.
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"my-skill":     {Origin: state.OriginRegistry},
+		"scribe-agent": {Origin: state.OriginBootstrap},
+	}}
+	skills := []discovery.Skill{
+		{Name: "my-skill", Managed: true},
+		{Name: "scribe-agent", Managed: true},
+	}
+
+	rows := BuildLocalRows(skills, st)
+	if len(rows) != 1 {
+		t.Fatalf("BuildLocalRows returned %d rows, want 1: %+v", len(rows), rows)
+	}
+	if rows[0].Name != "my-skill" {
+		t.Fatalf("row name = %q, want my-skill", rows[0].Name)
+	}
+}
+
+func TestBuildLocalRows_OnlyBootstrapReturnsEmpty(t *testing.T) {
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"scribe-agent": {Origin: state.OriginBootstrap},
+	}}
+	skills := []discovery.Skill{
+		{Name: "scribe-agent", Managed: true},
+	}
+
+	rows := BuildLocalRows(skills, st)
+	if len(rows) != 0 {
+		t.Fatalf("rows = %+v, want empty", rows)
+	}
+}
+
+func TestBuildLocalRowsExcluding_FiltersBootstrapAfterMatching(t *testing.T) {
+	// BuildLocalRowsExcluding delegates to BuildLocalRows after dropping
+	// matched entries. Verify the bootstrap filter survives the exclusion
+	// path (regression for #487 second-order coverage).
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"matched":      {Origin: state.OriginRegistry},
+		"my-skill":     {Origin: state.OriginRegistry},
+		"scribe-agent": {Origin: state.OriginBootstrap},
+	}}
+	skills := []discovery.Skill{
+		{Name: "matched", Managed: true},
+		{Name: "my-skill", Managed: true},
+		{Name: "scribe-agent", Managed: true},
+	}
+	matched := map[string]bool{"matched": true}
+
+	rows := BuildLocalRowsExcluding(skills, matched, st)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want only my-skill", rows)
+	}
+	if rows[0].Name != "my-skill" {
+		t.Fatalf("row[0].Name = %q, want my-skill", rows[0].Name)
+	}
+}
