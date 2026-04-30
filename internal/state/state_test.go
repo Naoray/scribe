@@ -33,6 +33,18 @@ func TestLoadMissing(t *testing.T) {
 	if len(s.BinaryUpdateChecks) != 0 {
 		t.Fatalf("expected empty BinaryUpdateChecks, got %d entries", len(s.BinaryUpdateChecks))
 	}
+	if s.Kits == nil {
+		t.Fatal("expected Kits to be initialized")
+	}
+	if len(s.Kits) != 0 {
+		t.Fatalf("expected empty Kits, got %d entries", len(s.Kits))
+	}
+	if s.Snippets == nil {
+		t.Fatal("expected Snippets to be initialized")
+	}
+	if len(s.Snippets) != 0 {
+		t.Fatalf("expected empty Snippets, got %d entries", len(s.Snippets))
+	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -461,6 +473,140 @@ func TestStateMigrateV4ToV5InitializesRemovedByUser(t *testing.T) {
 	}
 	if len(st.RemovedByUser) != 0 {
 		t.Fatalf("RemovedByUser len = %d, want 0", len(st.RemovedByUser))
+	}
+}
+
+func TestLoadEmptyFileReturnsEmptyV5State(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(" \n\t"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if st.SchemaVersion != 5 {
+		t.Fatalf("SchemaVersion = %d, want 5", st.SchemaVersion)
+	}
+	if len(st.Installed) != 0 {
+		t.Fatalf("Installed len = %d, want 0", len(st.Installed))
+	}
+	if st.Kits == nil || len(st.Kits) != 0 {
+		t.Fatalf("Kits = %#v, want empty non-nil map", st.Kits)
+	}
+	if st.Snippets == nil || len(st.Snippets) != 0 {
+		t.Fatalf("Snippets = %#v, want empty non-nil map", st.Snippets)
+	}
+}
+
+func TestStateMigrateLegacyToolsPathsToProjectionsRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"schema_version": 4,
+		"installed": {
+			"recap": {
+				"revision": 2,
+				"installed_hash": "abc",
+				"sources": [{"registry": "acme/skills", "ref": "main"}],
+				"installed_at": "2026-01-01T00:00:00Z",
+				"tools": ["claude", "codex"],
+				"paths": ["/Users/test/.claude/skills/recap", "/Users/test/.codex/skills/recap"]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load legacy: %v", err)
+	}
+	assertGlobalProjection(t, st.Installed["recap"], []string{"claude", "codex"})
+	if st.Kits == nil || st.Snippets == nil {
+		t.Fatalf("Kits/Snippets should be initialized: kits=%#v snippets=%#v", st.Kits, st.Snippets)
+	}
+
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save migrated: %v", err)
+	}
+	reloaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Reload migrated: %v", err)
+	}
+	if reloaded.SchemaVersion != 5 {
+		t.Fatalf("SchemaVersion = %d, want 5", reloaded.SchemaVersion)
+	}
+	assertGlobalProjection(t, reloaded.Installed["recap"], []string{"claude", "codex"})
+}
+
+func TestStateMigrateV5DenyListPreservedWhileAddingProjections(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".scribe")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{
+		"schema_version": 5,
+		"installed": {
+			"recap": {
+				"revision": 2,
+				"installed_hash": "abc",
+				"sources": [{"registry": "acme/skills", "ref": "main"}],
+				"installed_at": "2026-01-01T00:00:00Z",
+				"tools": ["claude"],
+				"paths": ["/Users/test/.claude/skills/recap"]
+			}
+		},
+		"removed_by_user": [
+			{"name": "deploy", "registry": "acme/skills", "removed_at": "2026-04-29T12:00:00Z"}
+		]
+	}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load v5 deny-list fixture: %v", err)
+	}
+	if st.SchemaVersion != 5 {
+		t.Fatalf("SchemaVersion = %d, want 5", st.SchemaVersion)
+	}
+	assertGlobalProjection(t, st.Installed["recap"], []string{"claude"})
+	if len(st.RemovedByUser) != 1 {
+		t.Fatalf("RemovedByUser len = %d, want 1", len(st.RemovedByUser))
+	}
+	if !st.IsRemovedByUser("acme/skills", "deploy") {
+		t.Fatal("expected deny-list entry to be preserved")
+	}
+	if st.Kits == nil || st.Snippets == nil {
+		t.Fatalf("Kits/Snippets should be initialized: kits=%#v snippets=%#v", st.Kits, st.Snippets)
+	}
+
+	if err := st.Save(); err != nil {
+		t.Fatalf("Save migrated v5: %v", err)
+	}
+	reloaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Reload migrated v5: %v", err)
+	}
+	assertGlobalProjection(t, reloaded.Installed["recap"], []string{"claude"})
+	if !reloaded.IsRemovedByUser("acme/skills", "deploy") {
+		t.Fatal("expected deny-list entry to survive save/reload")
 	}
 }
 
@@ -1011,6 +1157,25 @@ func installedKeys(s *state.State) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+func assertGlobalProjection(t *testing.T, skill state.InstalledSkill, wantTools []string) {
+	t.Helper()
+	if len(skill.Projections) != 1 {
+		t.Fatalf("Projections len = %d, want 1: %#v", len(skill.Projections), skill.Projections)
+	}
+	projection := skill.Projections[0]
+	if projection.Project != "" {
+		t.Fatalf("Projection project = %q, want legacy global project", projection.Project)
+	}
+	if len(projection.Tools) != len(wantTools) {
+		t.Fatalf("Projection tools = %v, want %v", projection.Tools, wantTools)
+	}
+	for i, want := range wantTools {
+		if projection.Tools[i] != want {
+			t.Fatalf("Projection tools = %v, want %v", projection.Tools, wantTools)
+		}
+	}
 }
 
 // TestMigrationSchemaV4NormalizesBranchBlobSHA verifies that loading an older
