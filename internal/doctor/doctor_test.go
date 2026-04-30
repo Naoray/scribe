@@ -267,6 +267,176 @@ description: Keep daily notes and summaries.
 	}
 }
 
+// TestInspectSkipsOpaqueToolWhenSkillPathErrors covers the gemini-style
+// failure mode: an opaque tool that intentionally returns an error from
+// SkillPath (because it cannot expose a filesystem location). The opacity
+// check must run BEFORE SkillPath so the intentional error is not wrapped
+// as a bogus projection_drift issue. See todo #488.
+func TestInspectSkipsOpaqueToolWhenSkillPathErrors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeSkill(t, "recap", []byte(`---
+name: recap
+description: Keep daily notes and summaries.
+---
+
+# Recap
+`))
+
+	// Custom tool with no Path template — SkillPath will return an error,
+	// mirroring the gemini case. CommandTool.CanonicalTarget always returns
+	// ok=false, so this tool is opaque from doctor's perspective.
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{
+				Name:      "ghost",
+				Enabled:   true,
+				Install:   "echo install",
+				Uninstall: "echo uninstall",
+			},
+		},
+	}
+	st := managedState("recap", []string{"ghost"}, []string{"ghost:user:recap"})
+
+	report, err := InspectManagedSkills(cfg, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+	for _, issue := range report.Issues {
+		if issue.Kind == IssueProjectionDrift {
+			t.Fatalf("unexpected projection_drift issue for opaque tool: %+v", issue)
+		}
+	}
+}
+
+// TestInspectStillReportsDriftForInspectableTool guards against regressing
+// drift detection while fixing the opacity bug. A real inspectable tool with
+// a missing projection on disk must still surface as projection_drift.
+func TestInspectStillReportsDriftForInspectableTool(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+
+	writeSkill(t, "recap", []byte(`---
+name: recap
+description: Keep daily notes and summaries.
+---
+
+# Recap
+`))
+
+	// claude is an inspectable builtin. Skill state claims a projection at
+	// the expected claude path, but no symlink is on disk → drift.
+	claudePath := filepath.Join(home, ".claude", "skills", "recap")
+	st := managedState("recap", []string{"claude"}, []string{claudePath})
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{Name: "claude", Enabled: true},
+		},
+	}
+
+	report, err := InspectManagedSkills(cfg, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+
+	var drift *Issue
+	for i := range report.Issues {
+		if report.Issues[i].Kind == IssueProjectionDrift {
+			drift = &report.Issues[i]
+			break
+		}
+	}
+	if drift == nil {
+		t.Fatalf("expected a projection_drift issue, got: %+v", report.Issues)
+	}
+	if drift.Tool != "claude" {
+		t.Fatalf("Tool = %q, want claude", drift.Tool)
+	}
+	if !strings.Contains(drift.Message, "missing managed projection") &&
+		!strings.Contains(drift.Message, "does not point to the canonical target") {
+		t.Fatalf("Message = %q, want drift detail", drift.Message)
+	}
+}
+
+// TestInspectSkipsConflictsFromOpaqueTools verifies the conflicts loop
+// suppresses entries whose tool is opaque. Without the opaqueTools-by-name
+// guard, conflicts recorded against an opaque tool (which has no
+// scribe-known path) would still surface as drift.
+func TestInspectSkipsConflictsFromOpaqueTools(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+
+	canonical := writeSkill(t, "recap", []byte(`---
+name: recap
+description: Keep daily notes and summaries.
+---
+
+# Recap
+`))
+
+	codexPath := filepath.Join(home, ".codex", "skills", "recap")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(canonical, codexPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	st := &state.State{
+		SchemaVersion: 4,
+		Installed: map[string]state.InstalledSkill{
+			"recap": {
+				Revision:      1,
+				InstalledHash: "hash",
+				Tools:         []string{"ghost", "codex"},
+				ToolsMode:     state.ToolsModePinned,
+				ManagedPaths:  []string{codexPath, "ghost:user:recap"},
+				Paths:         []string{codexPath, "ghost:user:recap"},
+				Conflicts: []state.ProjectionConflict{
+					{Tool: "ghost", Path: "ghost:user:recap"},
+					{Tool: "codex", Path: codexPath},
+				},
+			},
+		},
+	}
+	cfg := &config.Config{
+		Tools: []config.ToolConfig{
+			{Name: "codex", Enabled: true},
+			{
+				Name:      "ghost",
+				Enabled:   true,
+				Install:   "echo install",
+				Uninstall: "echo uninstall",
+			},
+		},
+	}
+
+	report, err := InspectManagedSkills(cfg, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+
+	var drift *Issue
+	for i := range report.Issues {
+		if report.Issues[i].Kind == IssueProjectionDrift {
+			drift = &report.Issues[i]
+			break
+		}
+	}
+	if drift == nil {
+		t.Fatalf("expected drift issue from codex conflict, got: %+v", report.Issues)
+	}
+	if strings.Contains(drift.Message, "ghost") {
+		t.Fatalf("opaque ghost conflict leaked into details: %q", drift.Message)
+	}
+	if !strings.Contains(drift.Message, "codex") {
+		t.Fatalf("expected codex conflict detail, got: %q", drift.Message)
+	}
+}
+
 func TestInspectContinuesWithInvalidUnrelatedToolConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

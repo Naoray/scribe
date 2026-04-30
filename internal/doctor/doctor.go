@@ -204,6 +204,7 @@ func inspectProjectionDrift(cfg *config.Config, skillName string, skill state.In
 
 	expectedPaths := make(map[string]expectedProjection, len(expectedTools))
 	opaquePaths := make(map[string]bool, len(expectedTools))
+	opaqueTools := make(map[string]bool, len(expectedTools))
 	canonicalDir, err := storeSkillDir(skillName)
 	if err != nil {
 		return Issue{
@@ -225,6 +226,19 @@ func inspectProjectionDrift(cfg *config.Config, skillName string, skill state.In
 				Message: fmt.Sprintf("resolve tool %q: %v", toolName, err),
 			}, true
 		}
+		// Opacity check FIRST. Opaque tools (gemini, custom CommandTools)
+		// own their on-disk projection — scribe cannot drift-check it.
+		// SkillPath may legitimately error for opaque tools (gemini does
+		// so by design); calling it before the opacity check turns that
+		// intentional error into a bogus projection_drift report.
+		target, inspectable := tool.CanonicalTarget(canonicalDir)
+		if !inspectable {
+			opaqueTools[toolName] = true
+			if path, err := tool.SkillPath(skillName); err == nil {
+				opaquePaths[path] = true
+			}
+			continue
+		}
 		path, err := tool.SkillPath(skillName)
 		if err != nil {
 			return Issue{
@@ -234,11 +248,6 @@ func inspectProjectionDrift(cfg *config.Config, skillName string, skill state.In
 				Status:  "error",
 				Message: fmt.Sprintf("resolve projection path for %q: %v", toolName, err),
 			}, true
-		}
-		target, inspectable := tool.CanonicalTarget(canonicalDir)
-		if !inspectable {
-			opaquePaths[path] = true
-			continue
 		}
 		expectedPaths[path] = expectedProjection{Tool: toolName, Target: target}
 	}
@@ -256,7 +265,7 @@ func inspectProjectionDrift(cfg *config.Config, skillName string, skill state.In
 	primaryTool := ""
 
 	for _, conflict := range skill.Conflicts {
-		if opaquePaths[conflict.Path] {
+		if opaquePaths[conflict.Path] || opaqueTools[conflict.Tool] {
 			continue
 		}
 		details = append(details, fmt.Sprintf("%s projection at %s is conflicted", conflict.Tool, conflict.Path))
@@ -272,7 +281,7 @@ func inspectProjectionDrift(cfg *config.Config, skillName string, skill state.In
 		if _, ok := expectedPaths[path]; ok {
 			continue
 		}
-		if opaquePaths[path] {
+		if opaquePaths[path] || pathOwnedByOpaqueTool(path, opaqueTools) {
 			continue
 		}
 		toolName := inferToolName(path, cfg, skillName)
@@ -309,6 +318,23 @@ func inspectProjectionDrift(cfg *config.Config, skillName string, skill state.In
 		Status:  "warn",
 		Message: strings.Join(details, "; "),
 	}, true
+}
+
+// pathOwnedByOpaqueTool reports whether path uses a `<tool>:` scheme prefix
+// belonging to one of the opaque tools. Opaque tools that cannot expose a
+// filesystem location (e.g. gemini) record managed paths as pseudo-URIs like
+// "gemini:user:recap"; without this check the actuals loop would flag them
+// as unexpected projections.
+func pathOwnedByOpaqueTool(path string, opaqueTools map[string]bool) bool {
+	for toolName := range opaqueTools {
+		if toolName == "" {
+			continue
+		}
+		if strings.HasPrefix(path, toolName+":") {
+			return true
+		}
+	}
+	return false
 }
 
 func projectionPaths(skill state.InstalledSkill) []string {
