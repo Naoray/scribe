@@ -3,6 +3,7 @@ package sync
 import (
 	"strings"
 
+	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/state"
@@ -50,6 +51,7 @@ type SkillStatus struct {
 	IsPackage  bool
 	LatestSHA  string // resolved SHA for branch-pinned skills; empty if unavailable
 	BlobSHAs   map[string]string
+	LockEntry  *lockfile.Entry
 }
 
 // DisplayVersion returns the best human-readable version for this skill.

@@ -174,6 +174,50 @@ builtins_version: 1
 	}
 }
 
+func TestRoot_ReadOnlyCommandsDoNotWriteHome(t *testing.T) {
+	for _, args := range [][]string{
+		{"check", "--json"},
+		{"update", "--json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+
+			root := newRootCmd()
+			var stdout, stderr bytes.Buffer
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetArgs(args)
+
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+			}
+
+			var files []string
+			err := filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.IsDir() {
+					return nil
+				}
+				rel, err := filepath.Rel(home, path)
+				if err != nil {
+					return err
+				}
+				files = append(files, rel)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("walk home: %v", err)
+			}
+			if len(files) > 0 {
+				t.Fatalf("read-only command wrote files in HOME: %v\nstdout=%s\nstderr=%s", files, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestRoot_JSONFlag_LegacyAnthropicBuiltinIsSilentlyRenamed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
