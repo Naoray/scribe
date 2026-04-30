@@ -10,6 +10,12 @@
 
 set -u
 
+# Detach from any inherited stdin / stdout-as-stdin. cat </dev/stdin would
+# block whenever the pipe never EOFs (TTY invocation, half-closed pipe in
+# tests). Closing stdin up-front is safer and ensures every child subshell
+# inherits /dev/null rather than blocking on a read.
+exec </dev/null
+
 MAX_CONTEXT_CHARS=1800
 
 escape_json_string() {
@@ -104,9 +110,6 @@ skill_names() {
     names | .[:8] | join(", ")
   ' 2>/dev/null
 }
-
-# Drain stdin so Claude Code can pipe payloads without affecting hook output.
-cat >/dev/null 2>&1 || true
 
 if ! command -v scribe >/dev/null 2>&1; then
   emit_context "scribe not available. Suggested next steps: install scribe or run scribe doctor once scribe is on PATH."
