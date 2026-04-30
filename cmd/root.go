@@ -16,7 +16,7 @@ import (
 )
 
 // Version is set at build time via ldflags.
-var Version = resolveVersion("dev", readBuildInfo())
+var Version = "dev"
 
 func readBuildInfo() *debug.BuildInfo {
 	info, ok := debug.ReadBuildInfo()
@@ -54,7 +54,7 @@ func newRootCmd() *cobra.Command {
 		Use:           "scribe",
 		Short:         "Manage local AI coding agent skills",
 		Long:          "Scribe manages local AI coding agent skills and keeps shared team registries in sync.",
-		Version:       Version,
+		Version:       resolveVersion(Version, readBuildInfo()),
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
