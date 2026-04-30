@@ -20,7 +20,7 @@ func (p *singleFileProvider) Discover(_ context.Context, repo string) (*provider
 	return &provider.DiscoverResult{
 		IsTeam: true,
 		Entries: []manifest.Entry{{
-			Name:   "scribe-agent",
+			Name:   "scribe",
 			Source: "github:Naoray/scribe@HEAD",
 			Path:   "SKILL.md",
 		}},
@@ -30,7 +30,7 @@ func (p *singleFileProvider) Discover(_ context.Context, repo string) (*provider
 func (p *singleFileProvider) Fetch(_ context.Context, entry manifest.Entry) ([]provider.File, error) {
 	return []provider.File{{
 		Path:    "SKILL.md",
-		Content: []byte("---\nname: scribe-agent\ndescription: test\n---\nbody\n"),
+		Content: []byte("---\nname: scribe\ndescription: test\n---\nbody\n"),
 	}}, nil
 }
 
@@ -67,7 +67,7 @@ func TestAddScribeAgent_SingleFileSkill_EndToEnd(t *testing.T) {
 	if err := runAddDirectInstall(
 		context.Background(),
 		"Naoray/scribe",
-		"scribe-agent",
+		"scribe",
 		cfg,
 		st,
 		syncer,
@@ -78,7 +78,7 @@ func TestAddScribeAgent_SingleFileSkill_EndToEnd(t *testing.T) {
 		t.Fatalf("install failed: %v", err)
 	}
 
-	storeDir := filepath.Join(os.Getenv("HOME"), ".scribe", "skills", "scribe-agent")
+	storeDir := filepath.Join(os.Getenv("HOME"), ".scribe", "skills", "scribe")
 	entries, err := os.ReadDir(storeDir)
 	if err != nil {
 		t.Fatalf("read store dir: %v", err)
@@ -98,7 +98,7 @@ func TestAddScribeAgent_SingleFileSkill_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
 	}
-	if !bytes.Contains(content, []byte("name: scribe-agent")) {
+	if !bytes.Contains(content, []byte("name: scribe")) {
 		t.Errorf("SKILL.md missing expected frontmatter: %q", string(content))
 	}
 }

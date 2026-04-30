@@ -1623,7 +1623,7 @@ func TestExecuteActionTools_OpensToolsEditor(t *testing.T) {
 			Config: &config.Config{},
 			State: &state.State{
 				Installed: map[string]state.InstalledSkill{
-					"scribe-agent": {
+					"scribe": {
 						ToolsMode: state.ToolsModeInherit,
 						Tools:     []string{"claude"},
 					},
@@ -1632,9 +1632,9 @@ func TestExecuteActionTools_OpensToolsEditor(t *testing.T) {
 		},
 		filtered: []listRow{
 			{
-				Name:    "scribe-agent",
+				Name:    "scribe",
 				Managed: true,
-				Local:   &discovery.Skill{Name: "scribe-agent", LocalPath: "/tmp/scribe-agent"},
+				Local:   &discovery.Skill{Name: "scribe", LocalPath: "/tmp/scribe"},
 			},
 		},
 	}
@@ -1707,9 +1707,9 @@ func TestRenderDetailPane_ToolsEditor(t *testing.T) {
 		toolSelection: map[string]bool{"claude": true},
 	}
 	row := listRow{
-		Name:    "scribe-agent",
+		Name:    "scribe",
 		Managed: true,
-		Local:   &discovery.Skill{Name: "scribe-agent", LocalPath: "/tmp/scribe-agent"},
+		Local:   &discovery.Skill{Name: "scribe", LocalPath: "/tmp/scribe"},
 	}
 
 	out := m.renderDetailPane(row, 60)
@@ -1737,9 +1737,9 @@ func TestRenderDetailPane_ToolsEditorInheritUsesInheritedMarker(t *testing.T) {
 		},
 	}
 	row := listRow{
-		Name:    "scribe-agent",
+		Name:    "scribe",
 		Managed: true,
-		Local:   &discovery.Skill{Name: "scribe-agent", LocalPath: "/tmp/scribe-agent"},
+		Local:   &discovery.Skill{Name: "scribe", LocalPath: "/tmp/scribe"},
 	}
 
 	out := m.renderDetailPane(row, 60)

@@ -198,7 +198,7 @@ func ApplyBuiltinsRemove(cfg *config.Config, st *state.State, removed []string) 
 // config on a one-shot migration. The entry is only removed if it carries
 // Builtin: true — registries the user added manually are left untouched.
 //
-// Background: scribe-agent is now managed by the embedded binary
+// Background: scribe is now managed by the embedded binary
 // (EnsureScribeAgent) rather than a registry sync, so the source repo no
 // longer needs to be a connected registry.
 func RemoveNaorayScribeRegistry(cfg *config.Config, st *state.State) ([]string, bool) {

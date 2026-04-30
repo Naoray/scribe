@@ -147,27 +147,27 @@ func TestClaudeInstallEmptyProjectRootWritesGlobalPath(t *testing.T) {
 }
 
 func TestScribeAgentAlwaysProjectsGlobal(t *testing.T) {
-	canonicalDir := setupNamedSkill(t, "scribe-agent")
+	canonicalDir := setupNamedSkill(t, "scribe")
 	home := os.Getenv("HOME")
 	projectRoot := t.TempDir()
 
-	claudePaths, err := tools.ClaudeTool{}.Install("scribe-agent", canonicalDir, projectRoot)
+	claudePaths, err := tools.ClaudeTool{}.Install("scribe", canonicalDir, projectRoot)
 	if err != nil {
 		t.Fatalf("claude Install: %v", err)
 	}
-	codexPaths, err := tools.CodexTool{}.Install("scribe-agent", canonicalDir, projectRoot)
+	codexPaths, err := tools.CodexTool{}.Install("scribe", canonicalDir, projectRoot)
 	if err != nil {
 		t.Fatalf("codex Install: %v", err)
 	}
-	cursorPaths, err := tools.CursorTool{}.Install("scribe-agent", canonicalDir, projectRoot)
+	cursorPaths, err := tools.CursorTool{}.Install("scribe", canonicalDir, projectRoot)
 	if err != nil {
 		t.Fatalf("cursor Install: %v", err)
 	}
 
 	wants := []string{
-		filepath.Join(home, ".claude", "skills", "scribe-agent"),
-		filepath.Join(home, ".codex", "skills", "scribe-agent"),
-		filepath.Join(home, ".cursor", "rules", "scribe-agent.mdc"),
+		filepath.Join(home, ".claude", "skills", "scribe"),
+		filepath.Join(home, ".codex", "skills", "scribe"),
+		filepath.Join(home, ".cursor", "rules", "scribe.mdc"),
 	}
 	got := []string{claudePaths[0], codexPaths[0], cursorPaths[0]}
 	for i := range wants {

@@ -398,16 +398,16 @@ func TestPrintLocalJSON(t *testing.T) {
 }
 
 func TestBuildLocalRows_HidesBootstrapOrigin(t *testing.T) {
-	// Regression for #487: scribe-agent (Origin=Bootstrap) is auto-managed
+	// Regression for #487: scribe (Origin=Bootstrap) is auto-managed
 	// by the CLI and shouldn't appear in `scribe list`. It can't be removed
 	// — the next invocation re-installs it — so listing it just clutters.
 	st := &state.State{Installed: map[string]state.InstalledSkill{
 		"my-skill":     {Origin: state.OriginRegistry},
-		"scribe-agent": {Origin: state.OriginBootstrap},
+		"scribe": {Origin: state.OriginBootstrap},
 	}}
 	skills := []discovery.Skill{
 		{Name: "my-skill", Managed: true},
-		{Name: "scribe-agent", Managed: true},
+		{Name: "scribe", Managed: true},
 	}
 
 	rows := BuildLocalRows(skills, st)
@@ -421,10 +421,10 @@ func TestBuildLocalRows_HidesBootstrapOrigin(t *testing.T) {
 
 func TestBuildLocalRows_OnlyBootstrapReturnsEmpty(t *testing.T) {
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"scribe-agent": {Origin: state.OriginBootstrap},
+		"scribe": {Origin: state.OriginBootstrap},
 	}}
 	skills := []discovery.Skill{
-		{Name: "scribe-agent", Managed: true},
+		{Name: "scribe", Managed: true},
 	}
 
 	rows := BuildLocalRows(skills, st)
@@ -440,12 +440,12 @@ func TestBuildLocalRowsExcluding_FiltersBootstrapAfterMatching(t *testing.T) {
 	st := &state.State{Installed: map[string]state.InstalledSkill{
 		"matched":      {Origin: state.OriginRegistry},
 		"my-skill":     {Origin: state.OriginRegistry},
-		"scribe-agent": {Origin: state.OriginBootstrap},
+		"scribe": {Origin: state.OriginBootstrap},
 	}}
 	skills := []discovery.Skill{
 		{Name: "matched", Managed: true},
 		{Name: "my-skill", Managed: true},
-		{Name: "scribe-agent", Managed: true},
+		{Name: "scribe", Managed: true},
 	}
 	matched := map[string]bool{"matched": true}
 

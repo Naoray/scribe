@@ -71,14 +71,14 @@ func TestMigrationPreservesScribeAgentGlobalSymlink(t *testing.T) {
 	store := filepath.Join(home, ".scribe", "skills")
 	project := filepath.Join(tmp, "project")
 	normalLink := filepath.Join(home, ".claude", "skills", "tdd")
-	scribeAgentLink := filepath.Join(home, ".claude", "skills", "scribe-agent")
+	scribeAgentLink := filepath.Join(home, ".claude", "skills", "scribe")
 
 	mustMkdir(t, filepath.Join(store, "tdd"))
-	mustMkdir(t, filepath.Join(store, "scribe-agent"))
+	mustMkdir(t, filepath.Join(store, "scribe"))
 	mustMkdir(t, filepath.Dir(normalLink))
 	mustMkdir(t, project)
 	mustSymlink(t, filepath.Join(store, "tdd"), normalLink)
-	mustSymlink(t, filepath.Join(store, "scribe-agent"), scribeAgentLink)
+	mustSymlink(t, filepath.Join(store, "scribe"), scribeAgentLink)
 
 	discovery, err := Discover(DiscoveryOptions{
 		HomeDir:     home,
@@ -109,7 +109,7 @@ func TestMigrationPreservesScribeAgentGlobalSymlink(t *testing.T) {
 		t.Fatalf("normal global symlink still exists or unexpected stat error: %v", err)
 	}
 	if _, err := os.Lstat(scribeAgentLink); err != nil {
-		t.Fatalf("scribe-agent global symlink should remain: %v", err)
+		t.Fatalf("scribe global symlink should remain: %v", err)
 	}
 
 	pf, err := projectfile.Load(filepath.Join(project, projectfile.Filename))
@@ -120,8 +120,8 @@ func TestMigrationPreservesScribeAgentGlobalSymlink(t *testing.T) {
 		t.Fatalf("project add = %v, want [tdd]", pf.Add)
 	}
 	for _, link := range plan.RemovedLinks {
-		if link.Skill == "scribe-agent" {
-			t.Fatalf("scribe-agent should not be scheduled for removal: %#v", plan.RemovedLinks)
+		if link.Skill == "scribe" {
+			t.Fatalf("scribe should not be scheduled for removal: %#v", plan.RemovedLinks)
 		}
 	}
 }

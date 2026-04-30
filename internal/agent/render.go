@@ -17,7 +17,7 @@ type scribeAgentRenderContext struct {
 	ShowDailyUpgradePrompt  bool
 }
 
-var scribeAgentTemplate = template.Must(template.New("scribe-agent").Parse(string(EmbeddedSkillTemplate)))
+var scribeAgentTemplate = template.Must(template.New("scribe").Parse(string(EmbeddedSkillTemplate)))
 
 func buildScribeAgentRenderContext(st *state.State) scribeAgentRenderContext {
 	return buildScribeAgentRenderContextAt(st, time.Now().UTC())
@@ -27,7 +27,7 @@ func buildScribeAgentRenderContextAt(st *state.State, now time.Time) scribeAgent
 	hasBinary := hasScribeBinary()
 	hasInstalled := st != nil && st.Installed != nil
 	if hasInstalled {
-		_, hasInstalled = st.Installed["scribe-agent"]
+		_, hasInstalled = st.Installed["scribe"]
 	}
 	needsBootstrap := !hasBinary || !hasInstalled
 	showPrompt := !needsBootstrap && !st.ScribeBinaryUpdateCooldownFresh(now)
@@ -52,7 +52,7 @@ func buildScribeAgentRenderContextForStoreAt(store string, st *state.State, now 
 func renderScribeAgentMarkdown(ctx scribeAgentRenderContext) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := scribeAgentTemplate.Execute(&buf, ctx); err != nil {
-		return nil, fmt.Errorf("render scribe-agent skill: %w", err)
+		return nil, fmt.Errorf("render scribe skill: %w", err)
 	}
 	return buf.Bytes(), nil
 }
@@ -61,14 +61,14 @@ func renderScribeAgentMarkdown(ctx scribeAgentRenderContext) ([]byte, error) {
 // the same context that EnsureScribeAgent uses. Use this when upgrading from
 // a fetched SKILL.md.tmpl so the bootstrap section is shown only when needed.
 func RenderSkillTemplate(tmpl []byte, store string, st *state.State) ([]byte, error) {
-	t, err := template.New("scribe-agent").Parse(string(tmpl))
+	t, err := template.New("scribe").Parse(string(tmpl))
 	if err != nil {
-		return nil, fmt.Errorf("parse scribe-agent template: %w", err)
+		return nil, fmt.Errorf("parse scribe template: %w", err)
 	}
 	ctx := buildScribeAgentRenderContextForStore(store, st)
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, ctx); err != nil {
-		return nil, fmt.Errorf("render scribe-agent skill: %w", err)
+		return nil, fmt.Errorf("render scribe skill: %w", err)
 	}
 	return buf.Bytes(), nil
 }

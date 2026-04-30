@@ -12,13 +12,13 @@ import (
 func TestGitHubProvider_Fetch_SingleFileSkill(t *testing.T) {
 	client := &stubClient{
 		files: map[string][]byte{
-			"Naoray/scribe/SKILL.md": []byte("---\nname: scribe-agent\n---\nbody\n"),
+			"Naoray/scribe/SKILL.md": []byte("---\nname: scribe\n---\nbody\n"),
 		},
 	}
 	p := provider.NewGitHubProvider(client)
 
 	entry := manifest.Entry{
-		Name:   "scribe-agent",
+		Name:   "scribe",
 		Source: "github:Naoray/scribe@HEAD",
 		Path:   "SKILL.md",
 	}

@@ -9,7 +9,7 @@ import (
 
 const embeddedRendererFormatVersion = "v2"
 
-// EmbeddedSkillTemplate is the scribe-agent SKILL.md template. It lives at the
+// EmbeddedSkillTemplate is the scribe SKILL.md template. It lives at the
 // repo root (SKILL.md.tmpl) and is embedded via the root package.
 var EmbeddedSkillTemplate = scribe.AgentSkillTemplate
 

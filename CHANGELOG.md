@@ -1,3 +1,9 @@
+## Unreleased
+
+### Changed
+
+- **BREAKING — embedded skill renamed `scribe-agent` → `scribe`** — first-run installs as `scribe`, and existing v1.0 installs are migrated automatically on next invocation (state entries + canonical store + projection symlinks repointed in one shot). Update any automation that hardcoded the skill name. ([#146](https://github.com/Naoray/scribe/pull/146))
+
 ## SemVer commitment (from v1.0.0)
 
 Starting with v1.0.0 we follow [Semantic Versioning](https://semver.org).

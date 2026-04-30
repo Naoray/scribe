@@ -68,6 +68,50 @@ func TestReadOnlyCommandsEmitEnvelopeAndValidateOutputSchema(t *testing.T) {
 	}
 }
 
+func TestReadOnlyCommandMigratesEmbeddedSkillRenameState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	stateDir := filepath.Join(home, ".scribe")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	oldState := `{
+  "schema_version": 5,
+  "installed": {
+    "scribe-agent": {
+      "revision": 1,
+      "installed_hash": "old",
+      "installed_at": "2026-04-30T12:00:00Z",
+      "origin": "bootstrap"
+    }
+  },
+  "kits": {},
+  "snippets": {},
+  "removed_by_user": []
+}`
+	if err := os.WriteFile(filepath.Join(stateDir, "state.json"), []byte(oldState), 0o644); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	_ = executeEnvelopeCommand(t, []string{"status", "--json"})
+
+	updated, err := os.ReadFile(filepath.Join(stateDir, "state.json"))
+	if err != nil {
+		t.Fatalf("read migrated state: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(updated, &parsed); err != nil {
+		t.Fatalf("unmarshal migrated state: %v\n%s", err, updated)
+	}
+	installed, _ := parsed["installed"].(map[string]any)
+	if _, ok := installed["scribe-agent"]; ok {
+		t.Fatalf("old embedded skill entry remains: %s", updated)
+	}
+	if _, ok := installed["scribe"]; !ok {
+		t.Fatalf("new embedded skill entry missing: %s", updated)
+	}
+}
+
 func TestListEnvelopeDataMatchesLegacyGolden(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -200,8 +244,8 @@ func normalizeListLegacyData(t *testing.T, raw json.RawMessage, home string) any
 	skills, _ := data["skills"].([]any)
 	for _, item := range skills {
 		skill, _ := item.(map[string]any)
-		if path, _ := skill["path"].(string); path == filepath.Join(home, ".scribe", "skills", "scribe-agent") {
-			skill["path"] = "$HOME/.scribe/skills/scribe-agent"
+		if path, _ := skill["path"].(string); path == filepath.Join(home, ".scribe", "skills", "scribe") {
+			skill["path"] = "$HOME/.scribe/skills/scribe"
 		}
 	}
 	return data

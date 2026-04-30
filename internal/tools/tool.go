@@ -5,7 +5,7 @@ package tools
 
 import "os"
 
-const bootstrapSkillName = "scribe-agent"
+const bootstrapSkillName = "scribe"
 
 // SkillFile represents a file to be written to the skill store.
 type SkillFile struct {

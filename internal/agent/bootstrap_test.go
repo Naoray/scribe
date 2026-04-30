@@ -40,11 +40,11 @@ func TestEnsureScribeAgentInstallsWhenMissing(t *testing.T) {
 		t.Fatal("EnsureScribeAgent() changed = false, want true")
 	}
 
-	got, err := os.ReadFile(filepath.Join(store, "scribe-agent", "SKILL.md"))
+	got, err := os.ReadFile(filepath.Join(store, "scribe", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
 	}
-	gotClaude, err := os.ReadFile(filepath.Join(store, "scribe-agent", "CLAUDE.md"))
+	gotClaude, err := os.ReadFile(filepath.Join(store, "scribe", "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
@@ -57,8 +57,8 @@ func TestEnsureScribeAgentInstallsWhenMissing(t *testing.T) {
 	if strings.Contains(string(got), "## Keep `scribe` current") {
 		t.Fatal("daily upgrade prompt should not appear during bootstrap")
 	}
-	if st.Installed["scribe-agent"].Origin != state.OriginBootstrap {
-		t.Fatalf("origin = %q, want %q", st.Installed["scribe-agent"].Origin, state.OriginBootstrap)
+	if st.Installed["scribe"].Origin != state.OriginBootstrap {
+		t.Fatalf("origin = %q, want %q", st.Installed["scribe"].Origin, state.OriginBootstrap)
 	}
 }
 
@@ -66,7 +66,7 @@ func TestEnsureScribeAgentNoOpWhenPresent(t *testing.T) {
 	withFakeScribeBinary(t)
 
 	store := filepath.Join(t.TempDir(), "skills")
-	skillDir := filepath.Join(store, "scribe-agent")
+	skillDir := filepath.Join(store, "scribe")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestEnsureScribeAgentNoOpWhenPresent(t *testing.T) {
 	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"scribe-agent": {
+		"scribe": {
 			Revision: 1,
 			Origin:   state.OriginBootstrap,
 			Sources:  []state.SkillSource{{Ref: EmbeddedVersion}},
@@ -112,7 +112,7 @@ func TestEnsureScribeAgentRepairsMissingBaseFile(t *testing.T) {
 	withFakeScribeBinary(t)
 
 	store := filepath.Join(t.TempDir(), "skills")
-	skillDir := filepath.Join(store, "scribe-agent")
+	skillDir := filepath.Join(store, "scribe")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestEnsureScribeAgentRepairsMissingBaseFile(t *testing.T) {
 	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"scribe-agent": {
+		"scribe": {
 			Revision: 1,
 			Origin:   state.OriginBootstrap,
 			Sources:  []state.SkillSource{{Ref: EmbeddedVersion}},
@@ -149,8 +149,8 @@ func TestEnsureScribeAgentRepairsMissingBaseFile(t *testing.T) {
 	if !changed {
 		t.Fatal("EnsureScribeAgent() changed = false, want true when .scribe-base.md is missing")
 	}
-	if st.Installed["scribe-agent"].Revision != 1 {
-		t.Fatalf("revision = %d, want 1 for same-version repair", st.Installed["scribe-agent"].Revision)
+	if st.Installed["scribe"].Revision != 1 {
+		t.Fatalf("revision = %d, want 1 for same-version repair", st.Installed["scribe"].Revision)
 	}
 
 	baseContent, err := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
@@ -166,7 +166,7 @@ func TestEnsureScribeAgentRepairsStaleBaseFile(t *testing.T) {
 	withFakeScribeBinary(t)
 
 	store := filepath.Join(t.TempDir(), "skills")
-	skillDir := filepath.Join(store, "scribe-agent")
+	skillDir := filepath.Join(store, "scribe")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestEnsureScribeAgentRepairsStaleBaseFile(t *testing.T) {
 	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"scribe-agent": {
+		"scribe": {
 			Revision: 1,
 			Origin:   state.OriginBootstrap,
 			Sources:  []state.SkillSource{{Ref: EmbeddedVersion}},
@@ -206,8 +206,8 @@ func TestEnsureScribeAgentRepairsStaleBaseFile(t *testing.T) {
 	if !changed {
 		t.Fatal("EnsureScribeAgent() changed = false, want true when .scribe-base.md is stale")
 	}
-	if st.Installed["scribe-agent"].Revision != 1 {
-		t.Fatalf("revision = %d, want 1 for same-version repair", st.Installed["scribe-agent"].Revision)
+	if st.Installed["scribe"].Revision != 1 {
+		t.Fatalf("revision = %d, want 1 for same-version repair", st.Installed["scribe"].Revision)
 	}
 
 	baseContent, err := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
@@ -223,7 +223,7 @@ func TestEnsureScribeAgentReinstallsOnVersionMismatch(t *testing.T) {
 	withFakeScribeBinary(t)
 
 	store := filepath.Join(t.TempDir(), "skills")
-	skillDir := filepath.Join(store, "scribe-agent")
+	skillDir := filepath.Join(store, "scribe")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestEnsureScribeAgentReinstallsOnVersionMismatch(t *testing.T) {
 	}
 
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"scribe-agent": {Revision: 2, Origin: state.OriginBootstrap},
+		"scribe": {Revision: 2, Origin: state.OriginBootstrap},
 	}}
 	cfg := &config.Config{}
 	cfg.ScribeAgent.Enabled = true
@@ -250,11 +250,11 @@ func TestEnsureScribeAgentReinstallsOnVersionMismatch(t *testing.T) {
 	if !changed {
 		t.Fatal("EnsureScribeAgent() changed = false, want true")
 	}
-	if st.Installed["scribe-agent"].Revision != 3 {
-		t.Fatalf("revision = %d, want 3", st.Installed["scribe-agent"].Revision)
+	if st.Installed["scribe"].Revision != 3 {
+		t.Fatalf("revision = %d, want 3", st.Installed["scribe"].Revision)
 	}
 
-	got, err := os.ReadFile(filepath.Join(store, "scribe-agent", "SKILL.md"))
+	got, err := os.ReadFile(filepath.Join(store, "scribe", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read SKILL.md: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestEnsureScribeAgentReinstallsOnVersionMismatch(t *testing.T) {
 	if strings.Contains(string(got), "===setup-start===") {
 		t.Fatal("bootstrap section should not be present in steady state")
 	}
-	gotClaude, err := os.ReadFile(filepath.Join(store, "scribe-agent", "CLAUDE.md"))
+	gotClaude, err := os.ReadFile(filepath.Join(store, "scribe", "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestRenderScribeAgentSteadyStateWhenInstalled(t *testing.T) {
 	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
 	rendered, err := renderScribeAgentMarkdown(buildScribeAgentRenderContextAt(&state.State{
 		Installed: map[string]state.InstalledSkill{
-			"scribe-agent": {},
+			"scribe": {},
 		},
 	}, now))
 	if err != nil {
@@ -362,7 +362,7 @@ func TestRenderScribeAgentOmitUpgradePromptWhenCooldownFresh(t *testing.T) {
 	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"scribe-agent": {},
+			"scribe": {},
 		},
 		BinaryUpdateChecks: map[string]state.BinaryUpdateCheck{},
 	}
@@ -383,7 +383,7 @@ func TestRenderScribeAgentShowUpgradePromptWhenCooldownExpired(t *testing.T) {
 	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"scribe-agent": {},
+			"scribe": {},
 		},
 		BinaryUpdateChecks: map[string]state.BinaryUpdateCheck{},
 	}
@@ -404,7 +404,7 @@ func TestRenderScribeAgentShowUpgradePromptWhenCooldownMissing(t *testing.T) {
 	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
 	rendered, err := renderScribeAgentMarkdown(buildScribeAgentRenderContextAt(&state.State{
 		Installed: map[string]state.InstalledSkill{
-			"scribe-agent": {},
+			"scribe": {},
 		},
 	}, now))
 	if err != nil {

@@ -147,7 +147,7 @@ func TestWriteStatusShowsNoToolHintForBootstrapOnlyState(t *testing.T) {
 	cfg := &config.Config{}
 	st := &state.State{
 		Installed: map[string]state.InstalledSkill{
-			"scribe-agent": {Origin: state.OriginBootstrap, Tools: nil},
+			"scribe": {Origin: state.OriginBootstrap, Tools: nil},
 		},
 	}
 

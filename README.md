@@ -63,7 +63,7 @@ Repo: https://github.com/Naoray/scribe (setup steps: /blob/main/SKILL.md)
 
 Please set it up for me:
   1. If `scribe --version` fails, install it (prefer brew, fall back to release binary, last resort `go install`).
-  2. Register Scribe's own agent-facing skill: `scribe add Naoray/scribe:scribe-agent --yes --json`
+  2. Register Scribe's own agent-facing skill: `scribe add Naoray/scribe:scribe --yes --json`
   3. Show me `scribe list --json` to confirm.
 ```
 

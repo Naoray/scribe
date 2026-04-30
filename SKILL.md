@@ -1,9 +1,9 @@
 ---
-name: scribe-agent
+name: scribe
 description: Use when the user wants to install, list, sync, remove, or manage AI coding-agent skills on this machine. Scribe manages a canonical skill store and links skills into Claude Code, Cursor, Codex, and other supported tools.
 ---
 
-# scribe-agent
+# scribe
 
 ## First-run bootstrap (do this before anything else)
 
@@ -78,17 +78,17 @@ Step 3 — make sure this skill is registered locally so it survives future sess
 scribe list --json
 ```
 
-If the output already contains an entry with `"name": "scribe-agent"`, you're done — continue with the user's actual request.
+If the output already contains an entry with `"name": "scribe"`, you're done — continue with the user's actual request.
 
 If it does not, install this skill now. First trigger first-run so the `Naoray/scribe` built-in registry is wired up, then install:
 
 ```bash
 scribe status --json
-scribe add Naoray/scribe:scribe-agent --yes --json
+scribe add Naoray/scribe:scribe --yes --json
 scribe list --json
 ```
 
-Confirm the final `scribe list --json` includes `scribe-agent`. If anything in this bootstrap fails, report the failing command and its stderr verbatim — do not guess around it.
+Confirm the final `scribe list --json` includes `scribe`. If anything in this bootstrap fails, report the failing command and its stderr verbatim — do not guess around it.
 
 Once bootstrap succeeds, proceed with the user's request using the command reference below.
 
