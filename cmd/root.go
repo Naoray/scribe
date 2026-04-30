@@ -54,7 +54,12 @@ var commandFactory = newCommandFactory
 
 var rootCmd = newRootCmd()
 
-const jsonSupportedAnnotation = "json_supported"
+const (
+	jsonSupportedAnnotation = "json_supported"
+	commandModeAnnotation   = "mode"
+	commandModeReadOnly     = "read-only"
+	commandModeApplyWrites  = "read-only-without-apply"
+)
 
 type legacyGlobalProjectionCompatKey struct{}
 
@@ -109,6 +114,9 @@ func newRootCmd() *cobra.Command {
 			}
 
 			factory := commandFactory()
+			if commandReadOnly(c) {
+				return nil
+			}
 			if err := runStoreMigration(factory); err != nil {
 				return err
 			}
@@ -299,6 +307,34 @@ func markJSONSupported(cmd *cobra.Command) *cobra.Command {
 	}
 	cmd.Annotations[jsonSupportedAnnotation] = "true"
 	return cmd
+}
+
+func markReadOnly(cmd *cobra.Command) *cobra.Command {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[commandModeAnnotation] = commandModeReadOnly
+	return cmd
+}
+
+func markReadOnlyWithoutApply(cmd *cobra.Command) *cobra.Command {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[commandModeAnnotation] = commandModeApplyWrites
+	return cmd
+}
+
+func commandReadOnly(cmd *cobra.Command) bool {
+	switch cmd.Annotations[commandModeAnnotation] {
+	case commandModeReadOnly:
+		return true
+	case commandModeApplyWrites:
+		apply, err := cmd.Flags().GetBool("apply")
+		return err == nil && !apply
+	default:
+		return false
+	}
 }
 
 func jsonFlagPassed(cmd *cobra.Command) bool {

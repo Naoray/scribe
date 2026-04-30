@@ -35,7 +35,7 @@ func newUpdateCommand() *cobra.Command {
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().Bool("apply", false, "Write refreshed lockfiles to registries")
-	return markJSONSupported(cmd)
+	return markReadOnlyWithoutApply(markJSONSupported(cmd))
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -54,12 +54,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	st, err := factory.State()
-	if err != nil {
-		return err
-	}
 	repos := cfg.TeamRepos()
-	plan, latest, err := buildLockPlan(cmd.Context(), repos, isync.WrapGitHubClient(client), provider, st)
+	plan, latest, err := buildLockPlan(cmd.Context(), repos, isync.WrapGitHubClient(client), provider)
 	if err != nil {
 		return err
 	}

@@ -18,7 +18,7 @@ func newCheckCommand() *cobra.Command {
 		RunE:  runCheck,
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	return markJSONSupported(cmd)
+	return markReadOnly(markJSONSupported(cmd))
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
@@ -36,12 +36,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	st, err := factory.State()
-	if err != nil {
-		return err
-	}
 	repos := cfg.TeamRepos()
-	out, _, err := buildLockPlan(cmd.Context(), repos, isync.WrapGitHubClient(client), provider, st)
+	out, _, err := buildLockPlan(cmd.Context(), repos, isync.WrapGitHubClient(client), provider)
 	if err != nil {
 		return err
 	}

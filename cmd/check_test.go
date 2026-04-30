@@ -7,7 +7,6 @@ import (
 	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
-	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -69,7 +68,7 @@ entries:
     content_hash: old-hash
 `)
 	fetcher := lockPlanFetcher{lock: current}
-	out, latest, err := buildLockPlan(context.Background(), []string{"acme/registry"}, fetcher, lockPlanProvider{fetcher: fetcher}, &state.State{})
+	out, latest, err := buildLockPlan(context.Background(), []string{"acme/registry"}, fetcher, lockPlanProvider{fetcher: fetcher})
 	if err != nil {
 		t.Fatalf("buildLockPlan() error = %v", err)
 	}

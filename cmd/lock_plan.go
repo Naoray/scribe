@@ -8,7 +8,6 @@ import (
 	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
-	"github.com/Naoray/scribe/internal/state"
 	isync "github.com/Naoray/scribe/internal/sync"
 )
 
@@ -22,7 +21,7 @@ type registryLockPlan struct {
 	Updates  []lockfile.Update `json:"updates"`
 }
 
-func buildLockPlan(ctx context.Context, repos []string, fetcher isync.GitHubFetcher, p provider.Provider, st *state.State) (lockPlanOutput, map[string]*lockfile.Lockfile, error) {
+func buildLockPlan(ctx context.Context, repos []string, fetcher isync.GitHubFetcher, p provider.Provider) (lockPlanOutput, map[string]*lockfile.Lockfile, error) {
 	out := lockPlanOutput{Registries: []registryLockPlan{}, Updates: []lockfile.Update{}}
 	next := map[string]*lockfile.Lockfile{}
 	syncer := &isync.Syncer{Client: fetcher, Provider: p}
@@ -39,7 +38,6 @@ func buildLockPlan(ctx context.Context, repos []string, fetcher isync.GitHubFetc
 		updates := lockfile.Diff(current, latest)
 		out.Registries = append(out.Registries, registryLockPlan{Registry: repo, Updates: updates})
 		out.Updates = append(out.Updates, updates...)
-		_ = st
 	}
 	return out, next, nil
 }
