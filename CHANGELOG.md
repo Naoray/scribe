@@ -18,7 +18,7 @@ Starting with v1.0.0 we follow [Semantic Versioning](https://semver.org).
 
 **Deprecation policy:** any breaking change to the stable surface gets a deprecation warning emitted via stderr for at least one minor version before removal in the next major.
 
-## Unreleased
+## v1.0.0 — 2026-04-30
 
 The "agent-first foundation" wave. Scribe's `--json` output is now a versioned envelope, mutator commands have semantic exit codes, every migrated command exposes its JSON Schema, and the data layer for kits + snippets + project files is in place. Most of this is foundation — user-facing flows ride on top in follow-up releases.
 
