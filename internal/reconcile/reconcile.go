@@ -128,7 +128,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 
 			if _, err := os.Lstat(path); err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
-					links, installErr := tool.Install(name, canonicalDir)
+					links, installErr := tool.Install(name, canonicalDir, "")
 					if installErr != nil {
 						return summary, actions, fmt.Errorf("install %s/%s: %w", toolName, name, installErr)
 					}
@@ -155,7 +155,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 					if err := os.RemoveAll(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 						return summary, actions, err
 					}
-					links, installErr := tool.Install(name, canonicalDir)
+					links, installErr := tool.Install(name, canonicalDir, "")
 					if installErr != nil {
 						return summary, actions, fmt.Errorf("relink %s/%s: %w", toolName, name, installErr)
 					}

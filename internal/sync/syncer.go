@@ -438,7 +438,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			var toolNames []string
 			toolFailed := false
 			for _, t := range effectiveTools {
-				links, err := t.Install(sk.Name, canonicalDir)
+				links, err := t.Install(sk.Name, canonicalDir, "")
 				if err != nil {
 					if errors.Is(err, tools.ErrRealDirectoryExists) {
 						existing, pathErr := t.SkillPath(sk.Name)

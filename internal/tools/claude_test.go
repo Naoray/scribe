@@ -39,7 +39,7 @@ func TestClaudeInstall_ReplacesExistingSymlink(t *testing.T) {
 	}
 
 	tool := ClaudeTool{}
-	if _, err := tool.Install("qa", oldCanonical); err != nil {
+	if _, err := tool.Install("qa", oldCanonical, ""); err != nil {
 		t.Fatalf("first Install: %v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestClaudeInstall_ReplacesExistingSymlink(t *testing.T) {
 	if err := os.MkdirAll(newCanonical, 0o755); err != nil {
 		t.Fatalf("mkdir new canonical: %v", err)
 	}
-	if _, err := tool.Install("qa", newCanonical); err != nil {
+	if _, err := tool.Install("qa", newCanonical, ""); err != nil {
 		t.Fatalf("second Install: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestClaudeInstall_FailsOnRealDirectory(t *testing.T) {
 	}
 
 	tool := ClaudeTool{}
-	_, err := tool.Install("qa", canonical)
+	_, err := tool.Install("qa", canonical, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -126,7 +126,7 @@ func TestClaudeInstallSymlinksToDir(t *testing.T) {
 	}
 
 	tool := ClaudeTool{}
-	paths, err := tool.Install("cleanup", canonicalDir)
+	paths, err := tool.Install("cleanup", canonicalDir, "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}

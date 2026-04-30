@@ -58,7 +58,7 @@ func TestClaudeInstall(t *testing.T) {
 	canonicalDir := setup(t)
 
 	tool := tools.ClaudeTool{}
-	paths, err := tool.Install("deploy", canonicalDir)
+	paths, err := tool.Install("deploy", canonicalDir, "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -90,10 +90,10 @@ func TestClaudeInstallReplaces(t *testing.T) {
 	tool := tools.ClaudeTool{}
 
 	// Install twice — second should replace the first without error.
-	if _, err := tool.Install("deploy", canonicalDir); err != nil {
+	if _, err := tool.Install("deploy", canonicalDir, ""); err != nil {
 		t.Fatalf("first Install: %v", err)
 	}
-	if _, err := tool.Install("deploy", canonicalDir); err != nil {
+	if _, err := tool.Install("deploy", canonicalDir, ""); err != nil {
 		t.Fatalf("second Install: %v", err)
 	}
 }
@@ -103,7 +103,7 @@ func TestCursorInstall(t *testing.T) {
 	workDir := t.TempDir()
 
 	tool := tools.CursorTool{WorkDir: workDir}
-	paths, err := tool.Install("deploy", canonicalDir)
+	paths, err := tool.Install("deploy", canonicalDir, "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestClaudeUninstall(t *testing.T) {
 	canonicalDir := setup(t)
 	tool := tools.ClaudeTool{}
 
-	if _, err := tool.Install("deploy", canonicalDir); err != nil {
+	if _, err := tool.Install("deploy", canonicalDir, ""); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 	if err := tool.Uninstall("deploy"); err != nil {
@@ -194,7 +194,7 @@ func TestCursorUninstall(t *testing.T) {
 	workDir := t.TempDir()
 	tool := tools.CursorTool{WorkDir: workDir}
 
-	if _, err := tool.Install("deploy", canonicalDir); err != nil {
+	if _, err := tool.Install("deploy", canonicalDir, ""); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 	if err := tool.Uninstall("deploy"); err != nil {
@@ -232,7 +232,7 @@ func TestGeminiInstallAndUninstall(t *testing.T) {
 	writeExecutable(t, filepath.Join(binDir, "gemini"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \""+logPath+"\"\n")
 
 	tool := tools.GeminiTool{}
-	paths, err := tool.Install("deploy", canonicalDir)
+	paths, err := tool.Install("deploy", canonicalDir, "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestCodexInstallAndUninstall(t *testing.T) {
 	canonicalDir := setup(t)
 
 	tool := tools.CodexTool{}
-	paths, err := tool.Install("deploy", canonicalDir)
+	paths, err := tool.Install("deploy", canonicalDir, "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestCodexInstall_ProjectsCodexCompatibleSkillMD(t *testing.T) {
 	}
 
 	tool := tools.CodexTool{}
-	paths, err := tool.Install("ascii", canonicalDir)
+	paths, err := tool.Install("ascii", canonicalDir, "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestCommandToolInstallAndUninstall(t *testing.T) {
 		PathTemplate:     "/tmp/{{tool_name}}/{{skill_name}}",
 	}
 
-	paths, err := cmd.Install("deploy", "/tmp/store/deploy")
+	paths, err := cmd.Install("deploy", "/tmp/store/deploy", "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestCursorInstallBareName(t *testing.T) {
 	}
 
 	tool := tools.CursorTool{WorkDir: workDir}
-	paths, err := tool.Install("deploy", dir)
+	paths, err := tool.Install("deploy", dir, "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}

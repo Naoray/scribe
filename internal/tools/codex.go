@@ -30,11 +30,11 @@ func (t CodexTool) Detect() bool {
 	return homeDirExists(filepath.Join(home, ".codex"))
 }
 
-func (t CodexTool) Install(skillName, canonicalDir string) ([]string, error) {
+func (t CodexTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
 	if err := ensureCodexCompatibleSkillMD(skillName, canonicalDir); err != nil {
 		return nil, err
 	}
-	skillsDir, err := codexSkillsDir()
+	skillsDir, err := codexSkillsDir(projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (t CodexTool) Install(skillName, canonicalDir string) ([]string, error) {
 }
 
 func (t CodexTool) Uninstall(skillName string) error {
-	skillsDir, err := codexSkillsDir()
+	skillsDir, err := codexSkillsDir("")
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (t CodexTool) Uninstall(skillName string) error {
 }
 
 func (t CodexTool) SkillPath(skillName string) (string, error) {
-	skillsDir, err := codexSkillsDir()
+	skillsDir, err := codexSkillsDir("")
 	if err != nil {
 		return "", err
 	}
@@ -72,7 +72,10 @@ func (t CodexTool) CanonicalTarget(canonicalDir string) (string, bool) {
 	return canonicalDir, true
 }
 
-func codexSkillsDir() (string, error) {
+func codexSkillsDir(projectRoot string) (string, error) {
+	if projectRoot != "" {
+		return filepath.Join(projectRoot, ".codex", "skills"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("home dir: %w", err)

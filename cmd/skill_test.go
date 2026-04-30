@@ -46,12 +46,12 @@ func seedSkillEnv(t *testing.T) {
 	claude := tools.ClaudeTool{}
 	cursor := tools.CursorTool{}
 	paths := []string{}
-	p1, err := claude.Install("commit", canonical)
+	p1, err := claude.Install("commit", canonical, "")
 	if err != nil {
 		t.Fatalf("claude install: %v", err)
 	}
 	paths = append(paths, p1...)
-	p2, err := cursor.Install("commit", canonical)
+	p2, err := cursor.Install("commit", canonical, "")
 	if err != nil {
 		t.Fatalf("cursor install: %v", err)
 	}

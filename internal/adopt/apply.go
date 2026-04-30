@@ -88,7 +88,7 @@ func (a *Adopter) applyOne(cand Candidate, result *Result) error {
 	var allPaths []string
 
 	for _, tool := range targetTools {
-		paths, err := tool.Install(cand.Name, canonicalDir)
+		paths, err := tool.Install(cand.Name, canonicalDir, "")
 		if err != nil {
 			return fmt.Errorf("install into %s: %w", tool.Name(), err)
 		}

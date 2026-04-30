@@ -69,7 +69,7 @@ type mockTool struct {
 
 func (m *mockTool) Name() string { return m.name }
 func (m *mockTool) Detect() bool { return true }
-func (m *mockTool) Install(skillName, canonicalDir string) ([]string, error) {
+func (m *mockTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
 	if m.installErr != nil {
 		return nil, m.installErr
 	}

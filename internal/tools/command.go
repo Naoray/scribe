@@ -24,7 +24,7 @@ func (t CommandTool) Detect() bool {
 	return runShell(t.DetectCommand) == nil
 }
 
-func (t CommandTool) Install(skillName, canonicalDir string) ([]string, error) {
+func (t CommandTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
 	cmd := renderTemplate(t.InstallCommand, t.ToolName, skillName, canonicalDir)
 	if err := runShell(cmd); err != nil {
 		return nil, fmt.Errorf("install %s via %s: %w", skillName, t.ToolName, err)
