@@ -149,6 +149,77 @@ Run `scribe schema <command> --json` before composing an unfamiliar call — ret
 
 If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. The schema and parser ship; CLI surfaces that act on it land per release. Don't synthesize one without being asked.
 
+## Authoring kits and snippets (until `scribe kit` / `scribe snippet` ship)
+
+Kit and snippet creation has no CLI yet. When the user asks to create, edit, or remove a kit or snippet, edit the YAML/Markdown files directly. Run `scribe sync` afterwards to apply.
+
+### Kit — bundle of skills, declared in `~/.scribe/kits/<name>.yaml`
+
+```yaml
+apiVersion: scribe/v1
+kind: Kit
+name: laravel-baseline
+description: Default skill set for Laravel app work
+skills:
+  - init-laravel
+  - tdd
+  - code-review
+```
+
+Required: `apiVersion`, `kind`, `name`, `skills`. `description` is optional but recommended.
+
+Each entry under `skills:` is a skill `name` from `scribe list --json`. Verify the skills exist before writing the kit; a kit referencing an unknown skill will fail at sync time.
+
+### Snippet — agent rules block, declared in `~/.scribe/snippets/<name>.md`
+
+```markdown
+---
+name: commit-discipline
+description: Commit-message rules and agent commit discipline
+targets: [claude, codex, cursor]
+---
+
+Commit after each logical phase of work, not just at the end.
+Use `[agent]` prefix on every commit message...
+```
+
+Required frontmatter: `name`, `description`, `targets`. `targets` is a YAML list of agent tool names (`claude`, `codex`, `cursor`). Body is plain markdown — no variables, no conditionals.
+
+### Wiring a kit/snippet into a project
+
+Edit `<project-root>/.scribe.yaml` to declare the project's intent:
+
+```yaml
+kits:
+  - laravel-baseline
+snippets:
+  - commit-discipline
+add:
+  - owner/repo:extra-skill
+remove:
+  - skill-this-project-doesnt-want
+```
+
+All four keys are optional. Empty / missing file = no project intent.
+
+### After authoring, apply
+
+```bash
+scribe sync --json
+```
+
+Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.codex/skills/` dirs, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `.cursorrules` (markers preserved; content outside markers untouched).
+
+### Codex budget
+
+Codex caps total skill descriptions at 5440 bytes. Sync refuses at 100% (exit 5) and warns at 70%-100%. If a kit overflows, trim it or pass `--force` to the sync.
+
+### Anti-patterns
+
+- Don't write `.scribe.yaml` without being asked. The project owner decides which kits/snippets the team adopts.
+- Don't reference skills that aren't installed locally. Run `scribe list --json` first.
+- Don't edit projected skill files under `.claude/skills/<name>/` — they're symlinks. Edit the source skill or use `scribe push` (v1.0+) to push back to a registry.
+
 ## JSON shapes
 
 ### `scribe list --json`
