@@ -218,18 +218,24 @@ func explainJSON(w io.Writer, skill discovery.Skill, content string) error {
 }
 
 type explainOutput struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Revision    int      `json:"revision,omitempty"`
-	Targets     []string `json:"targets,omitempty"`
-	Path        string   `json:"path,omitempty"`
-	Content     string   `json:"content"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Source      *discovery.Source `json:"source,omitempty"`
+	Revision    int               `json:"revision,omitempty"`
+	Targets     []string          `json:"targets,omitempty"`
+	Path        string            `json:"path,omitempty"`
+	Content     string            `json:"content"`
 }
 
 func buildExplainOutput(skill discovery.Skill, content string) explainOutput {
+	var source *discovery.Source
+	if skill.Source != (discovery.Source{}) {
+		source = &skill.Source
+	}
 	return explainOutput{
 		Name:        skill.Name,
 		Description: skill.Description,
+		Source:      source,
 		Revision:    skill.Revision,
 		Targets:     skill.Targets,
 		Path:        skill.LocalPath,

@@ -336,9 +336,14 @@ func TestExplainJSONUnit(t *testing.T) {
 	skill := discovery.Skill{
 		Name:        "my-skill",
 		Description: "Does things",
-		Revision:    2,
-		Targets:     []string{"claude"},
-		LocalPath:   "/tmp/skills/my-skill",
+		Source: discovery.Source{
+			URL:    "https://github.com/acme/my-skill",
+			Author: "acme",
+			Note:   "original source",
+		},
+		Revision:  2,
+		Targets:   []string{"claude"},
+		LocalPath: "/tmp/skills/my-skill",
 	}
 	content := "# My Skill\n\nHello world."
 
@@ -357,5 +362,11 @@ func TestExplainJSONUnit(t *testing.T) {
 	}
 	if !strings.Contains(output, `"content": "# My Skill\n\nHello world."`) {
 		t.Errorf("expected content field, got:\n%s", output)
+	}
+	if !strings.Contains(output, `"source": {`) {
+		t.Errorf("expected source object, got:\n%s", output)
+	}
+	if !strings.Contains(output, `"author": "acme"`) {
+		t.Errorf("expected source author, got:\n%s", output)
 	}
 }
