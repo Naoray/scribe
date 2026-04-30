@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/Naoray/scribe/internal/cli/envelope"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 )
@@ -17,6 +18,7 @@ type jsonFormatter struct {
 	denied     []denyListSkip
 	adoption   adoptionResult
 	reconcile  *reconcileResult
+	meta       func() envelope.Meta
 }
 
 type reconcileResult struct {
@@ -59,8 +61,11 @@ type registryResult struct {
 	Skills   []skillResult `json:"skills"`
 }
 
-func newJSONFormatter(out io.Writer) *jsonFormatter {
-	return &jsonFormatter{out: out, registries: []registryResult{}}
+func newJSONFormatter(out io.Writer, meta func() envelope.Meta) *jsonFormatter {
+	if meta == nil {
+		meta = func() envelope.Meta { return envelope.Meta{} }
+	}
+	return &jsonFormatter{out: out, registries: []registryResult{}, meta: meta}
 }
 
 func (f *jsonFormatter) OnRegistryStart(repo string) {
@@ -288,5 +293,9 @@ func (f *jsonFormatter) Flush() error {
 	if len(f.denied) > 0 {
 		out["skipped_by_deny_list"] = f.denied
 	}
-	return json.NewEncoder(f.out).Encode(out)
+	status := envelope.StatusOK
+	if f.summary.Failed > 0 || f.adoption.Failed > 0 {
+		status = envelope.StatusPartialSuccess
+	}
+	return json.NewEncoder(f.out).Encode(envelope.New(status, out, f.meta()))
 }

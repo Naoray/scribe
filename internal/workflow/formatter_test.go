@@ -88,10 +88,20 @@ func TestJSONFormatter(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("invalid JSON output: %v\nraw: %s", err, out.String())
 	}
+	if result["status"] != "partial_success" {
+		t.Fatalf("status = %v, want partial_success", result["status"])
+	}
+	if result["format_version"] != "1" {
+		t.Fatalf("format_version = %v, want 1", result["format_version"])
+	}
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data missing from envelope: %v", result)
+	}
 
-	registries, ok := result["registries"].([]any)
+	registries, ok := data["registries"].([]any)
 	if !ok || len(registries) != 1 {
-		t.Fatalf("expected 1 registry, got: %v", result["registries"])
+		t.Fatalf("expected 1 registry, got: %v", data["registries"])
 	}
 
 	reg := registries[0].(map[string]any)
@@ -104,11 +114,11 @@ func TestJSONFormatter(t *testing.T) {
 		t.Errorf("expected 4 skills, got %d", len(skills))
 	}
 
-	summary := result["summary"].(map[string]any)
+	summary := data["summary"].(map[string]any)
 	if summary["installed"].(float64) != 1 {
 		t.Errorf("expected installed=1, got: %v", summary["installed"])
 	}
-	denied := result["skipped_by_deny_list"].([]any)
+	denied := data["skipped_by_deny_list"].([]any)
 	if len(denied) != 1 {
 		t.Fatalf("expected 1 deny-list skip, got %d", len(denied))
 	}

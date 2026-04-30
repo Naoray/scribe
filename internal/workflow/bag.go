@@ -56,6 +56,7 @@ type Bag struct {
 	LocalSkills   []discovery.Skill             // populated when listing local skills
 	RegistryDiffs map[string][]sync.SkillStatus // repo → skill statuses (remote list)
 	MultiRegistry bool                          // whether multiple registries are shown
+	Partial       bool                          // true when a mutating workflow completed with failures
 
 	// Registry list command results:
 	RegistryRepos  []string       // connected registries

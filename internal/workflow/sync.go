@@ -181,13 +181,13 @@ func StepFilterRegistries(_ context.Context, b *Bag) error {
 // StepResolveFormatter constructs the Formatter once. Idempotent — if
 // bag.Formatter is already set (e.g. by a parent workflow), it skips.
 // Must run after StepFilterRegistries so b.Repos reflects the actual set.
-func StepResolveFormatter(_ context.Context, b *Bag) error {
+func StepResolveFormatter(ctx context.Context, b *Bag) error {
 	if b.Formatter != nil {
 		return nil
 	}
 	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	multiRegistry := len(b.Repos) > 1
-	b.Formatter = NewFormatter(useJSON, multiRegistry)
+	b.Formatter = NewFormatterForContext(ctx, useJSON, multiRegistry)
 	return nil
 }
 
@@ -292,6 +292,9 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 			case sync.LegacyFormatMsg:
 				b.Formatter.OnLegacyFormat(m.Repo)
 			case sync.SyncCompleteMsg:
+				if m.Failed > 0 {
+					b.Partial = true
+				}
 				b.Formatter.OnSyncComplete(m)
 
 			// Package events
