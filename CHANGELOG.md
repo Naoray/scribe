@@ -15,7 +15,7 @@
 
 Migration: `jq '.data.foo'` works; `jq '.foo'` requires update.
 
-Mutator commands (`sync`, `add`, `adopt`) keep their pre-envelope output for now; PR #<C> ships their migration.
+PR #118 / PR B introduces this format break for read-only commands. Mutator commands (`sync`, `add`, `adopt`, etc.) keep their pre-envelope output for now; their envelope migration is deferred to a follow-up PR.
 
 ### Added
 
