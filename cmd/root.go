@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -15,7 +16,25 @@ import (
 )
 
 // Version is set at build time via ldflags.
-var Version = "dev"
+var Version = resolveVersion("dev", readBuildInfo())
+
+func readBuildInfo() *debug.BuildInfo {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return nil
+	}
+	return info
+}
+
+func resolveVersion(initial string, info *debug.BuildInfo) string {
+	if initial != "dev" || info == nil {
+		return initial
+	}
+	if version := info.Main.Version; version != "" && version != "(devel)" {
+		return version
+	}
+	return initial
+}
 
 func newCommandFactory() *app.Factory {
 	return app.NewFactory()
