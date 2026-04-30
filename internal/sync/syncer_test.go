@@ -2,6 +2,7 @@ package sync_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -673,7 +674,6 @@ func TestApply_RealDirectoryAtProjectionPath(t *testing.T) {
 		t.Fatalf("write existing SKILL.md: %v", err)
 	}
 
-	var events []any
 	syncer := &sync.Syncer{
 		Client: &syncTestFetcher{
 			files: []tools.SkillFile{
@@ -681,7 +681,6 @@ func TestApply_RealDirectoryAtProjectionPath(t *testing.T) {
 			},
 		},
 		Tools: []tools.Tool{tools.ClaudeTool{}},
-		Emit:  func(msg any) { events = append(events, msg) },
 	}
 
 	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
@@ -694,26 +693,16 @@ func TestApply_RealDirectoryAtProjectionPath(t *testing.T) {
 		},
 	}}
 
-	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
-		t.Fatalf("RunWithDiff: %v", err)
+	err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st)
+	if err == nil {
+		t.Fatal("expected conflict error")
 	}
-
-	// Expect a SkillErrorMsg with adoption guidance.
-	var errMsg *sync.SkillErrorMsg
-	for _, ev := range events {
-		if e, ok := ev.(sync.SkillErrorMsg); ok {
-			errMsg = &e
-			break
-		}
+	var conflict *sync.NameConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %T %v, want NameConflictError", err, err)
 	}
-	if errMsg == nil {
-		t.Fatal("expected SkillErrorMsg, none emitted")
-	}
-	if !strings.Contains(errMsg.Err.Error(), "real directory") {
-		t.Errorf("error should mention 'real directory', got: %v", errMsg.Err)
-	}
-	if !strings.Contains(errMsg.Err.Error(), "scribe adopt qa") {
-		t.Errorf("error should mention 'scribe adopt qa', got: %v", errMsg.Err)
+	if !strings.Contains(err.Error(), "real directory") {
+		t.Errorf("error should mention 'real directory', got: %v", err)
 	}
 
 	// Real directory must be preserved.
@@ -725,6 +714,252 @@ func TestApply_RealDirectoryAtProjectionPath(t *testing.T) {
 	if _, ok := st.Installed["qa"]; ok {
 		t.Error("skill should not be in state when install failed")
 	}
+}
+
+func TestRunWithDiff_NameConflictWithoutResolverReturnsConflict(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	realSkillPath := filepath.Join(home, ".test-tool", "qa")
+	if err := os.MkdirAll(realSkillPath, 0o755); err != nil {
+		t.Fatalf("mkdir real skill dir: %v", err)
+	}
+
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# qa\n")}}},
+		Tools:  []tools.Tool{testProjectionTool{root: filepath.Join(home, ".test-tool")}},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+
+	err := syncer.RunWithDiff(context.Background(), "acme/skills", []sync.SkillStatus{{
+		Name:   "qa",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "qa", Source: "github:acme/skills@main"},
+	}}, st)
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+	var conflict *sync.NameConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %T %v, want NameConflictError", err, err)
+	}
+	if conflict.Resolution.Action != sync.NameConflictActionUnresolved {
+		t.Fatalf("resolution action = %q, want unresolved", conflict.Resolution.Action)
+	}
+	if _, ok := st.Installed["qa"]; ok {
+		t.Fatal("qa should not be installed on unresolved conflict")
+	}
+}
+
+func TestRunWithDiff_NameConflictAliasInstallsIncomingUnderAlias(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	realSkillPath := filepath.Join(home, ".test-tool", "qa")
+	if err := os.MkdirAll(realSkillPath, 0o755); err != nil {
+		t.Fatalf("mkdir real skill dir: %v", err)
+	}
+
+	var events []any
+	syncer := &sync.Syncer{
+		Client:    &syncTestFetcher{files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# qa\n")}}},
+		Tools:     []tools.Tool{testProjectionTool{root: filepath.Join(home, ".test-tool")}},
+		AliasName: "qa-registry",
+		Emit:      func(msg any) { events = append(events, msg) },
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", []sync.SkillStatus{{
+		Name:   "qa",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "qa", Source: "github:acme/skills@main"},
+	}}, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	if _, ok := st.Installed["qa"]; ok {
+		t.Fatal("original name should not be installed")
+	}
+	if _, ok := st.Installed["qa-registry"]; !ok {
+		t.Fatal("alias should be installed")
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".test-tool", "qa-registry")); err != nil {
+		t.Fatalf("alias projection missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(realSkillPath)); err != nil {
+		t.Fatalf("original real directory was touched: %v", err)
+	}
+	assertConflictResolutionEvent(t, events, sync.NameConflictActionAlias, "qa-registry")
+}
+
+func TestRunWithDiff_NameConflictAliasCollisionReturnsConflict(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".test-tool", "qa"), 0o755); err != nil {
+		t.Fatalf("mkdir real skill dir: %v", err)
+	}
+
+	syncer := &sync.Syncer{
+		Client:    &syncTestFetcher{files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# qa\n")}}},
+		Tools:     []tools.Tool{testProjectionTool{root: filepath.Join(home, ".test-tool")}},
+		AliasName: "existing",
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"existing": {Revision: 1},
+	}}
+
+	err := syncer.RunWithDiff(context.Background(), "acme/skills", []sync.SkillStatus{{
+		Name:   "qa",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "qa", Source: "github:acme/skills@main"},
+	}}, st)
+	if err == nil {
+		t.Fatal("expected alias collision conflict")
+	}
+	var conflict *sync.NameConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %T %v, want NameConflictError", err, err)
+	}
+	if conflict.Resolution.Action != sync.NameConflictActionAlias || conflict.Resolution.Alias != "existing" {
+		t.Fatalf("resolution = %+v, want alias existing", conflict.Resolution)
+	}
+}
+
+func TestRunWithDiff_NameConflictResolverSkipLeavesExistingUntouched(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	realSkillPath := filepath.Join(home, ".test-tool", "qa")
+	if err := os.MkdirAll(realSkillPath, 0o755); err != nil {
+		t.Fatalf("mkdir real skill dir: %v", err)
+	}
+	marker := filepath.Join(realSkillPath, "SKILL.md")
+	if err := os.WriteFile(marker, []byte("# manual\n"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	var events []any
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# qa\n")}}},
+		Tools:  []tools.Tool{testProjectionTool{root: filepath.Join(home, ".test-tool")}},
+		NameConflictResolver: func(sync.NameConflict) (sync.NameConflictResolution, error) {
+			return sync.NameConflictResolution{Action: sync.NameConflictActionSkip}, nil
+		},
+		Emit: func(msg any) { events = append(events, msg) },
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", []sync.SkillStatus{{
+		Name:   "qa",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "qa", Source: "github:acme/skills@main"},
+	}}, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != "# manual\n" {
+		t.Fatalf("existing marker = %q, %v; want untouched", got, err)
+	}
+	if len(st.Installed) != 0 {
+		t.Fatalf("state installed = %v, want empty", st.Installed)
+	}
+	assertConflictResolutionEvent(t, events, sync.NameConflictActionSkip, "")
+}
+
+func TestRunWithDiff_NameConflictResolverAdoptReturnsGuidance(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".test-tool", "qa"), 0o755); err != nil {
+		t.Fatalf("mkdir real skill dir: %v", err)
+	}
+
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# qa\n")}}},
+		Tools:  []tools.Tool{testProjectionTool{root: filepath.Join(home, ".test-tool")}},
+		NameConflictResolver: func(sync.NameConflict) (sync.NameConflictResolution, error) {
+			return sync.NameConflictResolution{Action: sync.NameConflictActionAdopt}, nil
+		},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+
+	err := syncer.RunWithDiff(context.Background(), "acme/skills", []sync.SkillStatus{{
+		Name:   "qa",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "qa", Source: "github:acme/skills@main"},
+	}}, st)
+	if err == nil {
+		t.Fatal("expected adopt guidance conflict")
+	}
+	if !strings.Contains(err.Error(), "scribe adopt qa") {
+		t.Fatalf("error = %v, want adopt guidance", err)
+	}
+	var conflict *sync.NameConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %T %v, want NameConflictError", err, err)
+	}
+	if conflict.Resolution.Action != sync.NameConflictActionAdopt {
+		t.Fatalf("resolution action = %q, want adopt", conflict.Resolution.Action)
+	}
+}
+
+type testProjectionTool struct {
+	root string
+}
+
+func (t testProjectionTool) Name() string { return "test-tool" }
+
+func (t testProjectionTool) Install(skillName, canonicalDir, _ string) ([]string, error) {
+	path, err := t.SkillPath(skillName)
+	if err != nil {
+		return nil, err
+	}
+	if info, statErr := os.Lstat(path); statErr == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+		return nil, fmt.Errorf("%w: %s", tools.ErrRealDirectoryExists, path)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := os.Symlink(canonicalDir, path); err != nil {
+		return nil, err
+	}
+	return []string{path}, nil
+}
+
+func (t testProjectionTool) Uninstall(skillName string) error {
+	path, err := t.SkillPath(skillName)
+	if err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (t testProjectionTool) Detect() bool { return true }
+
+func (t testProjectionTool) SkillPath(skillName string) (string, error) {
+	return filepath.Join(t.root, skillName), nil
+}
+
+func (t testProjectionTool) CanonicalTarget(canonicalDir string) (string, bool) {
+	return canonicalDir, true
+}
+
+func assertConflictResolutionEvent(t *testing.T, events []any, action sync.NameConflictAction, alias string) {
+	t.Helper()
+	for _, ev := range events {
+		msg, ok := ev.(sync.NameConflictResolvedMsg)
+		if !ok {
+			continue
+		}
+		if msg.Resolution.Action != action || msg.Resolution.Alias != alias {
+			t.Fatalf("resolution event = %+v, want action=%q alias=%q", msg.Resolution, action, alias)
+		}
+		return
+	}
+	t.Fatal("expected NameConflictResolvedMsg")
 }
 
 func writeStoredSkill(t *testing.T, storeDir, name, description string) {
