@@ -16,15 +16,15 @@ const (
 )
 
 type Lockfile struct {
-	Version  int     `yaml:"version"`
-	Registry string  `yaml:"registry"`
-	Entries  []Entry `yaml:"entries"`
+	FormatVersion int     `yaml:"format_version"`
+	Registry      string  `yaml:"registry"`
+	Entries       []Entry `yaml:"entries"`
 }
 
 type Entry struct {
 	Name               string `yaml:"name" json:"name"`
 	SourceRegistry     string `yaml:"source_registry" json:"source_registry"`
-	RegistryCommitSHA  string `yaml:"registry_commit_sha" json:"registry_commit_sha"`
+	CommitSHA          string `yaml:"commit_sha" json:"commit_sha"`
 	ContentHash        string `yaml:"content_hash" json:"content_hash"`
 	InstallCommandHash string `yaml:"install_command_hash,omitempty" json:"install_command_hash,omitempty"`
 }
@@ -65,8 +65,8 @@ func (lf *Lockfile) Validate() error {
 	if lf == nil {
 		return errors.New("lockfile is nil")
 	}
-	if lf.Version != SchemaVersion {
-		return fmt.Errorf("unsupported lockfile version %d (expected %d)", lf.Version, SchemaVersion)
+	if lf.FormatVersion != SchemaVersion {
+		return fmt.Errorf("unsupported lockfile format_version %d (expected %d)", lf.FormatVersion, SchemaVersion)
 	}
 	if strings.TrimSpace(lf.Registry) == "" {
 		return errors.New("lockfile registry is required")
@@ -83,8 +83,8 @@ func (lf *Lockfile) Validate() error {
 		if strings.TrimSpace(entry.SourceRegistry) == "" {
 			return fmt.Errorf("lockfile entry %q missing source_registry", entry.Name)
 		}
-		if strings.TrimSpace(entry.RegistryCommitSHA) == "" {
-			return fmt.Errorf("lockfile entry %q missing registry_commit_sha", entry.Name)
+		if strings.TrimSpace(entry.CommitSHA) == "" {
+			return fmt.Errorf("lockfile entry %q missing commit_sha", entry.Name)
 		}
 		if strings.TrimSpace(entry.ContentHash) == "" {
 			return fmt.Errorf("lockfile entry %q has invalid content_hash", entry.Name)
@@ -133,15 +133,15 @@ func Diff(current, latest *Lockfile) []Update {
 	for _, name := range names {
 		next := latestByName[name]
 		prev := currentByName[name]
-		if prev.RegistryCommitSHA == next.RegistryCommitSHA &&
+		if prev.CommitSHA == next.CommitSHA &&
 			prev.ContentHash == next.ContentHash &&
 			prev.InstallCommandHash == next.InstallCommandHash {
 			continue
 		}
 		updates = append(updates, Update{
 			Name:        name,
-			CurrentSHA:  prev.RegistryCommitSHA,
-			LatestSHA:   next.RegistryCommitSHA,
+			CurrentSHA:  prev.CommitSHA,
+			LatestSHA:   next.CommitSHA,
 			CurrentHash: prev.ContentHash,
 			LatestHash:  next.ContentHash,
 		})

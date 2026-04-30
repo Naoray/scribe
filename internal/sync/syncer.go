@@ -381,10 +381,10 @@ func applyLockPins(statuses []SkillStatus, lf *lockfile.Lockfile) {
 		}
 		entry := *statuses[i].Entry
 		statuses[i].LockEntry = &pin
-		if src, err := manifest.ParseSource(entry.Source); err == nil && pin.RegistryCommitSHA != "" {
-			src.Ref = pin.RegistryCommitSHA
+		if src, err := manifest.ParseSource(entry.Source); err == nil && pin.CommitSHA != "" {
+			src.Ref = pin.CommitSHA
 			entry.Source = src.String()
-			statuses[i].LatestSHA = pin.RegistryCommitSHA
+			statuses[i].LatestSHA = pin.CommitSHA
 			statuses[i].Entry = &entry
 		}
 	}

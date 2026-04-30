@@ -26,13 +26,13 @@ func (f *fakeLockfilePusher) PushFilesAtomic(_ context.Context, _, _, _ string, 
 func TestPushLockfileWritesScribeLockAtomically(t *testing.T) {
 	pusher := &fakeLockfilePusher{}
 	result, err := pushLockfile(context.Background(), pusher, "acme/registry", &lockfile.Lockfile{
-		Version:  lockfile.SchemaVersion,
-		Registry: "acme/registry",
+		FormatVersion: lockfile.SchemaVersion,
+		Registry:      "acme/registry",
 		Entries: []lockfile.Entry{{
-			Name:              "deploy",
-			SourceRegistry:    "acme/source",
-			RegistryCommitSHA: "sha",
-			ContentHash:       "hash",
+			Name:           "deploy",
+			SourceRegistry: "acme/source",
+			CommitSHA:      "sha",
+			ContentHash:    "hash",
 		}},
 	})
 	if err != nil {

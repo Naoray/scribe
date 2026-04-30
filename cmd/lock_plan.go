@@ -54,7 +54,7 @@ func buildLatestLockfile(ctx context.Context, repo string, fetcher isync.GitHubF
 	if err != nil {
 		return nil, fmt.Errorf("fetch manifest for %s: %w", repo, err)
 	}
-	lf := &lockfile.Lockfile{Version: lockfile.SchemaVersion, Registry: repo, Entries: []lockfile.Entry{}}
+	lf := &lockfile.Lockfile{FormatVersion: lockfile.SchemaVersion, Registry: repo, Entries: []lockfile.Entry{}}
 	for _, entry := range m.Catalog {
 		pin, err := buildLatestLockEntry(ctx, entry, fetcher, p)
 		if err != nil {
@@ -92,7 +92,7 @@ func buildLatestLockEntry(ctx context.Context, entry manifest.Entry, fetcher isy
 	return lockfile.Entry{
 		Name:               entry.Name,
 		SourceRegistry:     src.Owner + "/" + src.Repo,
-		RegistryCommitSHA:  commit,
+		CommitSHA:          commit,
 		ContentHash:        hash,
 		InstallCommandHash: installCommandHash(entry),
 	}, nil

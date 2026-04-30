@@ -60,12 +60,12 @@ func (p lockPlanProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]pr
 }
 
 func TestBuildLockPlanReportsAvailableUpdates(t *testing.T) {
-	current := []byte(`version: 1
+	current := []byte(`format_version: 1
 registry: acme/registry
 entries:
   - name: deploy
     source_registry: acme/source
-    registry_commit_sha: old-sha
+    commit_sha: old-sha
     content_hash: old-hash
 `)
 	fetcher := lockPlanFetcher{lock: current}
@@ -79,7 +79,7 @@ entries:
 	if out.Updates[0].CurrentSHA != "old-sha" || out.Updates[0].LatestSHA != "new-sha" {
 		t.Fatalf("unexpected update: %+v", out.Updates[0])
 	}
-	if latest["acme/registry"].Entries[0].RegistryCommitSHA != "new-sha" {
+	if latest["acme/registry"].Entries[0].CommitSHA != "new-sha" {
 		t.Fatalf("latest lock not pinned to new-sha: %+v", latest["acme/registry"])
 	}
 }
