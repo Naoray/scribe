@@ -1,4 +1,24 @@
-## Unreleased
+## SemVer commitment (from v1.0.0)
+
+Starting with v1.0.0 we follow [Semantic Versioning](https://semver.org).
+
+**Stable surface (breaking changes require a major version bump):**
+- The `--json` envelope shape (`status`, `format_version`, `data`, `meta` fields).
+- Documented exit codes per CLAUDE.md (0–10).
+- Command names and required flags listed in `scribe schema --all --json`.
+- The `SKILL.md` frontmatter fields scribe parses (`name`, `description`, `source`).
+- `scribe.toml` / `scribe.yaml` package manifest schema.
+- `scribe.lock` schema (`format_version: "1"`).
+
+**Not stable (may change in minor releases):**
+- Internal Go packages under `internal/`.
+- Text output formatting (the JSON envelope is the agent contract).
+- TUI behavior / keybindings.
+- Diagnostic messages and `scribe doctor` output.
+
+**Deprecation policy:** any breaking change to the stable surface gets a deprecation warning emitted via stderr for at least one minor version before removal in the next major.
+
+## v1.0.0 — 2026-04-30
 
 The "agent-first foundation" wave. Scribe's `--json` output is now a versioned envelope, mutator commands have semantic exit codes, every migrated command exposes its JSON Schema, and the data layer for kits + snippets + project files is in place. Most of this is foundation — user-facing flows ride on top in follow-up releases.
 
@@ -16,16 +36,31 @@ The "agent-first foundation" wave. Scribe's `--json` output is now a versioned e
 - **Hook installer package** — internal `internal/hooks` package handles install/uninstall + status of `scribe-hook.sh` in Claude Code settings, with idempotent merge into existing user hooks. ([#123](https://github.com/Naoray/scribe/pull/123))
 - **Skill deny-list** — explicitly removed skills are remembered, so `sync` no longer re-installs them on the next reconcile. ([#116](https://github.com/Naoray/scribe/pull/116))
 - **Packages store** — multi-skill upstream packages now project as a single store entry instead of being splayed across tool skill dirs. ([#113](https://github.com/Naoray/scribe/pull/113))
+- **Per-project projection writer** — Claude, Codex, and Cursor skill links now project under the resolved `.scribe.yaml` project root while preserving global fallback when no project file exists. ([#128](https://github.com/Naoray/scribe/pull/128))
+- **`scribe migrate global-to-projects`** — discovers legacy global tool symlinks, lets users select a target project, writes `.scribe.yaml` `add:` entries idempotently, and removes migrated global links. ([#134](https://github.com/Naoray/scribe/pull/134))
+- **Per-agent description-byte budget guardrail** — Codex and Claude projections estimate resolved skill description budgets, show utilization, and refuse over-budget projections unless `--force` is passed. ([#133](https://github.com/Naoray/scribe/pull/133))
+- **Skill source attribution** — `SKILL.md` frontmatter can include `source.url`, `source.author`, and `source.note`; `explain --json`, `list`, and `browse` surface attribution when present. ([#135](https://github.com/Naoray/scribe/pull/135))
+- **`scribe push <name>`** — local skill edits can be pushed back to their originating registry through the GitHub Contents API with author checks and divergence conflict handling. ([#136](https://github.com/Naoray/scribe/pull/136))
+- **Alias support for name conflicts** — `sync`, `install`, and `add` can resolve real-directory conflicts with `--alias` or an interactive Adopt / Alias / Skip prompt. ([#137](https://github.com/Naoray/scribe/pull/137))
+- **`scribe init` package author scaffold** — discovers local `SKILL.md` files, prompts for package metadata in TTY mode, and writes `scribe.toml` for publishing skill packages. ([#138](https://github.com/Naoray/scribe/pull/138))
+- **`scribe.lock` reproducibility flow** — lockfiles pin commit SHA, content hash, and install command hash; `scribe check` plans updates and `scribe update --apply` refreshes pins. ([#139](https://github.com/Naoray/scribe/pull/139))
+- **Comparison docs** — `docs/comparison.md` compares scribe with skills.sh, superpowers, Anthropic skills, Cursor MDC, Cline/Roo, and MCP across practical adoption dimensions. ([#140](https://github.com/Naoray/scribe/pull/140))
 
 ### Changed
 
 - **BREAKING — `--json` payload shape** for `scribe list`, `status`, `doctor`, `explain`, `guide`. Previously top-level keys are now under `data`. Migrate parsers from `jq '.foo'` to `jq '.data.foo'`. ([#118](https://github.com/Naoray/scribe/pull/118))
 - **BREAKING — mutator `--json` payload shape** for `scribe sync`, `add`, `adopt`, `connect`. Same envelope rules. When `data.summary.failed > 0`, `status` becomes `"partial_success"` and exit code is `10`. ([#119](https://github.com/Naoray/scribe/pull/119))
 - **State schema bumped to v5** — projection indexes plus kits/snippets storage. Migration runs automatically at first invocation; no user action required. ([#125](https://github.com/Naoray/scribe/pull/125))
+- **README split into focused docs** — the README is now a front page with quickstart and positioning, with command, JSON envelope, project/kit, adoption, and troubleshooting reference moved into `docs/`. ([#131](https://github.com/Naoray/scribe/pull/131))
+- **Legacy global-projection compatibility mode** — when no `.scribe.yaml` is present, scribe preserves existing global projection behavior and emits a once-per-day deprecation banner for `scribe migrate global-to-projects`. ([#132](https://github.com/Naoray/scribe/pull/132))
+- **Essentials registry pointer** — README now links to the public `Naoray/scribe-skills-essentials` starter registry. ([#141](https://github.com/Naoray/scribe/pull/141))
 
 ### Fixed
 
 - **`scribe --version`** now falls back to `debug.ReadBuildInfo` for `go install`-based builds, so installs without a release-time ldflag still report a meaningful version. ([#115](https://github.com/Naoray/scribe/pull/115))
+- **Hook installer hardening** — malformed Claude Code hook settings now return actionable errors without rewriting user config, and the embedded hook script no longer blocks on inherited stdin. ([#127](https://github.com/Naoray/scribe/pull/127))
+- **`scribe doctor` opaque-tool drift check** — opaque tools such as Gemini no longer produce false `projection_drift` errors when their skill path is intentionally unavailable. ([#129](https://github.com/Naoray/scribe/pull/129))
+- **`scribe list` viewport and bootstrap filtering** — cursor scrolling now matches rendered group headers, stale offsets clamp correctly, and the auto-managed `scribe-agent` bootstrap skill is hidden from list output. ([#130](https://github.com/Naoray/scribe/pull/130))
 
 ### Internal
 
