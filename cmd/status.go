@@ -17,5 +17,5 @@ Examples:
 		RunE: runStatus,
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	return cmd
+	return markJSONSupported(cmd)
 }

@@ -41,7 +41,7 @@ Examples:
 	cmd.Flags().Bool("dry-run", false, "Print plan without writing anything")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().Bool("verbose", false, "Include paths and hashes in plan output")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runAdopt(cmd *cobra.Command, args []string) error {

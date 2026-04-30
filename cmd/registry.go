@@ -24,7 +24,7 @@ func newRegistryCommand() *cobra.Command {
 	cmd.AddCommand(newRegistryAddCommand())
 	cmd.AddCommand(newRegistryCreateCommand())
 	cmd.AddCommand(newRegistryMigrateCommand())
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 // newRegistryMigrateCommand wires `scribe registry migrate` to the existing

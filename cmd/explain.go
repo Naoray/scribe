@@ -49,13 +49,15 @@ Falls back to rendering the SKILL.md directly if no LLM is available.`,
 	}
 	cmd.Flags().Bool("json", false, "Output structured JSON (for agents/scripts)")
 	cmd.Flags().Bool("raw", false, "Show rendered SKILL.md directly, skip AI explanation")
-	cmd.MarkFlagsMutuallyExclusive("json", "raw")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runExplain(cmd *cobra.Command, args []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	rawFlag, _ := cmd.Flags().GetBool("raw")
+	if jsonFlag && rawFlag {
+		return fmt.Errorf("if any flags in the group [json raw] are set none of the others can be; [json raw] were all set")
+	}
 	factory := newCommandFactory()
 
 	st, err := factory.State()

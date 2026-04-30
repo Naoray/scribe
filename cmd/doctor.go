@@ -39,7 +39,7 @@ Examples:
 	cmd.Flags().Bool("fix", false, "Normalize canonical skill metadata and repair affected projections")
 	cmd.Flags().String("skill", "", "Inspect a single managed skill")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 type doctorIssueJSON struct {
@@ -63,7 +63,7 @@ type doctorFixResult struct {
 }
 
 type doctorSkillSnapshot struct {
-	Name        string
+	Name         string
 	Installed    state.InstalledSkill
 	SkillContent []byte
 	BaseContent  []byte
