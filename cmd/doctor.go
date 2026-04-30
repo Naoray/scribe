@@ -38,7 +38,6 @@ Examples:
 	}
 	cmd.Flags().Bool("fix", false, "Normalize canonical skill metadata and repair affected projections")
 	cmd.Flags().String("skill", "", "Inspect a single managed skill")
-	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	return markJSONSupported(cmd)
 }
 
@@ -82,7 +81,7 @@ type pathSnapshot struct {
 func runDoctor(cmd *cobra.Command, _ []string) error {
 	fixFlag, _ := cmd.Flags().GetBool("fix")
 	skillFlag, _ := cmd.Flags().GetString("skill")
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 
 	if fixFlag && jsonFlag {
 		return fmt.Errorf("doctor: --fix cannot be combined with --json")
@@ -120,7 +119,11 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	}
 
 	if jsonFlag {
-		return writeDoctorJSON(cmd.OutOrStdout(), skillFlag, report)
+		r := jsonRendererForCommand(cmd, jsonFlag)
+		if err := r.Result(buildDoctorReportJSON(skillFlag, report)); err != nil {
+			return err
+		}
+		return r.Flush()
 	}
 	return writeDoctorText(cmd.OutOrStdout(), skillFlag, report)
 }
@@ -540,6 +543,14 @@ func copyPath(src, dst string) error {
 }
 
 func writeDoctorJSON(w io.Writer, skill string, report doctor.Report) error {
+	out := buildDoctorReportJSON(skill, report)
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func buildDoctorReportJSON(skill string, report doctor.Report) doctorReportJSON {
 	out := doctorReportJSON{
 		Skill:  skill,
 		Fix:    false,
@@ -554,10 +565,7 @@ func writeDoctorJSON(w io.Writer, skill string, report doctor.Report) error {
 			Message: issue.Message,
 		})
 	}
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return out
 }
 
 func writeDoctorText(w io.Writer, skill string, report doctor.Report) error {
