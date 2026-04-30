@@ -1293,6 +1293,28 @@ func TestFormatRow_LocalRowsDoNotShowPlaceholderColumns(t *testing.T) {
 	}
 }
 
+func TestFormatRow_LocalRowsShowSourceAttributionMarker(t *testing.T) {
+	m := listModel{width: 120}
+	row := listRow{
+		Name:    "recap",
+		Managed: true,
+		Local: &discovery.Skill{
+			Name: "recap",
+			Source: discovery.Source{
+				Author: "acme",
+			},
+		},
+		Source: discovery.Source{
+			Author: "acme",
+		},
+	}
+
+	formatted := m.formatRow(row, false, 20, false)
+	if !strings.Contains(formatted, "ℹ️ (via acme)") {
+		t.Fatalf("local row should show source marker, got: %q", formatted)
+	}
+}
+
 func TestFormatRow_LocalRegistryRowsShowSkeletonWhileBackgroundLoading(t *testing.T) {
 	m := listModel{width: 120, backgroundLoad: true, spinnerFrame: 0}
 	row := listRow{

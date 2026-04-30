@@ -334,6 +334,7 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 	if compact {
 		if !row.HasStatus {
 			line := prefix + nameStyle.Render(name)
+			line += sourceAttributionMarker(row)
 			if !row.Managed {
 				line += " " + ltDimStyle.Render("[unmanaged]")
 			}
@@ -349,6 +350,7 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 
 	if !row.HasStatus {
 		line := prefix + nameStyle.Render(name)
+		line += sourceAttributionMarker(row)
 		if !row.Managed {
 			line += " " + ltDimStyle.Render("[unmanaged]")
 		} else if m.backgroundLoad && row.Origin == state.OriginRegistry && row.Group != "" {
@@ -373,6 +375,7 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 	author = runewidth.FillRight(author, 12)
 
 	line := prefix + nameStyle.Render(name) + "  " + ltDimStyle.Render(ver) + "  " + ltDimStyle.Render(author)
+	line += sourceAttributionMarker(row)
 
 	if row.HasStatus {
 		icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
@@ -385,6 +388,13 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 	}
 
 	return line
+}
+
+func sourceAttributionMarker(row listRow) string {
+	if row.Source.Author == "" {
+		return ""
+	}
+	return " " + ltDimStyle.Render("ℹ️ (via "+row.Source.Author+")")
 }
 
 func (m listModel) renderSkeletonColumns(row listRow) (string, string) {

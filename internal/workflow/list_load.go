@@ -28,6 +28,7 @@ type ListRow struct {
 	HasStatus bool
 	Version   string
 	Author    string
+	Source    discovery.Source
 	Targets   []string
 	Local     *discovery.Skill
 	Entry     *manifest.Entry
@@ -110,6 +111,7 @@ func BuildRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
 			}
 			if local != nil {
 				row.Managed = local.Managed
+				row.Source = local.Source
 			}
 			if installed, ok := bag.State.Installed[ss.Name]; ok {
 				row.Origin = installed.Origin
@@ -144,6 +146,7 @@ func BuildLocalRows(skills []discovery.Skill, st *state.State) []ListRow {
 		row := ListRow{
 			Name:    sk.Name,
 			Group:   g,
+			Source:  sk.Source,
 			Targets: sk.Targets,
 			Local:   sk,
 			Managed: sk.Managed,
