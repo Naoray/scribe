@@ -716,11 +716,7 @@ func validateFetchedLockHash(sk SkillStatus, files []tools.SkillFile) error {
 	if sk.LockEntry == nil {
 		return nil
 	}
-	hashFiles := make([]lockfile.File, 0, len(files))
-	for _, file := range files {
-		hashFiles = append(hashFiles, lockfile.File{Path: file.Path, Content: file.Content})
-	}
-	hash, err := lockfile.HashFiles(hashFiles)
+	hash, err := HashInstallableFiles(files)
 	if err != nil {
 		return err
 	}
@@ -736,6 +732,16 @@ func validateFetchedLockHash(sk SkillStatus, files []tools.SkillFile) error {
 			Reason:       "downloaded content hash differs from lockfile pin",
 		}},
 	}
+}
+
+func HashInstallableFiles(files []tools.SkillFile) (string, error) {
+	hashFiles := make([]lockfile.File, 0, len(files))
+	for _, file := range files {
+		if shouldInclude(file.Path) {
+			hashFiles = append(hashFiles, lockfile.File{Path: file.Path, Content: file.Content})
+		}
+	}
+	return lockfile.HashFiles(hashFiles)
 }
 
 func (s *Syncer) emit(msg any) {
