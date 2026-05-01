@@ -1,5 +1,15 @@
 ## Unreleased
 
+## v1.0.2 — 2026-05-01
+
+### Fixed
+
+- **`scribe upgrade` self-upgrades for `go install` builds** — the dev-build skip read the raw `Version` package var, which stays `"dev"` for `go install github.com/Naoray/scribe@vX.Y.Z` because goreleaser ldflags only run at release time. Module-versioned installs now flow through `currentVersion()`, which falls back to `debug.ReadBuildInfo()` so they participate in the upgrade comparison. Local source builds (`go build` / `go install ./...`) still see `Main.Version == "(devel)"` and remain dev-skipped. ([#147](https://github.com/Naoray/scribe/pull/147))
+
+### Docs
+
+- **Broader agent-coverage messaging** — README hero, cross-tool projection bullet, install-via-agent block, agents-first bullet, and one-manifest bullet now lead with "any AI coding agent" and call out built-in support for Claude Code, Codex, Cursor, and Gemini plus `scribe tools add` for any custom tool. Mirrored in `SKILL.md` and `docs/projects-and-kits.md`. ([#148](https://github.com/Naoray/scribe/pull/148))
+
 ## v1.0.1 — 2026-05-01
 
 ### Changed
