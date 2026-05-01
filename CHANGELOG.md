@@ -1,8 +1,15 @@
 ## Unreleased
 
+## v1.0.1 — 2026-05-01
+
 ### Changed
 
 - **BREAKING — embedded skill renamed `scribe-agent` → `scribe`** — first-run installs as `scribe`, and existing v1.0 installs are migrated automatically on next invocation (state entries + canonical store + projection symlinks repointed in one shot). Update any automation that hardcoded the skill name. ([#146](https://github.com/Naoray/scribe/pull/146))
+
+### Docs
+
+- **Embedded skill teaches kit + snippet authoring** — `SKILL.md` now walks agents through the `.scribe.yaml` kit and snippet flow, so the skill itself is the authoring contract. ([#144](https://github.com/Naoray/scribe/pull/144))
+- **`docs/projects-and-kits.md` documents agent-driven authoring** — the v1.0 path for hand-authoring kits and snippets is now in the docs site. ([#145](https://github.com/Naoray/scribe/pull/145))
 
 ## SemVer commitment (from v1.0.0)
 
