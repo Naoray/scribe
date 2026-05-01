@@ -22,6 +22,14 @@ type upgradeRunner func(ctx context.Context, method upgrade.Method, release *gog
 
 var upgradeCheck bool
 
+// currentVersion returns the version scribe should compare against the latest
+// release. Falls back to debug.ReadBuildInfo for `go install`-style builds where
+// goreleaser ldflags weren't applied (e.g. `go install github.com/Naoray/scribe@v1.0.1`).
+// Wrapped in a var so tests can override.
+var currentVersion = func() string {
+	return resolveVersion(Version, readBuildInfo())
+}
+
 func newUpgradeCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upgrade",
@@ -39,7 +47,7 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	factory := newCommandFactory()
 
 	// Dev builds should not attempt self-upgrade.
-	isDevBuild, _ := upgrade.NeedsUpgrade(Version, "")
+	isDevBuild, _ := upgrade.NeedsUpgrade(currentVersion(), "")
 	if isDevBuild {
 		fmt.Println("Running development build, skipping upgrade.")
 		return nil
@@ -74,9 +82,10 @@ func runUpgradeCheckWithDeps(ctx context.Context, client upgradeClient) error {
 		return fmt.Errorf("check latest version: %w", err)
 	}
 	latestTag := release.GetTagName()
-	_, needsUpgrade := upgrade.NeedsUpgrade(Version, latestTag)
+	current := currentVersion()
+	_, needsUpgrade := upgrade.NeedsUpgrade(current, latestTag)
 	if needsUpgrade {
-		fmt.Printf("New version available: %s (current: %s)\n", latestTag, Version)
+		fmt.Printf("New version available: %s (current: %s)\n", latestTag, current)
 	} else {
 		fmt.Printf("Already up to date (%s)\n", latestTag)
 	}
@@ -90,7 +99,8 @@ func runUpgradeWithDeps(ctx context.Context, st *state.State, client upgradeClie
 	}
 
 	latestTag := release.GetTagName()
-	_, needsUpgrade := upgrade.NeedsUpgrade(Version, latestTag)
+	current := currentVersion()
+	_, needsUpgrade := upgrade.NeedsUpgrade(current, latestTag)
 	if !needsUpgrade {
 		fmt.Printf("Already up to date (%s)\n", latestTag)
 		st.RecordScribeBinaryUpdateSuccess()
@@ -100,7 +110,7 @@ func runUpgradeWithDeps(ctx context.Context, st *state.State, client upgradeClie
 		return nil
 	}
 
-	fmt.Printf("Upgrading v%s → %s...\n", Version, latestTag)
+	fmt.Printf("Upgrading v%s → %s...\n", current, latestTag)
 
 	if err := runner(ctx, method, release, isTTY); err != nil {
 		return err
