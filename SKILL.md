@@ -183,7 +183,7 @@ Commit after each logical phase of work, not just at the end.
 Use `[agent]` prefix on every commit message...
 ```
 
-Required frontmatter: `name`, `description`, `targets`. `targets` is a YAML list of agent tool names (`claude`, `codex`, `cursor`). Body is plain markdown — no variables, no conditionals.
+Required frontmatter: `name`, `description`, `targets`. `targets` is a YAML list of agent tool names — built-ins are `claude`, `codex`, `cursor`, `gemini`; any custom tool registered via `scribe tools add` works here too. Body is plain markdown — no variables, no conditionals.
 
 ### Wiring a kit/snippet into a project
 

@@ -7,7 +7,7 @@
 |___/\___|_|_\___|___/___|
 ```
 
-> Agent-first skill manager for Claude Code, Codex, and Cursor. Your team's AI coding skills, always in sync — one manifest, one command.
+> Agent-first skill manager for any AI coding agent. Built-in support for Claude Code, Codex, Cursor, and Gemini; register any other agent with `scribe tools add`. Your team's AI coding skills, always in sync — one manifest, one command.
 
 <!-- TODO: hero terminal screenshot or asciinema GIF of `scribe list` TUI -->
 
@@ -18,7 +18,7 @@ AI coding agents work better when you teach them how your team works — code re
 Scribe makes the skill set declarative.
 
 - **One source of truth.** Put your team's skills in a GitHub repo with a `scribe.yaml` manifest. Teammates run `scribe registry connect` once.
-- **Cross-tool projection.** One canonical store under `~/.scribe/skills/` projects to Claude Code, Codex, and Cursor at the right paths.
+- **Cross-tool projection.** One canonical store under `~/.scribe/skills/` projects to whatever agent you use — Claude Code, Codex, Cursor, and Gemini ship as built-ins; register others (Aider, Cline, Roo, your own tool) with `scribe tools add`.
 - **Agent-first, scriptable.** Every migrated command emits a versioned JSON envelope (`{status, format_version, data, meta}`) with exit codes, partial-success semantics, and JSON Schema introspection.
 
 ## Install
@@ -55,7 +55,7 @@ Verify: `scribe --version`. Update via `brew upgrade scribe`, the same `go insta
 
 ### Install via your agent
 
-Paste this into Claude Code, Cursor, or Codex with shell access — it installs scribe and registers the agent skill so future sessions pick it up automatically:
+Paste this into your AI coding agent (Claude Code, Codex, Cursor, Gemini, or any agent with shell access) — it installs scribe and registers the agent skill so future sessions pick it up automatically:
 
 ```
 I want to use Scribe to manage my AI coding-agent skills on this machine.
@@ -121,10 +121,10 @@ For a default starter set, connect `Naoray/scribe-skills-essentials` and run `sc
 
 ## Why scribe?
 
-- **Agents-first**: versioned JSON envelope, JSON Schema for every migrated command, distinct exit codes, machine-readable error remediation. Drops cleanly into Claude Code / Codex / Cursor agent loops.
+- **Agents-first**: versioned JSON envelope, JSON Schema for every migrated command, distinct exit codes, machine-readable error remediation. Drops cleanly into any agent loop — Claude Code, Codex, Cursor, Gemini, or a custom tool you registered with `scribe tools add`.
 - **Project-local projection**: scopes skill availability to the project you're in, instead of dumping every installed skill into every session. Keeps Codex inside its 5440-byte description budget by construction.
 - **Adoption, not migration**: claims hand-rolled skills already in `~/.claude/skills/` etc. via symlink — nothing moves, nothing breaks, scribe just starts managing them.
-- **One manifest, every tool**: `scribe.yaml` works across Claude Code, Codex, and Cursor. No per-tool maintenance.
+- **One manifest, every tool**: `scribe.yaml` works across every supported agent — built-ins (Claude Code, Codex, Cursor, Gemini) plus any custom tool you register. No per-tool maintenance.
 
 ## Documentation
 

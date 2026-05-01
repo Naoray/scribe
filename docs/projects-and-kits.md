@@ -58,7 +58,7 @@ Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits 
 
 ### Authoring kits and snippets (today)
 
-A user-facing `scribe kit` / `scribe snippet` CLI is on the v1.1 roadmap. Until it ships, the embedded scribe skill (installed automatically the first time you run scribe in a Claude Code, Codex, or Cursor session) knows how to scaffold kits and snippets directly. **Ask your AI agent.**
+A user-facing `scribe kit` / `scribe snippet` CLI is on the v1.1 roadmap. Until it ships, the embedded scribe skill (installed automatically the first time you run scribe in any supported agent session — Claude Code, Codex, Cursor, Gemini, or a custom tool registered via `scribe tools add`) knows how to scaffold kits and snippets directly. **Ask your AI agent.**
 
 Examples:
 

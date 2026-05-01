@@ -99,9 +99,9 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe tools disable` | --json | no |
 | `scribe tools enable` | --json | no |
 | `scribe tools` | --json | no |
+| `scribe update` | --apply, --json | yes |
 | `scribe upgrade-agent` | --json | no |
 | `scribe upgrade` | --check, --json | no |
-| `scribe update` | --apply, --json | yes |
 | `scribe` |  | no |
 
 
