@@ -152,6 +152,39 @@ func TestRunUpgradeWithDepsAllowsUnauthenticatedReleaseChecks(t *testing.T) {
 	}
 }
 
+func TestRunUpgradeCheckResolvesGoInstallVersion(t *testing.T) {
+	origVersion := Version
+	origCurrent := currentVersion
+	Version = "dev"
+	currentVersion = func() string { return "1.2.3" }
+	t.Cleanup(func() {
+		Version = origVersion
+		currentVersion = origCurrent
+	})
+
+	r, w, _ := os.Pipe()
+	origStdout := os.Stdout
+	os.Stdout = w
+
+	err := runUpgradeCheckWithDeps(context.Background(), fakeUpgradeClient{tag: "v1.2.3"})
+
+	w.Close()
+	os.Stdout = origStdout
+	var buf strings.Builder
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("runUpgradeCheckWithDeps() error = %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Already up to date") {
+		t.Fatalf("dev binary with module-version BuildInfo should compare cleanly; got %q", out)
+	}
+	if strings.Contains(out, "New version available") {
+		t.Fatalf("dev fallback should not report new version against matching tag; got %q", out)
+	}
+}
+
 func TestRunUpgradeCheckReportsUpToDate(t *testing.T) {
 	origVersion := Version
 	Version = "1.2.3"
