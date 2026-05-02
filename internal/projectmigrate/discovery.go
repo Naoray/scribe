@@ -175,15 +175,13 @@ func DiscoverCandidateProjects(searchRoots []string, st *state.State) ([]Project
 		foundInRoot := false
 		err = filepath.WalkDir(abs, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
-				// Skip unreadable paths (e.g. macOS-protected ~/.Trash, ~/Library)
-				// instead of aborting the whole scan.
-				if errors.Is(walkErr, os.ErrPermission) {
-					if d != nil && d.IsDir() {
-						return filepath.SkipDir
-					}
-					return nil
+				if path == abs {
+					return walkErr
 				}
-				return walkErr
+				if d != nil && d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 			if d.IsDir() && path != abs && shouldSkipProjectWalkDir(d.Name()) {
 				return filepath.SkipDir
@@ -242,8 +240,11 @@ func pathWithin(path, root string) bool {
 }
 
 func shouldSkipProjectWalkDir(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
 	switch name {
-	case ".git", ".hg", ".svn", ".anvil", ".Trash", "node_modules", "vendor":
+	case "node_modules", "vendor":
 		return true
 	default:
 		return false
