@@ -169,6 +169,101 @@ func TestApplyDryRunDoesNotMutateFilesystem(t *testing.T) {
 	}
 }
 
+func TestMigrate_SkipsKitYAMLOnExistingKitFile(t *testing.T) {
+	tmp := t.TempDir()
+	project := filepath.Join(tmp, "project")
+	store := filepath.Join(tmp, "home", ".scribe", "skills")
+	link := filepath.Join(tmp, "home", ".claude", "skills", "tdd")
+	mustMkdir(t, filepath.Join(store, "tdd"))
+	mustMkdir(t, filepath.Dir(link))
+	mustMkdir(t, project)
+	mustSymlink(t, filepath.Join(store, "tdd"), link)
+	projectFile := filepath.Join(project, projectfile.Filename)
+	original := []byte("kits:\n  - foo\nsnippets:\n  - commit-discipline\n")
+	if err := os.WriteFile(projectFile, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	discovery := Discovery{
+		GlobalSymlinks: []GlobalSymlink{{
+			Tool:          "claude",
+			Skill:         "tdd",
+			Path:          link,
+			CanonicalPath: filepath.Join(store, "tdd"),
+		}},
+		Projects: []ProjectCandidate{{Path: project, Source: "search_root"}},
+		Skills:   []string{"tdd"},
+	}
+
+	plan, err := BuildPlan(discovery, []string{project}, false)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	result, err := Apply(plan, discovery.Projects)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if result.WroteProjectFiles != 0 || result.RemovedGlobalLinks != 1 {
+		t.Fatalf("result = %#v, want skipped write and removed link", result)
+	}
+	got, err := os.ReadFile(projectFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("project file = %q, want unchanged %q", got, original)
+	}
+}
+
+func TestMigrate_ForceOverwritesKitYAML(t *testing.T) {
+	tmp := t.TempDir()
+	project := filepath.Join(tmp, "project")
+	store := filepath.Join(tmp, "home", ".scribe", "skills")
+	link := filepath.Join(tmp, "home", ".claude", "skills", "tdd")
+	mustMkdir(t, filepath.Join(store, "tdd"))
+	mustMkdir(t, filepath.Dir(link))
+	mustMkdir(t, project)
+	mustSymlink(t, filepath.Join(store, "tdd"), link)
+	projectFile := filepath.Join(project, projectfile.Filename)
+	original := []byte("kits:\n  - foo\n")
+	if err := os.WriteFile(projectFile, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	discovery := Discovery{
+		GlobalSymlinks: []GlobalSymlink{{
+			Tool:          "claude",
+			Skill:         "tdd",
+			Path:          link,
+			CanonicalPath: filepath.Join(store, "tdd"),
+		}},
+		Projects: []ProjectCandidate{{Path: project, Source: "search_root"}},
+		Skills:   []string{"tdd"},
+	}
+
+	plan, err := BuildPlan(discovery, []string{project}, false, true)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	result, err := Apply(plan, discovery.Projects)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if result.WroteProjectFiles != 1 {
+		t.Fatalf("WroteProjectFiles = %d, want 1", result.WroteProjectFiles)
+	}
+	got, err := os.ReadFile(projectFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) == string(original) {
+		t.Fatalf("project file = %q, want overwritten", got)
+	}
+	if !strings.Contains(string(got), "tdd") {
+		t.Fatalf("project file = %q, want migrated skill", got)
+	}
+}
+
 func TestBuildPlan_FailsBudget_NoForce(t *testing.T) {
 	home, project, link := setupBudgetMigrationFixture(t, "claude", "oversized", 200)
 	t.Setenv("HOME", home)

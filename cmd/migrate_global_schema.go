@@ -27,6 +27,7 @@ var migrateGlobalToProjectsOutputSchema = `{
           "added_skills": {"type": "array", "items": {"type": "string"}},
           "skills": {"type": "array", "items": {"type": "string"}},
           "changed": {"type": "boolean"},
+          "skipped_write_reason": {"type": "string"},
           "budget_per_agent": {
             "type": "object",
             "additionalProperties": {

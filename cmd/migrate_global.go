@@ -210,6 +210,11 @@ func printGlobalToProjectsResult(cmd *cobra.Command, result projectmigrate.Migra
 		}
 		fmt.Fprintf(out, "%swrote .scribe.yaml in %d project(s)\n", prefix, projectWrites)
 		for _, change := range result.ProjectFiles {
+			if change.SkippedWriteReason != "" {
+				fmt.Fprintf(out, "  %s\n", change.SkippedWriteReason)
+				printBudgetLines(out, change.BudgetPerAgent)
+				continue
+			}
 			action := "unchanged"
 			if change.Changed {
 				action = "write"
