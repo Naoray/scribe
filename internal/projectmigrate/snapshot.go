@@ -110,7 +110,7 @@ func captureSnapshot(discovery Discovery, plan MigrationPlan) (Snapshot, error) 
 		}
 	}
 	expected := cloneState(st)
-	applyMigrationProjections(expected, plan, false)
+	applyMigrationProjections(expected, plan, true)
 
 	return Snapshot{
 		Version:              snapshotVersion,

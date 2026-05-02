@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
@@ -517,6 +518,73 @@ description: Keep daily notes and summaries.
 	}
 	if len(report.Issues) != 0 {
 		t.Fatalf("Issues = %d, want 0: %+v", len(report.Issues), report.Issues)
+	}
+}
+
+func TestDoctor_WarnsMigrationBudgetOverflow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	old := budget.AgentBudgets
+	budget.AgentBudgets = map[string]int{"claude": 20}
+	t.Cleanup(func() { budget.AgentBudgets = old })
+	writeSkill(t, "recap", []byte("---\nname: recap\ndescription: "+strings.Repeat("x", 200)+"\n---\n"))
+	project := filepath.Join(home, "project")
+	st := &state.State{
+		SchemaVersion: 5,
+		Installed: map[string]state.InstalledSkill{
+			"recap": {
+				Revision: 1,
+				Projections: []state.ProjectionEntry{{
+					Project: project,
+					Tools:   []string{"claude"},
+					Source:  state.SourceMigration,
+				}},
+			},
+		},
+	}
+	report, err := InspectManagedSkills(nil, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+	for _, issue := range report.Issues {
+		if issue.Kind == IssueMigrationBudgetOverflow && issue.Tool == "claude" && issue.Status == "warn" {
+			return
+		}
+	}
+	t.Fatalf("Issues = %+v, want migration budget overflow", report.Issues)
+}
+
+func TestDoctor_NoNewWarningsAfterMigrate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	old := budget.AgentBudgets
+	budget.AgentBudgets = map[string]int{"claude": 8000}
+	t.Cleanup(func() { budget.AgentBudgets = old })
+	writeSkill(t, "recap", []byte("---\nname: recap\ndescription: small\n---\n"))
+	project := filepath.Join(home, "project")
+	st := &state.State{
+		SchemaVersion: 5,
+		Installed: map[string]state.InstalledSkill{
+			"recap": {
+				Revision: 1,
+				Projections: []state.ProjectionEntry{{
+					Project: project,
+					Tools:   []string{"claude"},
+					Source:  state.SourceMigration,
+				}},
+			},
+		},
+	}
+	report, err := InspectManagedSkills(nil, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+	for _, issue := range report.Issues {
+		if issue.Kind == IssueMigrationBudgetOverflow {
+			t.Fatalf("unexpected migration budget issue: %+v", issue)
+		}
 	}
 }
 

@@ -241,6 +241,76 @@ func TestApply_SetsMigrationSource(t *testing.T) {
 	}
 }
 
+func TestApply_ClearsLegacyGlobalProjections(t *testing.T) {
+	home, project, link := setupBudgetMigrationFixture(t, "claude", "tdd", 10)
+	t.Setenv("HOME", home)
+	st := &state.State{
+		SchemaVersion: 5,
+		Installed: map[string]state.InstalledSkill{
+			"tdd": {Projections: []state.ProjectionEntry{{Project: "", Tools: []string{"claude"}}}},
+		},
+		Kits:               map[string]state.InstalledKit{},
+		Snippets:           map[string]state.InstalledSnippet{},
+		Migrations:         map[string]bool{},
+		RegistryFailures:   map[string]state.RegistryFailure{},
+		BinaryUpdateChecks: map[string]state.BinaryUpdateCheck{},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	discovery := undoDiscovery(home, project, link, "claude", "tdd")
+	plan, err := BuildPlan(discovery, []string{project}, false)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	if _, err := Apply(plan, discovery.Projects); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, projection := range loaded.Installed["tdd"].Projections {
+		if projection.Project == "" {
+			t.Fatalf("legacy projection still present: %#v", loaded.Installed["tdd"].Projections)
+		}
+	}
+}
+
+func TestApply_RecordsProjectScopedProjections(t *testing.T) {
+	home, project, link := setupBudgetMigrationFixture(t, "codex", "review", 10)
+	t.Setenv("HOME", home)
+	st := &state.State{
+		SchemaVersion: 5,
+		Installed: map[string]state.InstalledSkill{
+			"review": {Projections: []state.ProjectionEntry{{Project: "", Tools: []string{"codex"}}}},
+		},
+		Kits:               map[string]state.InstalledKit{},
+		Snippets:           map[string]state.InstalledSnippet{},
+		Migrations:         map[string]bool{},
+		RegistryFailures:   map[string]state.RegistryFailure{},
+		BinaryUpdateChecks: map[string]state.BinaryUpdateCheck{},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	discovery := undoDiscovery(home, project, link, "codex", "review")
+	plan, err := BuildPlan(discovery, []string{project}, false)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	if _, err := Apply(plan, discovery.Projects); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded.Installed["review"].Projections, []state.ProjectionEntry{{Project: project, Tools: []string{"codex"}, Source: state.SourceMigration}}) {
+		t.Fatalf("projections = %#v, want project migration projection", loaded.Installed["review"].Projections)
+	}
+}
+
 func setupBudgetMigrationFixture(t *testing.T, tool, skill string, descriptionBytes int) (home, project, link string) {
 	t.Helper()
 	home = t.TempDir()

@@ -177,7 +177,7 @@ func recordMigrationProjections(plan MigrationPlan) error {
 	if err != nil {
 		return err
 	}
-	if !applyMigrationProjections(st, plan, false) {
+	if !applyMigrationProjections(st, plan, true) {
 		return nil
 	}
 	return st.Save()
