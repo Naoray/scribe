@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -60,6 +61,10 @@ func runKitCreate(cmd *cobra.Command, name string, opts *kitCreateOptions) error
 		opts = &kitCreateOptions{}
 	}
 
+	if err := validateKitName(name); err != nil {
+		return err
+	}
+
 	scribeDir, err := paths.ScribeDir()
 	if err != nil {
 		return fmt.Errorf("resolve scribe dir: %w", err)
@@ -100,5 +105,15 @@ func runKitCreate(cmd *cobra.Command, name string, opts *kitCreateOptions) error
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Created kit %s at %s with %d skills\n", out.Name, out.Path, out.SkillsCount)
+	return nil
+}
+
+func validateKitName(name string) error {
+	if name == "" || filepath.IsAbs(name) || strings.ContainsRune(name, rune(os.PathSeparator)) || strings.Contains(name, "..") {
+		return clierrors.Wrap(fmt.Errorf("invalid kit name %q", name), "KIT_NAME_INVALID", clierrors.ExitValid,
+			clierrors.WithResource(name),
+			clierrors.WithRemediation("Use a simple kit name without path separators or parent directory segments."),
+		)
+	}
 	return nil
 }

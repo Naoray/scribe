@@ -127,3 +127,58 @@ func TestKitCreateExistingFileRequiresForce(t *testing.T) {
 		t.Fatalf("existing file was overwritten: %q", string(data))
 	}
 }
+
+func TestKitCreateForceOverwritesExistingFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	kitPath := filepath.Join(home, ".scribe", "kits", "core.yaml")
+	if err := os.MkdirAll(filepath.Dir(kitPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kitPath, []byte("name: core\nskills:\n  - old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newKitCreateCommand()
+	cmd.SetArgs([]string{"core", "--force", "--skills", "new,another"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := kit.Load(kitPath)
+	if err != nil {
+		t.Fatalf("load kit: %v", err)
+	}
+	wantSkills := []string{"new", "another"}
+	if len(got.Skills) != len(wantSkills) {
+		t.Fatalf("skills = %#v, want %#v", got.Skills, wantSkills)
+	}
+	for i := range wantSkills {
+		if got.Skills[i] != wantSkills[i] {
+			t.Fatalf("skills = %#v, want %#v", got.Skills, wantSkills)
+		}
+	}
+}
+
+func TestKitCreateRejectsInvalidNames(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []string{"../outside", "/absolute", "has/slash"}
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			cmd := newKitCreateCommand()
+			cmd.SetArgs([]string{name, "--skills", "one"})
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if got := clierrors.ExitCode(err); got != clierrors.ExitValid {
+				t.Fatalf("exit = %d, want %d; err=%v", got, clierrors.ExitValid, err)
+			}
+		})
+	}
+}
