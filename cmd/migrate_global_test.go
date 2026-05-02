@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/projectmigrate"
 )
@@ -61,6 +63,89 @@ func TestGlobalToProjectsJSONDryRunDoesNotMutateHome(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(project, projectfile.Filename)); !os.IsNotExist(err) {
 		t.Fatalf(".scribe.yaml should not exist after dry-run, stat err = %v", err)
+	}
+}
+
+func TestGlobalToProjects_RefusesWithoutProject(t *testing.T) {
+	home, project, link := setupGlobalToProjectsFixture(t, "claude", "tdd")
+	t.Setenv("HOME", home)
+	t.Chdir(project)
+
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"migrate", "global-to-projects"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want refusal\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+	if got := clierrors.ExitCode(err); got != clierrors.ExitUsage {
+		t.Fatalf("exit code = %d, want %d; err=%v", got, clierrors.ExitUsage, err)
+	}
+	if !strings.Contains(err.Error(), "must pass --project <path>; refusing to remove global symlinks") {
+		t.Fatalf("error = %q, want project refusal", err.Error())
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("global symlink should remain after refusal: %v", err)
+	}
+}
+
+func TestGlobalToProjects_DryRunRefusesWithoutProject(t *testing.T) {
+	home, project, link := setupGlobalToProjectsFixture(t, "claude", "tdd")
+	t.Setenv("HOME", home)
+	t.Chdir(project)
+
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--json", "migrate", "global-to-projects", "--dry-run"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want refusal\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+	if got := clierrors.ExitCode(err); got != clierrors.ExitUsage {
+		t.Fatalf("exit code = %d, want %d; err=%v", got, clierrors.ExitUsage, err)
+	}
+	if !strings.Contains(err.Error(), "must pass --project <path>; refusing to remove global symlinks") {
+		t.Fatalf("error = %q, want project refusal", err.Error())
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("global symlink should remain after refusal: %v", err)
+	}
+}
+
+func TestGlobalToProjects_NoLinksSucceedsSilent(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	project := filepath.Join(tmp, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Chdir(project)
+
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--json", "migrate", "global-to-projects"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	var env struct {
+		Status string `json:"status"`
+		Data   struct {
+			FoundGlobalLinks int `json:"found_global_links"`
+			SelectedProjects int `json:"selected_projects"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if env.Status != "no_change" || env.Data.FoundGlobalLinks != 0 || env.Data.SelectedProjects != 0 {
+		t.Fatalf("env = %#v, want silent no_change", env)
 	}
 }
 

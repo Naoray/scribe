@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/cli/envelope"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/projectmigrate"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -34,6 +35,7 @@ files for those projects, and remove the global symlinks.`,
 		RunE: runGlobalToProjects,
 	}
 	cmd.Flags().Bool("dry-run", false, "Preview migration without writing .scribe.yaml or removing global symlinks")
+	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
 	cmd.Flags().StringArray("project", nil, "Project directory to keep the current global skill set (repeatable; skips prompt)")
 	return markJSONSupported(cmd)
 }
@@ -44,6 +46,7 @@ func runGlobalToProjects(cmd *cobra.Command, args []string) error {
 
 func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector projectSelector) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	yes, _ := cmd.Flags().GetBool("yes")
 	jsonFlag := jsonFlagPassed(cmd)
 	projectFlags, _ := cmd.Flags().GetStringArray("project")
 
@@ -83,11 +86,26 @@ func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector pr
 			return err
 		}
 	}
-	if len(selected) == 0 && (jsonFlag || dryRun) {
-		selected = projectPaths(discovery.Projects)
-	}
 	if len(selected) == 0 && len(discovery.GlobalSymlinks) > 0 {
-		return fmt.Errorf("no projects selected")
+		return clierrors.Wrap(
+			fmt.Errorf("must pass --project <path>; refusing to remove global symlinks"),
+			"USAGE",
+			clierrors.ExitUsage,
+			clierrors.WithRemediation("scribe migrate global-to-projects --project <path> --dry-run"),
+		)
+	}
+	if !dryRun && !jsonFlag && !yes && len(projectFlags) > 0 && globalToProjectsIsTerminal() {
+		var confirm bool
+		err := huh.NewConfirm().
+			Title("Remove legacy global symlinks and write selected project .scribe.yaml files?").
+			Value(&confirm).
+			Run()
+		if err != nil {
+			return err
+		}
+		if !confirm {
+			return clierrors.Wrap(fmt.Errorf("migration canceled"), "CANCELED", clierrors.ExitCanceled)
+		}
 	}
 
 	plan, err := projectmigrate.BuildPlan(discovery, selected, dryRun)
