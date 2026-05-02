@@ -96,6 +96,60 @@ func TestDiscoverCandidateProjectsIncludesEmptySearchRoot(t *testing.T) {
 	}
 }
 
+func TestDiscoverCandidateProjectsSkipsHiddenDirs(t *testing.T) {
+	root := t.TempDir()
+	visible := filepath.Join(root, "app")
+	hiddenLooksLikeProject := filepath.Join(root, ".cache", "fake-project")
+	mustMkdir(t, visible)
+	mustMkdir(t, hiddenLooksLikeProject)
+	if err := os.WriteFile(filepath.Join(visible, ".scribe.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hiddenLooksLikeProject, ".scribe.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projects, err := DiscoverCandidateProjects([]string{root}, nil)
+	if err != nil {
+		t.Fatalf("DiscoverCandidateProjects() error = %v, want nil", err)
+	}
+
+	got := []string{}
+	for _, project := range projects {
+		got = append(got, project.Path)
+	}
+	want := []string{visible}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("projects = %v, want %v", got, want)
+	}
+}
+
+func TestDiscoverCandidateProjectsTolerantOfTransientErrors(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	weird := filepath.Join(root, "weird")
+	mustMkdir(t, app)
+	mustMkdir(t, weird)
+	if err := os.WriteFile(filepath.Join(app, ".scribe.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, filepath.Join(weird, "missing-target"), filepath.Join(weird, "broken"))
+
+	projects, err := DiscoverCandidateProjects([]string{root}, nil)
+	if err != nil {
+		t.Fatalf("DiscoverCandidateProjects() error = %v, want nil", err)
+	}
+
+	got := []string{}
+	for _, project := range projects {
+		got = append(got, project.Path)
+	}
+	want := []string{app}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("projects = %v, want %v", got, want)
+	}
+}
+
 func TestDiscoverCandidateProjectsSkipsUnreadableDirs(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission semantics differ on Windows")
