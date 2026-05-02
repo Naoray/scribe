@@ -50,7 +50,7 @@ func runShow(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintln(os.Stdout, "Budgets:")
 	for _, agent := range budgetAgents(cfg) {
-		result := budget.CheckBudget(set.Skills, agent)
+		result := budget.CheckBudget(budgetSkillsForAgent(set, st, agent), agent)
 		line := budget.FormatResult(result)
 		if line == "" {
 			continue

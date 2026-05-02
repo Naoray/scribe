@@ -961,7 +961,7 @@ func budgetSkillsForProjection(st *state.State, incomingName string, incomingCon
 		if installed.Kind == state.KindPackage {
 			continue
 		}
-		if name == incomingName || !projectedToAgent(installed, projectRoot, agent) {
+		if name == incomingName || !projectedToAgent(installed, projectRoot, agent) || !pinnedToAgent(installed, agent) {
 			continue
 		}
 		seen[name] = true
@@ -999,6 +999,10 @@ func projectedToAgent(installed state.InstalledSkill, projectRoot, agent string)
 		return false
 	}
 	return containsString(installed.Tools, agent)
+}
+
+func pinnedToAgent(installed state.InstalledSkill, agent string) bool {
+	return installed.ToolsMode != state.ToolsModePinned || containsString(installed.Tools, agent)
 }
 
 func containsString(values []string, want string) bool {
