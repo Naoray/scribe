@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -242,6 +243,69 @@ func TestRunWithDiff_RecordsGlobalProjectionWhenProjectRootEmpty(t *testing.T) {
 	wantPath := filepath.Join(home, ".claude", "skills", "recap")
 	if len(installed.ManagedPaths) != 1 || installed.ManagedPaths[0] != wantPath {
 		t.Fatalf("ManagedPaths = %v, want [%s]", installed.ManagedPaths, wantPath)
+	}
+}
+
+func TestSync_PromotesGlobalProjectionWhenProjectFileExists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		t.Fatalf("store dir: %v", err)
+	}
+	writeStoredSkill(t, storeDir, "recap", "project recap")
+
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, ".scribe.yaml"), []byte("kits:\n  - core\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	syncer := &sync.Syncer{
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot: projectRoot,
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"recap": {
+			InstalledHash: sync.ComputeFileHash(skillContent("recap", "project recap")),
+			Tools:         []string{"claude"},
+			Projections: []state.ProjectionEntry{{
+				Project: "",
+				Tools:   []string{"claude"},
+			}},
+		},
+	}}
+	current := st.Installed["recap"]
+	statuses := []sync.SkillStatus{{
+		Name:      "recap",
+		Status:    sync.StatusCurrent,
+		Installed: &current,
+		Entry:     &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	installed := st.Installed["recap"]
+	foundGlobal := false
+	foundProject := false
+	for _, projection := range installed.Projections {
+		if projection.Project == "" && reflect.DeepEqual(projection.Tools, []string{"claude"}) {
+			foundGlobal = true
+		}
+		if projection.Project == projectRoot && reflect.DeepEqual(projection.Tools, []string{"claude"}) {
+			foundProject = true
+		}
+	}
+	if !foundGlobal {
+		t.Fatalf("Projections = %#v, want retained global projection", installed.Projections)
+	}
+	if !foundProject {
+		t.Fatalf("Projections = %#v, want project projection", installed.Projections)
+	}
+	if _, err := os.Lstat(filepath.Join(projectRoot, ".claude", "skills", "recap")); err != nil {
+		t.Fatalf("project symlink missing: %v", err)
 	}
 }
 

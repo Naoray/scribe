@@ -400,7 +400,15 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 	for _, sk := range statuses {
 		switch sk.Status {
-		case StatusCurrent, StatusExtra:
+		case StatusCurrent:
+			if s.needsProjectProjection(sk.Name, st) {
+				s.promoteProjectProjection(sk.Name, st, &summary)
+				continue
+			}
+			s.emit(SkillSkippedMsg{Name: sk.Name})
+			summary.Skipped++
+
+		case StatusExtra:
 			s.emit(SkillSkippedMsg{Name: sk.Name})
 			summary.Skipped++
 
@@ -710,6 +718,80 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 	s.emit(summary)
 	return nil
+}
+
+func (s *Syncer) needsProjectProjection(name string, st *state.State) bool {
+	if s.ProjectRoot == "" {
+		return false
+	}
+	installed := lookupInstalled(st, name)
+	if installed == nil || len(installed.Projections) == 0 {
+		return false
+	}
+	hasLegacy := false
+	for _, projection := range installed.Projections {
+		if projection.Project == s.ProjectRoot {
+			return false
+		}
+		if projection.Project != "" {
+			return false
+		}
+		hasLegacy = true
+	}
+	return hasLegacy
+}
+
+func (s *Syncer) promoteProjectProjection(name string, st *state.State, summary *SyncCompleteMsg) {
+	installed := lookupInstalled(st, name)
+	if installed == nil {
+		s.emit(SkillSkippedMsg{Name: name})
+		summary.Skipped++
+		return
+	}
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		s.emit(SkillErrorMsg{Name: name, Err: fmt.Errorf("resolve store dir: %w", err)})
+		summary.Failed++
+		return
+	}
+	canonicalDir := filepath.Join(storeDir, name)
+	content, err := os.ReadFile(filepath.Join(canonicalDir, "SKILL.md"))
+	if err != nil {
+		s.emit(SkillErrorMsg{Name: name, Err: fmt.Errorf("read stored skill: %w", err)})
+		summary.Failed++
+		return
+	}
+	effectiveTools := selectEffectiveTools(s.Tools, installed)
+	if !s.ForceBudget {
+		files := []tools.SkillFile{{Path: "SKILL.md", Content: content}}
+		if err := s.checkBudgetBeforeProjection(st, name, files, effectiveTools); err != nil {
+			s.emit(SkillErrorMsg{Name: name, Err: err})
+			summary.Failed++
+			return
+		}
+	}
+	var paths []string
+	var toolNames []string
+	for _, t := range effectiveTools {
+		links, err := t.Install(name, canonicalDir, s.ProjectRoot)
+		if err != nil {
+			s.emit(SkillErrorMsg{Name: name, Err: fmt.Errorf("link to %s: %w", t.Name(), err)})
+			summary.Failed++
+			return
+		}
+		paths = append(paths, links...)
+		toolNames = append(toolNames, t.Name())
+	}
+	next := *installed
+	next.Projections = mergeProjection(installed, s.ProjectRoot, toolNames)
+	next.ManagedPaths = mergeManagedPaths(installed, paths)
+	next.Paths = append([]string(nil), next.ManagedPaths...)
+	st.Installed[name] = next
+	if err := st.Save(); err != nil {
+		s.emit(SkillErrorMsg{Name: name, Err: fmt.Errorf("save state after %s: %w", name, err)})
+	}
+	s.emit(SkillInstalledMsg{Name: name, Updated: true})
+	summary.Updated++
 }
 
 func validateFetchedLockHash(sk SkillStatus, files []tools.SkillFile) error {
