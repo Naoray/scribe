@@ -166,7 +166,6 @@ func TestDiscoverCandidateProjectsSkipsUnreadableDirs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(app, ".scribe.yaml"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Simulate a macOS-style protected dir (e.g. ~/.Trash).
 	if err := os.Chmod(locked, 0o000); err != nil {
 		t.Fatal(err)
 	}
