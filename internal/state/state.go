@@ -35,7 +35,13 @@ type State struct {
 type ProjectionEntry struct {
 	Project string   `json:"project"`
 	Tools   []string `json:"tools"`
+	Source  string   `json:"source,omitempty"`
 }
+
+const (
+	SourceSync      = "sync"
+	SourceMigration = "migration"
+)
 
 // InstalledKit indexes an installed kit definition in the local state file.
 type InstalledKit struct {
@@ -723,6 +729,14 @@ func appendUniqueSources(base, extra []SkillSource) []SkillSource {
 
 func statePath() (string, error) {
 	return paths.StatePath()
+}
+
+func MigrationSnapshotsDir() (string, error) {
+	dir, err := paths.ScribeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "migration-history"), nil
 }
 
 func FileExists() (bool, error) {

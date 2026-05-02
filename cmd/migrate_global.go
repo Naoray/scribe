@@ -3,12 +3,15 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/cli/envelope"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/projectmigrate"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -28,12 +31,27 @@ func newGlobalToProjectsCommand() *cobra.Command {
 		Use:   "global-to-projects",
 		Short: "Move legacy global skill links into project .scribe.yaml files",
 		Long: `Detect Scribe-managed symlinks in legacy global tool skill directories,
-let the user choose projects that should keep that skill set, write .scribe.yaml
-files for those projects, and remove the global symlinks.`,
+write .scribe.yaml files for explicitly selected projects, and remove the
+global symlinks.
+
+This command refuses to remove global symlinks unless at least one --project
+path is passed or selected interactively. Run --dry-run first to inspect the
+project files, symlink removals, and budget status. Successful migrations write
+a JSON snapshot to ~/.scribe/migration-history/ for latest-only --undo.
+
+Do not run multiple global-to-projects migrations concurrently.
+
+Examples:
+  scribe migrate global-to-projects --project . --dry-run
+  scribe migrate global-to-projects --project . --yes
+  scribe migrate global-to-projects --undo`,
 		Args: cobra.NoArgs,
 		RunE: runGlobalToProjects,
 	}
 	cmd.Flags().Bool("dry-run", false, "Preview migration without writing .scribe.yaml or removing global symlinks")
+	cmd.Flags().Bool("force", false, "Allow migration even if a project exceeds an agent skill budget")
+	cmd.Flags().Bool("undo", false, "Restore the latest global-to-projects migration snapshot")
+	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
 	cmd.Flags().StringArray("project", nil, "Project directory to keep the current global skill set (repeatable; skips prompt)")
 	return markJSONSupported(cmd)
 }
@@ -44,8 +62,34 @@ func runGlobalToProjects(cmd *cobra.Command, args []string) error {
 
 func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector projectSelector) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	forceBudget, _ := cmd.Flags().GetBool("force")
+	undo, _ := cmd.Flags().GetBool("undo")
+	yes, _ := cmd.Flags().GetBool("yes")
 	jsonFlag := jsonFlagPassed(cmd)
 	projectFlags, _ := cmd.Flags().GetStringArray("project")
+
+	if undo {
+		if dryRun || len(projectFlags) > 0 {
+			return clierrors.Wrap(fmt.Errorf("--undo cannot be combined with --project or --dry-run"), "USAGE_FLAG_CONFLICT", clierrors.ExitUsage)
+		}
+		path, err := projectmigrate.LatestSnapshotPath()
+		if err != nil {
+			return err
+		}
+		snapshot, err := projectmigrate.LoadSnapshot(path)
+		if err != nil {
+			return err
+		}
+		result, err := projectmigrate.Undo(snapshot, path)
+		if err != nil {
+			return err
+		}
+		if jsonFlag {
+			return renderMutatorEnvelope(cmd, result, envelope.StatusOK)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "restored %d global symlink(s)\n", result.RestoredLinks)
+		return nil
+	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -83,14 +127,29 @@ func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector pr
 			return err
 		}
 	}
-	if len(selected) == 0 && (jsonFlag || dryRun) {
-		selected = projectPaths(discovery.Projects)
-	}
 	if len(selected) == 0 && len(discovery.GlobalSymlinks) > 0 {
-		return fmt.Errorf("no projects selected")
+		return clierrors.Wrap(
+			fmt.Errorf("must pass --project <path>; refusing to remove global symlinks"),
+			"USAGE",
+			clierrors.ExitUsage,
+			clierrors.WithRemediation("scribe migrate global-to-projects --project <path> --dry-run"),
+		)
+	}
+	if !dryRun && !jsonFlag && !yes && len(projectFlags) > 0 && globalToProjectsIsTerminal() {
+		var confirm bool
+		err := huh.NewConfirm().
+			Title("Remove legacy global symlinks and write selected project .scribe.yaml files?").
+			Value(&confirm).
+			Run()
+		if err != nil {
+			return err
+		}
+		if !confirm {
+			return clierrors.Wrap(fmt.Errorf("migration canceled"), "CANCELED", clierrors.ExitCanceled)
+		}
 	}
 
-	plan, err := projectmigrate.BuildPlan(discovery, selected, dryRun)
+	plan, err := projectmigrate.BuildPlan(discovery, selected, dryRun, forceBudget)
 	if err != nil {
 		return err
 	}
@@ -153,9 +212,10 @@ func printGlobalToProjectsResult(cmd *cobra.Command, result projectmigrate.Migra
 		for _, change := range result.ProjectFiles {
 			action := "unchanged"
 			if change.Changed {
-				action = "update"
+				action = "write"
 			}
-			fmt.Fprintf(out, "  %s %s (%d skill%s)\n", action, change.Project, len(change.Skills), plural(len(change.Skills)))
+			fmt.Fprintf(out, "  %s %s (%d skill%s, %d added)\n", action, change.File, len(change.Skills), plural(len(change.Skills)), len(change.AddedSkills))
+			printBudgetLines(out, change.BudgetPerAgent)
 		}
 	}
 	linkRemovals := result.RemovedGlobalLinks
@@ -163,9 +223,57 @@ func printGlobalToProjectsResult(cmd *cobra.Command, result projectmigrate.Migra
 		linkRemovals = result.PlannedGlobalLinkRemovals
 	}
 	fmt.Fprintf(out, "%sremoved %d global symlink(s)\n", prefix, linkRemovals)
+	links := result.RemovedLinks
+	if result.DryRun {
+		links = result.RemovedLinks
+	}
+	sample := links
+	if len(sample) > 5 {
+		sample = sample[:5]
+	}
+	for _, link := range sample {
+		fmt.Fprintf(out, "    - %s → %s\n", link.Path, link.CanonicalPath)
+	}
+	if len(links) > 5 {
+		fmt.Fprintf(out, "    ... and %d more\n", len(links)-5)
+	}
 	if result.SkippedGlobalLinks > 0 {
 		fmt.Fprintf(out, "skipped %d global path(s) that were already gone or no longer symlinks\n", result.SkippedGlobalLinks)
 	}
+}
+
+func printBudgetLines(out interface{ Write([]byte) (int, error) }, results map[string]budget.Result) {
+	agents := make([]string, 0, len(results))
+	for agent := range results {
+		agents = append(agents, agent)
+	}
+	sort.Strings(agents)
+	for _, agent := range agents {
+		result := results[agent]
+		if result.Limit <= 0 {
+			continue
+		}
+		status := "PASS"
+		if result.Status == budget.StatusRefuse {
+			status = "REFUSE"
+		}
+		fmt.Fprintf(out, "  budget: %s %s %s / %s", agent, status, formatBudgetAmount(result.Used), formatBudgetAmount(result.Limit))
+		if result.Status == budget.StatusRefuse {
+			fmt.Fprintf(out, " (+%s)", formatBudgetAmount(result.Used-result.Limit))
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+func formatBudgetAmount(bytes int) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	value := float64(bytes) / 1024
+	if value == float64(int(value)) {
+		return fmt.Sprintf("%dKB", int(value))
+	}
+	return fmt.Sprintf("%.1fKB", value)
 }
 
 func plural(n int) string {

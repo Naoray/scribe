@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/skillmd"
 	"github.com/Naoray/scribe/internal/state"
@@ -18,8 +19,9 @@ import (
 type IssueKind string
 
 const (
-	IssueCanonicalMetadata IssueKind = "canonical_metadata"
-	IssueProjectionDrift   IssueKind = "projection_drift"
+	IssueCanonicalMetadata       IssueKind = "canonical_metadata"
+	IssueMigrationBudgetOverflow IssueKind = "migration_budget_overflow"
+	IssueProjectionDrift         IssueKind = "projection_drift"
 )
 
 type Issue struct {
@@ -64,6 +66,7 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 			issues = append(issues, projectionIssue)
 		}
 	}
+	issues = append(issues, inspectMigrationBudgetOverflow(st, name)...)
 
 	sort.SliceStable(issues, func(i, j int) bool {
 		if issues[i].Skill != issues[j].Skill {
@@ -79,6 +82,70 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 	})
 
 	return Report{Issues: issues}, nil
+}
+
+func inspectMigrationBudgetOverflow(st *state.State, name string) []Issue {
+	type groupKey struct {
+		project string
+		agent   string
+	}
+	groups := map[groupKey][]string{}
+	for skillName, installed := range st.Installed {
+		if name != "" && skillName != name {
+			continue
+		}
+		for _, projection := range installed.Projections {
+			if projection.Source != state.SourceMigration || projection.Project == "" {
+				continue
+			}
+			for _, tool := range projection.Tools {
+				if _, ok := budget.AgentBudgets[tool]; !ok {
+					continue
+				}
+				key := groupKey{project: projection.Project, agent: tool}
+				if !containsString(groups[key], skillName) {
+					groups[key] = append(groups[key], skillName)
+				}
+			}
+		}
+	}
+	var issues []Issue
+	for key, names := range groups {
+		sort.Strings(names)
+		skills := make([]budget.Skill, 0, len(names))
+		for _, skillName := range names {
+			dir, err := storeSkillDir(skillName)
+			if err != nil {
+				continue
+			}
+			content, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+			if err != nil {
+				continue
+			}
+			skills = append(skills, budget.Skill{Name: skillName, Content: content})
+		}
+		result := budget.CheckBudget(skills, key.agent)
+		if result.Status != budget.StatusRefuse {
+			continue
+		}
+		issues = append(issues, Issue{
+			Skill:   key.project,
+			Tool:    key.agent,
+			Kind:    IssueMigrationBudgetOverflow,
+			Status:  "warn",
+			Message: fmt.Sprintf("migration-derived projections exceed %s budget by %d bytes", key.agent, result.Used-result.Limit),
+		})
+	}
+	return issues
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func managedSkillNames(st *state.State, name string) []string {
