@@ -1,6 +1,7 @@
 package projectmigrate
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ type Snapshot struct {
 	Plan                 MigrationPlan                      `json:"plan"`
 	PreviousProjectFiles map[string][]byte                  `json:"previous_project_files"`
 	PreviousProjections  map[string][]state.ProjectionEntry `json:"previous_projections"`
+	StateHash            string                             `json:"state_hash,omitempty"`
 }
 
 func WriteSnapshot(snapshot Snapshot) (string, error) {
@@ -115,7 +117,24 @@ func captureSnapshot(discovery Discovery, plan MigrationPlan) (Snapshot, error) 
 		Plan:                 plan,
 		PreviousProjectFiles: previousFiles,
 		PreviousProjections:  previousProjections,
+		StateHash:            hashProjections(previousProjections),
 	}, nil
+}
+
+func hashCurrentProjections(st *state.State, snapshot *Snapshot) string {
+	projections := map[string][]state.ProjectionEntry{}
+	for skill := range snapshot.PreviousProjections {
+		if installed, ok := st.Installed[skill]; ok {
+			projections[skill] = installed.Projections
+		}
+	}
+	return hashProjections(projections)
+}
+
+func hashProjections(projections map[string][]state.ProjectionEntry) string {
+	data, _ := json.Marshal(projections)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:])
 }
 
 func snapshotPaths(dir string) ([]string, error) {

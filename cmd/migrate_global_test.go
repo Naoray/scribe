@@ -178,6 +178,53 @@ func TestGlobalToProjectsInteractiveSelectorAppliesMigration(t *testing.T) {
 	}
 }
 
+func TestGlobalToProjects_UndoFlag(t *testing.T) {
+	home, project, link := setupGlobalToProjectsFixture(t, "claude", "tdd")
+	t.Setenv("HOME", home)
+	t.Chdir(project)
+
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"migrate", "global-to-projects", "--project", project})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("migrate Execute() error = %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("global symlink should be removed after migrate, stat err = %v", err)
+	}
+
+	root = newRootCmd()
+	stdout.Reset()
+	stderr.Reset()
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--json", "migrate", "global-to-projects", "--undo"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("undo Execute() error = %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	var env struct {
+		Status string `json:"status"`
+		Data   struct {
+			RestoredLinks int    `json:"restored_links"`
+			Snapshot      string `json:"snapshot"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if env.Status != "ok" || env.Data.RestoredLinks != 1 || env.Data.Snapshot == "" {
+		t.Fatalf("env = %#v, want undo result", env)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("global symlink should be restored after undo: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, projectfile.Filename)); !os.IsNotExist(err) {
+		t.Fatalf(".scribe.yaml should be deleted after undo, stat err = %v", err)
+	}
+}
+
 func setupGlobalToProjectsFixture(t *testing.T, tool, skill string) (home, project, link string) {
 	t.Helper()
 	tmp := t.TempDir()

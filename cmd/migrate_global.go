@@ -35,6 +35,7 @@ files for those projects, and remove the global symlinks.`,
 		RunE: runGlobalToProjects,
 	}
 	cmd.Flags().Bool("dry-run", false, "Preview migration without writing .scribe.yaml or removing global symlinks")
+	cmd.Flags().Bool("undo", false, "Restore the latest global-to-projects migration snapshot")
 	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
 	cmd.Flags().StringArray("project", nil, "Project directory to keep the current global skill set (repeatable; skips prompt)")
 	return markJSONSupported(cmd)
@@ -46,9 +47,33 @@ func runGlobalToProjects(cmd *cobra.Command, args []string) error {
 
 func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector projectSelector) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	undo, _ := cmd.Flags().GetBool("undo")
 	yes, _ := cmd.Flags().GetBool("yes")
 	jsonFlag := jsonFlagPassed(cmd)
 	projectFlags, _ := cmd.Flags().GetStringArray("project")
+
+	if undo {
+		if dryRun || len(projectFlags) > 0 {
+			return clierrors.Wrap(fmt.Errorf("--undo cannot be combined with --project or --dry-run"), "USAGE_FLAG_CONFLICT", clierrors.ExitUsage)
+		}
+		path, err := projectmigrate.LatestSnapshotPath()
+		if err != nil {
+			return err
+		}
+		snapshot, err := projectmigrate.LoadSnapshot(path)
+		if err != nil {
+			return err
+		}
+		result, err := projectmigrate.Undo(snapshot, path)
+		if err != nil {
+			return err
+		}
+		if jsonFlag {
+			return renderMutatorEnvelope(cmd, result, envelope.StatusOK)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "restored %d global symlink(s)\n", result.RestoredLinks)
+		return nil
+	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
