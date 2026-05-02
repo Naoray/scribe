@@ -11,8 +11,10 @@ import (
 
 	"github.com/Naoray/scribe/internal/budget"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	clischema "github.com/Naoray/scribe/internal/cli/schema"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/projectmigrate"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 type fakeProjectSelector struct {
@@ -64,6 +66,41 @@ func TestGlobalToProjectsJSONDryRunDoesNotMutateHome(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(project, projectfile.Filename)); !os.IsNotExist(err) {
 		t.Fatalf(".scribe.yaml should not exist after dry-run, stat err = %v", err)
+	}
+}
+
+func TestGlobalToProjectsSchema_MatchesEnvelope(t *testing.T) {
+	home, project, _ := setupGlobalToProjectsFixture(t, "claude", "tdd")
+	t.Setenv("HOME", home)
+	t.Chdir(project)
+	rawSchema, ok := clischema.Get("scribe migrate global-to-projects")
+	if !ok {
+		t.Fatal("missing migrate global-to-projects output schema")
+	}
+	compiled, err := jsonschema.CompileString("migrate-global-to-projects.schema.json", rawSchema)
+	if err != nil {
+		t.Fatalf("compile schema: %v\n%s", err, rawSchema)
+	}
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--json", "migrate", "global-to-projects", "--dry-run", "--project", project})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	var data any
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("unmarshal data: %v\n%s", err, string(env.Data))
+	}
+	if err := compiled.Validate(data); err != nil {
+		t.Fatalf("schema validation: %v\ndata=%s\nschema=%s", err, string(env.Data), rawSchema)
 	}
 }
 
