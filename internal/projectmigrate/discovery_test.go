@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/state"
@@ -92,6 +93,43 @@ func TestDiscoverCandidateProjectsIncludesEmptySearchRoot(t *testing.T) {
 
 	if len(projects) != 1 || projects[0].Path != root || projects[0].Source != "search_root" {
 		t.Fatalf("projects = %#v, want search root candidate", projects)
+	}
+}
+
+func TestDiscoverCandidateProjectsSkipsUnreadableDirs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission semantics differ on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	locked := filepath.Join(root, "locked")
+	mustMkdir(t, app)
+	mustMkdir(t, locked)
+	if err := os.WriteFile(filepath.Join(app, ".scribe.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a macOS-style protected dir (e.g. ~/.Trash).
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	projects, err := DiscoverCandidateProjects([]string{root}, nil)
+	if err != nil {
+		t.Fatalf("DiscoverCandidateProjects() error = %v, want nil", err)
+	}
+
+	got := []string{}
+	for _, project := range projects {
+		got = append(got, project.Path)
+	}
+	want := []string{app}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("projects = %v, want %v", got, want)
 	}
 }
 
