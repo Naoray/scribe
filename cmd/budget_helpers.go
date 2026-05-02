@@ -104,6 +104,30 @@ func budgetAgents(_ *config.Config) []string {
 	return agents
 }
 
+func budgetSkillsForAgent(set resolvedBudgetSet, st *state.State, agent string) []budget.Skill {
+	if st == nil {
+		return append([]budget.Skill(nil), set.Skills...)
+	}
+	skills := make([]budget.Skill, 0, len(set.Skills))
+	for _, skill := range set.Skills {
+		installed, ok := st.Installed[skill.Name]
+		if ok && installed.ToolsMode == state.ToolsModePinned && !containsBudgetTool(installed.Tools, agent) {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+	return skills
+}
+
+func containsBudgetTool(tools []string, agent string) bool {
+	for _, tool := range tools {
+		if tool == agent {
+			return true
+		}
+	}
+	return false
+}
+
 func enforceCurrentBudget(factory *app.Factory, force bool) error {
 	cfg, err := factory.Config()
 	if err != nil {
@@ -118,7 +142,7 @@ func enforceCurrentBudget(factory *app.Factory, force bool) error {
 		return err
 	}
 	for _, agent := range budgetAgents(cfg) {
-		result := budget.CheckBudget(set.Skills, agent)
+		result := budget.CheckBudget(budgetSkillsForAgent(set, st, agent), agent)
 		switch result.Status {
 		case budget.StatusRefuse:
 			if !force {
