@@ -1,5 +1,11 @@
 ## Unreleased
 
+## v1.0.4 — 2026-05-02
+
+### Fixed
+
+- **`scribe migrate global-to-projects` skips hidden dirs and tolerates transient walk errors** — v1.0.3 fixed the `~/.Trash` EACCES, but the same class of bug surfaced again as `open ~/.openclaw/.../runtime-mirror.lock: no such file or directory` whenever the walk hit any other hidden subtree with broken symlinks or weird state. Generalize the skip rule to drop *all* dot-prefixed directories (they're tool/runtime state, never scribe projects), and treat every non-root walk error as recoverable instead of fatal — the project search is best-effort by design. Only an error on the search root itself still aborts the scan. ([#151](https://github.com/Naoray/scribe/pull/151))
+
 ## v1.0.3 — 2026-05-02
 
 ### Fixed
