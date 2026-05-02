@@ -1,6 +1,7 @@
 package projectmigrate
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,16 +12,18 @@ import (
 	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/state"
+	"gopkg.in/yaml.v3"
 )
 
 // ProjectChange describes the .scribe.yaml update for one selected project.
 type ProjectChange struct {
-	Project        string                   `json:"project"`
-	File           string                   `json:"file"`
-	AddedSkills    []string                 `json:"added_skills"`
-	Skills         []string                 `json:"skills"`
-	Changed        bool                     `json:"changed"`
-	BudgetPerAgent map[string]budget.Result `json:"budget_per_agent,omitempty"`
+	Project            string                   `json:"project"`
+	File               string                   `json:"file"`
+	AddedSkills        []string                 `json:"added_skills"`
+	Skills             []string                 `json:"skills"`
+	Changed            bool                     `json:"changed"`
+	SkippedWriteReason string                   `json:"skipped_write_reason,omitempty"`
+	BudgetPerAgent     map[string]budget.Result `json:"budget_per_agent,omitempty"`
 }
 
 // MigrationPlan is the complete set of writes/removals for the migration.
@@ -56,12 +59,12 @@ func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool, forc
 	if len(skills) == 0 {
 		return MigrationPlan{DryRun: dryRun, GlobalLinks: discovery.GlobalSymlinks}, nil
 	}
-	forceBudget := len(force) > 0 && force[0]
+	forceMigration := len(force) > 0 && force[0]
 
 	selected := normalizeSelectedProjects(selectedProjects)
 	projectFiles := make([]ProjectChange, 0, len(selected))
 	for _, project := range selected {
-		change, err := prepareProjectChange(project, skills)
+		change, err := prepareProjectChange(project, skills, forceMigration)
 		if err != nil {
 			return MigrationPlan{}, err
 		}
@@ -70,7 +73,7 @@ func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool, forc
 			return MigrationPlan{}, err
 		}
 		change.BudgetPerAgent = budgetPerAgent
-		if !dryRun && !forceBudget {
+		if !dryRun && !forceMigration {
 			for agent, result := range budgetPerAgent {
 				if result.Status == budget.StatusRefuse {
 					return MigrationPlan{}, fmt.Errorf("project %s exceeds %s budget by %d bytes; pass --force to proceed", change.Project, agent, result.Used-result.Limit)
@@ -248,7 +251,7 @@ func removeLegacyProjectionTools(projections []state.ProjectionEntry, tools []st
 	return out
 }
 
-func prepareProjectChange(project string, skills []string) (ProjectChange, error) {
+func prepareProjectChange(project string, skills []string, force bool) (ProjectChange, error) {
 	abs, err := filepath.Abs(project)
 	if err != nil {
 		return ProjectChange{}, fmt.Errorf("resolve project path: %w", err)
@@ -257,6 +260,21 @@ func prepareProjectChange(project string, skills []string) (ProjectChange, error
 	pf, err := projectfile.Load(file)
 	if err != nil {
 		return ProjectChange{}, err
+	}
+	if !force {
+		userAuthored, err := hasKitOrSnippetKey(file)
+		if err != nil {
+			return ProjectChange{}, err
+		}
+		if userAuthored {
+			return ProjectChange{
+				Project:            abs,
+				File:               file,
+				Skills:             append([]string(nil), pf.Add...),
+				Changed:            false,
+				SkippedWriteReason: fmt.Sprintf("skipped writing %s: user-authored kit YAML detected", file),
+			}, nil
+		}
 	}
 
 	addSet := map[string]bool{}
@@ -295,6 +313,36 @@ func prepareProjectChange(project string, skills []string) (ProjectChange, error
 		Skills:      nextAdd,
 		Changed:     changed,
 	}, nil
+}
+
+func hasKitOrSnippetKey(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read project file: %w", err)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return false, nil
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return false, fmt.Errorf("parse project file: %w", err)
+	}
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		doc = *doc.Content[0]
+	}
+	if doc.Kind != yaml.MappingNode {
+		return false, nil
+	}
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		key := doc.Content[i].Value
+		if key == "kits" || key == "snippets" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func writeProjectChange(change ProjectChange) error {
