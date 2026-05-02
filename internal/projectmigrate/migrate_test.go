@@ -201,6 +201,34 @@ func TestBuildPlan_FailsBudget_PassesWithForce(t *testing.T) {
 	}
 }
 
+func TestBuildPlan_BudgetIncludesExistingProjectSkills(t *testing.T) {
+	home, project, link := setupBudgetMigrationFixture(t, "claude", "migrated", 10)
+	t.Setenv("HOME", home)
+	existing := filepath.Join(home, ".scribe", "skills", "existing")
+	mustMkdir(t, existing)
+	if err := os.WriteFile(filepath.Join(existing, "SKILL.md"), []byte("---\nname: existing\ndescription: "+strings.Repeat("x", 20)+"\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, projectfile.Filename), []byte("add:\n  - existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := budget.AgentBudgets
+	budget.AgentBudgets = map[string]int{"claude": 25}
+	t.Cleanup(func() { budget.AgentBudgets = old })
+	discovery := undoDiscovery(home, project, link, "claude", "migrated")
+	_, err := BuildPlan(discovery, []string{project}, false)
+	if err == nil {
+		t.Fatal("BuildPlan() error = nil, want budget refusal")
+	}
+	plan, err := BuildPlan(discovery, []string{project}, false, true)
+	if err != nil {
+		t.Fatalf("BuildPlan() with force error = %v", err)
+	}
+	if got := plan.ProjectFiles[0].BudgetPerAgent["claude"].Status; got != budget.StatusRefuse {
+		t.Fatalf("budget status = %s, want refuse", got)
+	}
+}
+
 func TestApply_SetsMigrationSource(t *testing.T) {
 	home, project, link := setupBudgetMigrationFixture(t, "claude", "tdd", 10)
 	t.Setenv("HOME", home)
