@@ -1,5 +1,11 @@
 ## Unreleased
 
+## v1.0.3 — 2026-05-02
+
+### Fixed
+
+- **`scribe migrate global-to-projects` no longer aborts on macOS-protected dirs** — `filepath.WalkDir` propagated EACCES from `~/.Trash` (and similar TCC-protected paths) as a fatal error, so running the migration from `~` failed with `discover migration candidates: scan project candidates: open /Users/<you>/.Trash: operation not permitted`. The walk now skips permission errors, and `.Trash` joins the in-tree skip list so the syscall is avoided entirely. Other walk errors still propagate. ([#150](https://github.com/Naoray/scribe/pull/150))
+
 ## v1.0.2 — 2026-05-01
 
 ### Fixed
