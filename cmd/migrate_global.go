@@ -31,8 +31,20 @@ func newGlobalToProjectsCommand() *cobra.Command {
 		Use:   "global-to-projects",
 		Short: "Move legacy global skill links into project .scribe.yaml files",
 		Long: `Detect Scribe-managed symlinks in legacy global tool skill directories,
-let the user choose projects that should keep that skill set, write .scribe.yaml
-files for those projects, and remove the global symlinks.`,
+write .scribe.yaml files for explicitly selected projects, and remove the
+global symlinks.
+
+This command refuses to remove global symlinks unless at least one --project
+path is passed or selected interactively. Run --dry-run first to inspect the
+project files, symlink removals, and budget status. Successful migrations write
+a JSON snapshot to ~/.scribe/migration-history/ for latest-only --undo.
+
+Do not run multiple global-to-projects migrations concurrently.
+
+Examples:
+  scribe migrate global-to-projects --project . --dry-run
+  scribe migrate global-to-projects --project . --yes
+  scribe migrate global-to-projects --undo`,
 		Args: cobra.NoArgs,
 		RunE: runGlobalToProjects,
 	}

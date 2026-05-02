@@ -1,5 +1,24 @@
 ## Unreleased
 
+## v1.0.5 — 2026-05-02
+
+### Breaking
+
+- **`scribe migrate global-to-projects` now refuses without `--project`** — bare non-interactive migration no longer auto-selects every discovered project when global symlinks exist. Pass one or more `--project <path>` values, or select projects interactively.
+
+### Added
+
+- **Migration recovery snapshots and `--undo`** — successful migrations persist pre-apply JSON snapshots in `~/.scribe/migration-history/`, retain the latest 10, and support latest-only `scribe migrate global-to-projects --undo`.
+- **Non-interactive confirmation controls** — `--yes` skips destructive confirmation prompts, and `--force` allows migration when budget preflight would otherwise refuse.
+- **Budget-aware migration plans** — migration simulates each target project's post-migration skill set, refuses over-budget writes unless `--force` is passed, and prints per-agent budget status in dry-run output.
+- **Doctor signal for migration budget overflow** — `scribe doctor` warns when migration-derived project projections exceed an agent budget even though sync preserves them for compatibility.
+- **JSON output schema** — `scribe migrate global-to-projects` now registers an output schema for automation via `scribe schema migrate global-to-projects --json`.
+
+### Fixed
+
+- **Legacy projection state is cleaned up during migration** — migrated skills no longer keep empty-project legacy projection entries after global symlink removal.
+- **Project-scoped migration projections are recorded immediately** — migrated projects get state entries tagged as migration-derived, preventing the legacy global projection banner from firing again after a clean migration.
+
 ## v1.0.4 — 2026-05-02
 
 ### Fixed

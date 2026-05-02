@@ -331,6 +331,28 @@ func TestPrintGlobalToProjectsResult_OverBudget(t *testing.T) {
 	}
 }
 
+func TestHelpDocumentsContract(t *testing.T) {
+	cmd := newGlobalToProjectsCommand()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"refuses to remove global symlinks unless at least one --project",
+		"~/.scribe/migration-history/",
+		"scribe migrate global-to-projects --project . --dry-run",
+		"scribe migrate global-to-projects --undo",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help missing %q\n%s", want, out)
+		}
+	}
+}
+
 func setupGlobalToProjectsFixture(t *testing.T, tool, skill string) (home, project, link string) {
 	t.Helper()
 	tmp := t.TempDir()
