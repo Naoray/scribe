@@ -147,7 +147,45 @@ Run `scribe schema <command> --json` before composing an unfamiliar call — ret
 
 ## Project file (`.scribe.yaml`)
 
-If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. The schema and parser ship; CLI surfaces that act on it land per release. Don't synthesize one without being asked.
+If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. Kits are first-class local skill bundles, and `scribe kit create` can scaffold them. Don't synthesize `.scribe.yaml` without being asked.
+
+### Kits
+
+A Kit is a named YAML bundle of skills stored at `~/.scribe/kits/<name>.yaml`.
+
+Schema: `{name, description?, skills[], source?{registry, rev?}}`
+
+Example:
+
+```yaml
+name: laravel-stack
+description: Laravel project defaults
+skills:
+  - eloquent
+  - queues
+  - livewire
+source:
+  registry: my-org/scribe-registry
+```
+
+Suggest a Kit when the user repeats the same install list across projects, is onboarding a team, or describes a consistent stack such as "we use these defaults for every Laravel app."
+
+To consume a Kit, add it to `.scribe.yaml`:
+
+```yaml
+kits:
+  - laravel-stack
+```
+
+`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`.
+
+To author a Kit, run:
+
+```bash
+scribe kit create laravel-stack --skills eloquent,queues,livewire --description "Laravel project defaults"
+```
+
+That scaffolds `~/.scribe/kits/laravel-stack.yaml`. Use `--registry my-org/scribe-registry` to record `source.registry`.
 
 ## JSON shapes
 
