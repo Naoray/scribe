@@ -881,6 +881,9 @@ func selectEffectiveTools(global []tools.Tool, installed *state.InstalledSkill) 
 }
 
 func (s *Syncer) checkBudgetBeforeProjection(st *state.State, incomingName string, files []tools.SkillFile, effectiveTools []tools.Tool) error {
+	if migrationProjection(st, incomingName, s.ProjectRoot) {
+		return nil
+	}
 	incomingContent, ok := skillMDContent(files)
 	if !ok {
 		return nil
@@ -905,6 +908,22 @@ func (s *Syncer) checkBudgetBeforeProjection(st *state.State, incomingName strin
 		}
 	}
 	return nil
+}
+
+func migrationProjection(st *state.State, name, projectRoot string) bool {
+	if st == nil {
+		return false
+	}
+	installed, ok := st.Installed[name]
+	if !ok {
+		return false
+	}
+	for _, projection := range installed.Projections {
+		if projection.Project == projectRoot && projection.Source == state.SourceMigration {
+			return true
+		}
+	}
+	return false
 }
 
 func skillMDContent(files []tools.SkillFile) ([]byte, bool) {

@@ -35,6 +35,7 @@ files for those projects, and remove the global symlinks.`,
 		RunE: runGlobalToProjects,
 	}
 	cmd.Flags().Bool("dry-run", false, "Preview migration without writing .scribe.yaml or removing global symlinks")
+	cmd.Flags().Bool("force", false, "Allow migration even if a project exceeds an agent skill budget")
 	cmd.Flags().Bool("undo", false, "Restore the latest global-to-projects migration snapshot")
 	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
 	cmd.Flags().StringArray("project", nil, "Project directory to keep the current global skill set (repeatable; skips prompt)")
@@ -47,6 +48,7 @@ func runGlobalToProjects(cmd *cobra.Command, args []string) error {
 
 func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector projectSelector) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	forceBudget, _ := cmd.Flags().GetBool("force")
 	undo, _ := cmd.Flags().GetBool("undo")
 	yes, _ := cmd.Flags().GetBool("yes")
 	jsonFlag := jsonFlagPassed(cmd)
@@ -133,7 +135,7 @@ func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector pr
 		}
 	}
 
-	plan, err := projectmigrate.BuildPlan(discovery, selected, dryRun)
+	plan, err := projectmigrate.BuildPlan(discovery, selected, dryRun, forceBudget)
 	if err != nil {
 		return err
 	}

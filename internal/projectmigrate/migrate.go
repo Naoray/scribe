@@ -8,16 +8,19 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/state"
 )
 
 // ProjectChange describes the .scribe.yaml update for one selected project.
 type ProjectChange struct {
-	Project     string   `json:"project"`
-	File        string   `json:"file"`
-	AddedSkills []string `json:"added_skills"`
-	Skills      []string `json:"skills"`
-	Changed     bool     `json:"changed"`
+	Project        string                   `json:"project"`
+	File           string                   `json:"file"`
+	AddedSkills    []string                 `json:"added_skills"`
+	Skills         []string                 `json:"skills"`
+	Changed        bool                     `json:"changed"`
+	BudgetPerAgent map[string]budget.Result `json:"budget_per_agent,omitempty"`
 }
 
 // MigrationPlan is the complete set of writes/removals for the migration.
@@ -48,11 +51,12 @@ type MigrationResult struct {
 }
 
 // BuildPlan creates an idempotent migration plan for selected projects.
-func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool) (MigrationPlan, error) {
+func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool, force ...bool) (MigrationPlan, error) {
 	skills := discovery.Skills
 	if len(skills) == 0 {
 		return MigrationPlan{DryRun: dryRun, GlobalLinks: discovery.GlobalSymlinks}, nil
 	}
+	forceBudget := len(force) > 0 && force[0]
 
 	selected := normalizeSelectedProjects(selectedProjects)
 	projectFiles := make([]ProjectChange, 0, len(selected))
@@ -60,6 +64,18 @@ func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool) (Mig
 		change, err := prepareProjectChange(project, skills)
 		if err != nil {
 			return MigrationPlan{}, err
+		}
+		budgetPerAgent, err := BudgetForProjectChange(change, discovery.GlobalSymlinks)
+		if err != nil {
+			return MigrationPlan{}, err
+		}
+		change.BudgetPerAgent = budgetPerAgent
+		if !dryRun && !forceBudget {
+			for agent, result := range budgetPerAgent {
+				if result.Status == budget.StatusRefuse {
+					return MigrationPlan{}, fmt.Errorf("project %s exceeds %s budget by %d bytes; pass --force to proceed", change.Project, agent, result.Used-result.Limit)
+				}
+			}
 		}
 		projectFiles = append(projectFiles, change)
 	}
@@ -138,6 +154,11 @@ func Apply(plan MigrationPlan, candidates []ProjectCandidate) (MigrationResult, 
 		}
 	}
 
+	if err := recordMigrationProjections(plan); err != nil {
+		deleteSnapshot(snapshot)
+		return result, err
+	}
+
 	return result, nil
 }
 
@@ -146,6 +167,85 @@ func deleteSnapshot(path string) {
 		return
 	}
 	_ = os.Remove(path)
+}
+
+func recordMigrationProjections(plan MigrationPlan) error {
+	if len(plan.ProjectFiles) == 0 || len(plan.GlobalLinks) == 0 {
+		return nil
+	}
+	st, err := state.Load()
+	if err != nil {
+		return err
+	}
+	if !applyMigrationProjections(st, plan, false) {
+		return nil
+	}
+	return st.Save()
+}
+
+func applyMigrationProjections(st *state.State, plan MigrationPlan, clearLegacy bool) bool {
+	changed := false
+	toolsBySkill := toolsBySkill(plan.GlobalLinks)
+	for skill, tools := range toolsBySkill {
+		installed, ok := st.Installed[skill]
+		if !ok {
+			continue
+		}
+		if clearLegacy {
+			installed.Projections = removeLegacyProjectionTools(installed.Projections, tools)
+		}
+		for _, change := range plan.ProjectFiles {
+			installed.Projections = mergeMigrationProjection(installed.Projections, change.Project, tools)
+		}
+		st.Installed[skill] = installed
+		changed = true
+	}
+	return changed
+}
+
+func toolsBySkill(links []GlobalSymlink) map[string][]string {
+	bySkill := map[string][]string{}
+	for _, link := range links {
+		if !containsString(bySkill[link.Skill], link.Tool) {
+			bySkill[link.Skill] = append(bySkill[link.Skill], link.Tool)
+		}
+	}
+	for skill := range bySkill {
+		sort.Strings(bySkill[skill])
+	}
+	return bySkill
+}
+
+func mergeMigrationProjection(projections []state.ProjectionEntry, project string, tools []string) []state.ProjectionEntry {
+	next := state.ProjectionEntry{
+		Project: project,
+		Tools:   append([]string(nil), tools...),
+		Source:  state.SourceMigration,
+	}
+	for i, projection := range projections {
+		if projection.Project == project {
+			projections[i] = next
+			return projections
+		}
+	}
+	return append(projections, next)
+}
+
+func removeLegacyProjectionTools(projections []state.ProjectionEntry, tools []string) []state.ProjectionEntry {
+	out := projections[:0]
+	for _, projection := range projections {
+		if projection.Project != "" {
+			out = append(out, projection)
+			continue
+		}
+		remaining := removeStrings(projection.Tools, tools)
+		if len(remaining) == 0 {
+			continue
+		}
+		projection.Tools = remaining
+		out = append(out, projection)
+	}
+	return out
 }
 
 func prepareProjectChange(project string, skills []string) (ProjectChange, error) {
@@ -276,4 +376,27 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func removeStrings(values []string, remove []string) []string {
+	removeSet := map[string]bool{}
+	for _, value := range remove {
+		removeSet[value] = true
+	}
+	out := values[:0]
+	for _, value := range values {
+		if !removeSet[value] {
+			out = append(out, value)
+		}
+	}
+	return out
 }

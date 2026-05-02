@@ -4,9 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/state"
 )
 
 func TestApplyWritesProjectFileRemovesGlobalSymlinksAndIsIdempotent(t *testing.T) {
@@ -164,4 +167,97 @@ func TestApplyDryRunDoesNotMutateFilesystem(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(project, projectfile.Filename)); !os.IsNotExist(err) {
 		t.Fatalf(".scribe.yaml should not exist after dry-run, stat err = %v", err)
 	}
+}
+
+func TestBuildPlan_FailsBudget_NoForce(t *testing.T) {
+	home, project, link := setupBudgetMigrationFixture(t, "claude", "oversized", 200)
+	t.Setenv("HOME", home)
+	old := budget.AgentBudgets
+	budget.AgentBudgets = map[string]int{"claude": 20}
+	t.Cleanup(func() { budget.AgentBudgets = old })
+	discovery := undoDiscovery(home, project, link, "claude", "oversized")
+	_, err := BuildPlan(discovery, []string{project}, false)
+	if err == nil {
+		t.Fatal("BuildPlan() error = nil, want budget refusal")
+	}
+	if !strings.Contains(err.Error(), "project "+project+" exceeds claude budget") || !strings.Contains(err.Error(), "pass --force to proceed") {
+		t.Fatalf("error = %q, want budget refusal", err.Error())
+	}
+}
+
+func TestBuildPlan_FailsBudget_PassesWithForce(t *testing.T) {
+	home, project, link := setupBudgetMigrationFixture(t, "claude", "oversized", 200)
+	t.Setenv("HOME", home)
+	old := budget.AgentBudgets
+	budget.AgentBudgets = map[string]int{"claude": 20}
+	t.Cleanup(func() { budget.AgentBudgets = old })
+	discovery := undoDiscovery(home, project, link, "claude", "oversized")
+	plan, err := BuildPlan(discovery, []string{project}, false, true)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	if got := plan.ProjectFiles[0].BudgetPerAgent["claude"].Status; got != budget.StatusRefuse {
+		t.Fatalf("budget status = %s, want refuse", got)
+	}
+}
+
+func TestApply_SetsMigrationSource(t *testing.T) {
+	home, project, link := setupBudgetMigrationFixture(t, "claude", "tdd", 10)
+	t.Setenv("HOME", home)
+	st := &state.State{
+		SchemaVersion: 5,
+		Installed: map[string]state.InstalledSkill{
+			"tdd": {Projections: []state.ProjectionEntry{{Project: "", Tools: []string{"claude"}}}},
+		},
+		Kits:               map[string]state.InstalledKit{},
+		Snippets:           map[string]state.InstalledSnippet{},
+		Migrations:         map[string]bool{},
+		RegistryFailures:   map[string]state.RegistryFailure{},
+		BinaryUpdateChecks: map[string]state.BinaryUpdateCheck{},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	discovery := undoDiscovery(home, project, link, "claude", "tdd")
+	plan, err := BuildPlan(discovery, []string{project}, false)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	if _, err := Apply(plan, discovery.Projects); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, projection := range loaded.Installed["tdd"].Projections {
+		if projection.Project == project && projection.Source == state.SourceMigration {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("projections = %#v, want migration source for project", loaded.Installed["tdd"].Projections)
+	}
+}
+
+func setupBudgetMigrationFixture(t *testing.T, tool, skill string, descriptionBytes int) (home, project, link string) {
+	t.Helper()
+	home = t.TempDir()
+	project = filepath.Join(home, "project")
+	storeSkill := filepath.Join(home, ".scribe", "skills", skill)
+	link = filepath.Join(home, "."+tool, "skills", skill)
+	for _, dir := range []string{project, storeSkill, filepath.Dir(link)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	content := []byte("---\nname: " + skill + "\ndescription: " + strings.Repeat("x", descriptionBytes) + "\n---\n")
+	if err := os.WriteFile(filepath.Join(storeSkill, "SKILL.md"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(storeSkill, link); err != nil {
+		t.Fatal(err)
+	}
+	return home, project, link
 }

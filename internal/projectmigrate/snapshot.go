@@ -99,16 +99,18 @@ func captureSnapshot(discovery Discovery, plan MigrationPlan) (Snapshot, error) 
 		previousFiles[change.File] = data
 	}
 
-	previousProjections := map[string][]state.ProjectionEntry{}
 	st, err := state.Load()
 	if err != nil {
 		return Snapshot{}, err
 	}
+	previousProjections := map[string][]state.ProjectionEntry{}
 	for _, skill := range uniqueSkills(plan.GlobalLinks) {
 		if installed, ok := st.Installed[skill]; ok {
 			previousProjections[skill] = append([]state.ProjectionEntry(nil), installed.Projections...)
 		}
 	}
+	expected := cloneState(st)
+	applyMigrationProjections(expected, plan, false)
 
 	return Snapshot{
 		Version:              snapshotVersion,
@@ -117,8 +119,15 @@ func captureSnapshot(discovery Discovery, plan MigrationPlan) (Snapshot, error) 
 		Plan:                 plan,
 		PreviousProjectFiles: previousFiles,
 		PreviousProjections:  previousProjections,
-		StateHash:            hashProjections(previousProjections),
+		StateHash:            hashCurrentProjections(expected, &Snapshot{PreviousProjections: previousProjections}),
 	}, nil
+}
+
+func cloneState(st *state.State) *state.State {
+	data, _ := json.Marshal(st)
+	var cloned state.State
+	_ = json.Unmarshal(data, &cloned)
+	return &cloned
 }
 
 func hashCurrentProjections(st *state.State, snapshot *Snapshot) string {

@@ -35,7 +35,13 @@ type State struct {
 type ProjectionEntry struct {
 	Project string   `json:"project"`
 	Tools   []string `json:"tools"`
+	Source  string   `json:"source,omitempty"`
 }
+
+const (
+	SourceSync      = "sync"
+	SourceMigration = "migration"
+)
 
 // InstalledKit indexes an installed kit definition in the local state file.
 type InstalledKit struct {

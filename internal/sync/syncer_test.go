@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
@@ -655,6 +656,46 @@ func TestRunWithDiff_EmitsBudgetWarningForPostChangeProjection(t *testing.T) {
 		}
 	}
 	t.Fatal("expected BudgetWarningMsg")
+}
+
+func TestRunWithDiff_SkipsBudgetOnMigrationSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	old := budget.AgentBudgets
+	budget.AgentBudgets = map[string]int{"codex": 20}
+	t.Cleanup(func() { budget.AgentBudgets = old })
+	projectRoot := t.TempDir()
+	var events []any
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: skillContent("incoming", strings.Repeat("y", 200))}},
+		},
+		Tools:       []tools.Tool{tools.CodexTool{}},
+		ProjectRoot: projectRoot,
+		Emit:        func(msg any) { events = append(events, msg) },
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"incoming": {
+			Projections: []state.ProjectionEntry{{
+				Project: projectRoot,
+				Tools:   []string{"codex"},
+				Source:  state.SourceMigration,
+			}},
+		},
+	}}
+	statuses := []sync.SkillStatus{{
+		Name:   "incoming",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "incoming", Source: "github:acme/skills@main"},
+	}}
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+	for _, event := range events {
+		if msg, ok := event.(sync.SkillErrorMsg); ok {
+			t.Fatalf("unexpected SkillErrorMsg: %v", msg.Err)
+		}
+	}
 }
 
 // TestApply_RealDirectoryAtProjectionPath verifies that sync emits an actionable
