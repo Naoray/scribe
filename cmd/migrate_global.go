@@ -3,11 +3,13 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/cli/envelope"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/projectmigrate"
@@ -198,9 +200,10 @@ func printGlobalToProjectsResult(cmd *cobra.Command, result projectmigrate.Migra
 		for _, change := range result.ProjectFiles {
 			action := "unchanged"
 			if change.Changed {
-				action = "update"
+				action = "write"
 			}
-			fmt.Fprintf(out, "  %s %s (%d skill%s)\n", action, change.Project, len(change.Skills), plural(len(change.Skills)))
+			fmt.Fprintf(out, "  %s %s (%d skill%s, %d added)\n", action, change.File, len(change.Skills), plural(len(change.Skills)), len(change.AddedSkills))
+			printBudgetLines(out, change.BudgetPerAgent)
 		}
 	}
 	linkRemovals := result.RemovedGlobalLinks
@@ -208,9 +211,57 @@ func printGlobalToProjectsResult(cmd *cobra.Command, result projectmigrate.Migra
 		linkRemovals = result.PlannedGlobalLinkRemovals
 	}
 	fmt.Fprintf(out, "%sremoved %d global symlink(s)\n", prefix, linkRemovals)
+	links := result.RemovedLinks
+	if result.DryRun {
+		links = result.RemovedLinks
+	}
+	sample := links
+	if len(sample) > 5 {
+		sample = sample[:5]
+	}
+	for _, link := range sample {
+		fmt.Fprintf(out, "    - %s → %s\n", link.Path, link.CanonicalPath)
+	}
+	if len(links) > 5 {
+		fmt.Fprintf(out, "    ... and %d more\n", len(links)-5)
+	}
 	if result.SkippedGlobalLinks > 0 {
 		fmt.Fprintf(out, "skipped %d global path(s) that were already gone or no longer symlinks\n", result.SkippedGlobalLinks)
 	}
+}
+
+func printBudgetLines(out interface{ Write([]byte) (int, error) }, results map[string]budget.Result) {
+	agents := make([]string, 0, len(results))
+	for agent := range results {
+		agents = append(agents, agent)
+	}
+	sort.Strings(agents)
+	for _, agent := range agents {
+		result := results[agent]
+		if result.Limit <= 0 {
+			continue
+		}
+		status := "PASS"
+		if result.Status == budget.StatusRefuse {
+			status = "REFUSE"
+		}
+		fmt.Fprintf(out, "  budget: %s %s %s / %s", agent, status, formatBudgetAmount(result.Used), formatBudgetAmount(result.Limit))
+		if result.Status == budget.StatusRefuse {
+			fmt.Fprintf(out, " (+%s)", formatBudgetAmount(result.Used-result.Limit))
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+func formatBudgetAmount(bytes int) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	value := float64(bytes) / 1024
+	if value == float64(int(value)) {
+		return fmt.Sprintf("%dKB", int(value))
+	}
+	return fmt.Sprintf("%.1fKB", value)
 }
 
 func plural(n int) string {

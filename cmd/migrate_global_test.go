@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/budget"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/projectmigrate"
@@ -222,6 +223,74 @@ func TestGlobalToProjects_UndoFlag(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(project, projectfile.Filename)); !os.IsNotExist(err) {
 		t.Fatalf(".scribe.yaml should be deleted after undo, stat err = %v", err)
+	}
+}
+
+func TestPrintGlobalToProjectsResult_DryRunShowsPaths(t *testing.T) {
+	cmd := newGlobalToProjectsCommand()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	printGlobalToProjectsResult(cmd, projectmigrate.MigrationResult{
+		DryRun:                    true,
+		FoundGlobalLinks:          6,
+		FoundSkills:               2,
+		PlannedProjectFileWrites:  1,
+		PlannedGlobalLinkRemovals: 6,
+		ProjectFiles: []projectmigrate.ProjectChange{{
+			Project:     "/tmp/project",
+			File:        "/tmp/project/.scribe.yaml",
+			Skills:      []string{"review", "tdd"},
+			AddedSkills: []string{"tdd"},
+			Changed:     true,
+			BudgetPerAgent: map[string]budget.Result{
+				"claude": {Agent: "claude", Limit: 8192, Used: 6348, Status: budget.StatusWarn},
+			},
+		}},
+		RemovedLinks: []projectmigrate.GlobalSymlink{
+			{Path: "/tmp/home/.claude/skills/a", CanonicalPath: "/tmp/home/.scribe/skills/a"},
+			{Path: "/tmp/home/.claude/skills/b", CanonicalPath: "/tmp/home/.scribe/skills/b"},
+			{Path: "/tmp/home/.claude/skills/c", CanonicalPath: "/tmp/home/.scribe/skills/c"},
+			{Path: "/tmp/home/.claude/skills/d", CanonicalPath: "/tmp/home/.scribe/skills/d"},
+			{Path: "/tmp/home/.claude/skills/e", CanonicalPath: "/tmp/home/.scribe/skills/e"},
+			{Path: "/tmp/home/.claude/skills/f", CanonicalPath: "/tmp/home/.scribe/skills/f"},
+		},
+	})
+	out := stdout.String()
+	for _, want := range []string{
+		"  write /tmp/project/.scribe.yaml (2 skills, 1 added)",
+		"  budget: claude PASS 6.2KB / 8KB",
+		"    - /tmp/home/.claude/skills/a → /tmp/home/.scribe/skills/a",
+		"    ... and 1 more",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestPrintGlobalToProjectsResult_OverBudget(t *testing.T) {
+	cmd := newGlobalToProjectsCommand()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	printGlobalToProjectsResult(cmd, projectmigrate.MigrationResult{
+		DryRun:                    true,
+		FoundGlobalLinks:          1,
+		FoundSkills:               1,
+		PlannedProjectFileWrites:  1,
+		PlannedGlobalLinkRemovals: 1,
+		ProjectFiles: []projectmigrate.ProjectChange{{
+			File:        "/tmp/project/.scribe.yaml",
+			Skills:      []string{"oversized"},
+			AddedSkills: []string{"oversized"},
+			Changed:     true,
+			BudgetPerAgent: map[string]budget.Result{
+				"claude": {Agent: "claude", Limit: 8192, Used: 35533, Status: budget.StatusRefuse},
+			},
+		}},
+	})
+	out := stdout.String()
+	if !strings.Contains(out, "  budget: claude REFUSE 34.7KB / 8KB (+26.7KB)") {
+		t.Fatalf("output = %s, want overbudget line", out)
 	}
 }
 
