@@ -96,11 +96,28 @@ func Apply(plan MigrationPlan, candidates []ProjectCandidate) (MigrationResult, 
 		return result, nil
 	}
 
+	snapshot := ""
+	if len(plan.GlobalLinks) > 0 || len(plan.ProjectFiles) > 0 {
+		captured, err := captureSnapshot(Discovery{
+			GlobalSymlinks: append([]GlobalSymlink(nil), plan.GlobalLinks...),
+			Projects:       append([]ProjectCandidate(nil), candidates...),
+			Skills:         uniqueSkills(plan.GlobalLinks),
+		}, plan)
+		if err != nil {
+			return result, err
+		}
+		snapshot, err = WriteSnapshot(captured)
+		if err != nil {
+			return result, err
+		}
+	}
+
 	for _, change := range plan.ProjectFiles {
 		if !change.Changed {
 			continue
 		}
 		if err := writeProjectChange(change); err != nil {
+			deleteSnapshot(snapshot)
 			return result, err
 		}
 		result.WroteProjectFiles++
@@ -109,6 +126,7 @@ func Apply(plan MigrationPlan, candidates []ProjectCandidate) (MigrationResult, 
 	for _, link := range plan.RemovedLinks {
 		removed, err := removeGlobalSymlink(link)
 		if err != nil {
+			deleteSnapshot(snapshot)
 			return result, err
 		}
 		if removed {
@@ -121,6 +139,13 @@ func Apply(plan MigrationPlan, candidates []ProjectCandidate) (MigrationResult, 
 	}
 
 	return result, nil
+}
+
+func deleteSnapshot(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
 }
 
 func prepareProjectChange(project string, skills []string) (ProjectChange, error) {

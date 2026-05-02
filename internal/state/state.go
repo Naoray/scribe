@@ -725,6 +725,14 @@ func statePath() (string, error) {
 	return paths.StatePath()
 }
 
+func MigrationSnapshotsDir() (string, error) {
+	dir, err := paths.ScribeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "migration-history"), nil
+}
+
 func FileExists() (bool, error) {
 	path, err := statePath()
 	if err != nil {
