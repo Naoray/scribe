@@ -71,7 +71,15 @@ func (t CursorTool) Uninstall(skillName string) error {
 }
 
 func (t CursorTool) SkillPath(skillName, projectRoot string) (string, error) {
+	projectRoot = projectionProjectRoot(skillName, projectRoot)
 	workDir := projectRoot
+	if skillName == bootstrapSkillName {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("home dir: %w", err)
+		}
+		workDir = home
+	}
 	if workDir == "" {
 		var err error
 		workDir, err = t.resolveWorkDir()

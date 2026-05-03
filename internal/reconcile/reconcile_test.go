@@ -96,6 +96,50 @@ func TestReconcileUsesProjectRootForCodexProjection(t *testing.T) {
 	}
 }
 
+func TestReconcileUsesGlobalClaudeProjectionForBootstrapSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+
+	canonical, err := tools.WriteToStore("scribe", []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# scribe\n")}})
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+	canonical, _ = filepath.EvalSymlinks(canonical)
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"scribe": {Revision: 1, Tools: []string{"claude"}, ToolsMode: state.ToolsModePinned},
+	}}
+
+	engine := reconcile.Engine{
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot: projectRoot,
+		Now:         func() time.Time { return time.Unix(1, 0).UTC() },
+	}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Installed != 1 || summary.Removed != 0 || summary.Relinked != 0 || len(summary.Conflicts) != 0 {
+		t.Fatalf("summary = %+v, want one global install", summary)
+	}
+
+	globalPath := filepath.Join(home, ".claude", "skills", "scribe")
+	if len(actions) != 1 || actions[0].Kind != reconcile.ActionInstalled || actions[0].Path != globalPath {
+		t.Fatalf("actions = %+v, want installed global projection %s", actions, globalPath)
+	}
+	if resolved, err := filepath.EvalSymlinks(globalPath); err != nil || resolved != canonical {
+		t.Fatalf("global claude skill link = %q, %v; want %q", resolved, err, canonical)
+	}
+	projectPath := filepath.Join(projectRoot, ".claude", "skills", "scribe")
+	if _, err := os.Lstat(projectPath); !os.IsNotExist(err) {
+		t.Fatalf("project-local claude projection exists or stat failed: %v", err)
+	}
+	if got := st.Installed["scribe"].ManagedPaths; len(got) != 1 || got[0] != globalPath {
+		t.Fatalf("ManagedPaths = %v, want [%s]", got, globalPath)
+	}
+}
+
 func TestReconcileClaudeUnchangedOnSecondPass(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
