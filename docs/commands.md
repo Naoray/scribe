@@ -47,6 +47,7 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe skill tools <name>` | Per-skill tool projection controls (`--enable`, `--disable`, `--reset`) |
 | `scribe tools` | List, enable, or disable detected tools machine-wide |
 | `scribe tools add` | Register a custom tool integration (`--detect`, `--install`, `--path`, `--uninstall`) |
+| `scribe kit create <name>` | Create a local kit — a named list of skills projected into a project (saved to `~/.scribe/kits/<name>.yaml`). Use `--skills` to populate it and `--registry` to scope it to one registry. Reference the kit by name in a project's `.scribe.yaml` under `kits:`. |
 
 ## Conflicts and recovery
 
