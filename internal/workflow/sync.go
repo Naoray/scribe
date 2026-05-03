@@ -341,6 +341,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		ForceBudget: b.ForceBudget,
 		AliasName:   b.AliasName,
 		SkillFilter: b.SkillFilter,
+		KitFilter:   b.KitFilter,
 		ProjectRoot: b.ProjectRoot,
 		// Skip missing skills when no explicit filter/--all: scribe sync only updates
 		// what's already installed. scribe install sets SkillFilter or InstallAllFlag
