@@ -1015,7 +1015,7 @@ type testProjectionTool struct {
 func (t testProjectionTool) Name() string { return "test-tool" }
 
 func (t testProjectionTool) Install(skillName, canonicalDir, _ string) ([]string, error) {
-	path, err := t.SkillPath(skillName)
+	path, err := t.SkillPath(skillName, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1035,7 +1035,7 @@ func (t testProjectionTool) Install(skillName, canonicalDir, _ string) ([]string
 }
 
 func (t testProjectionTool) Uninstall(skillName string) error {
-	path, err := t.SkillPath(skillName)
+	path, err := t.SkillPath(skillName, "")
 	if err != nil {
 		return err
 	}
@@ -1044,7 +1044,7 @@ func (t testProjectionTool) Uninstall(skillName string) error {
 
 func (t testProjectionTool) Detect() bool { return true }
 
-func (t testProjectionTool) SkillPath(skillName string) (string, error) {
+func (t testProjectionTool) SkillPath(skillName, projectRoot string) (string, error) {
 	return filepath.Join(t.root, skillName), nil
 }
 

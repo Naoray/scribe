@@ -73,7 +73,7 @@ func (a *Adopter) applyOne(cand Candidate, result *Result) error {
 	// os.RemoveAll on a symlink removes the symlink, not the target — canonical
 	// store content written above is safe.
 	for _, tool := range targetTools {
-		skillPath, err := tool.SkillPath(cand.Name)
+		skillPath, err := tool.SkillPath(cand.Name, "")
 		if err != nil || skillPath == "" {
 			// Tool doesn't expose a predictable path (e.g. Gemini); skip.
 			continue

@@ -36,7 +36,7 @@ func (t CommandTool) Install(skillName, canonicalDir, projectRoot string) ([]str
 
 // SkillPath returns the path this tool would link for skillName, using PathTemplate.
 // Returns an error if no PathTemplate is configured (path is unknown).
-func (t CommandTool) SkillPath(skillName string) (string, error) {
+func (t CommandTool) SkillPath(skillName, projectRoot string) (string, error) {
 	if strings.TrimSpace(t.PathTemplate) == "" {
 		return "", fmt.Errorf("command tool %q: no path_template configured", t.ToolName)
 	}

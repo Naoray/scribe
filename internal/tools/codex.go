@@ -61,8 +61,8 @@ func (t CodexTool) Uninstall(skillName string) error {
 	return nil
 }
 
-func (t CodexTool) SkillPath(skillName string) (string, error) {
-	skillsDir, err := codexSkillsDir("")
+func (t CodexTool) SkillPath(skillName, projectRoot string) (string, error) {
+	skillsDir, err := codexSkillsDir(projectRoot)
 	if err != nil {
 		return "", err
 	}

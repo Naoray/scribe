@@ -61,8 +61,8 @@ func (t ClaudeTool) Uninstall(skillName string) error {
 	return nil
 }
 
-func (t ClaudeTool) SkillPath(skillName string) (string, error) {
-	skillsDir, err := claudeSkillsDir("")
+func (t ClaudeTool) SkillPath(skillName, projectRoot string) (string, error) {
+	skillsDir, err := claudeSkillsDir(projectRoot)
 	if err != nil {
 		return "", err
 	}

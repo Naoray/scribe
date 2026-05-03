@@ -30,7 +30,7 @@ func applySkillRepair(cfg *config.Config, st *state.State, name, toolName, sourc
 	if err != nil {
 		return skillRepairResult{}, err
 	}
-	path, err := tool.SkillPath(name)
+	path, err := tool.SkillPath(name, "")
 	if err != nil {
 		return skillRepairResult{}, err
 	}

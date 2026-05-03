@@ -70,10 +70,14 @@ func (t CursorTool) Uninstall(skillName string) error {
 	return nil
 }
 
-func (t CursorTool) SkillPath(skillName string) (string, error) {
-	workDir, err := t.resolveWorkDir()
-	if err != nil {
-		return "", err
+func (t CursorTool) SkillPath(skillName, projectRoot string) (string, error) {
+	workDir := projectRoot
+	if workDir == "" {
+		var err error
+		workDir, err = t.resolveWorkDir()
+		if err != nil {
+			return "", err
+		}
 	}
 	mdcName := SlugifyRegistry(skillName) + ".mdc"
 	return filepath.Join(workDir, ".cursor", "rules", mdcName), nil

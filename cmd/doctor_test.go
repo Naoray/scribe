@@ -506,7 +506,7 @@ Keep daily notes and summaries.
 	}
 
 	codex := tools.CodexTool{}
-	codexPath, err := codex.SkillPath("recap")
+	codexPath, err := codex.SkillPath("recap", "")
 	if err != nil {
 		t.Fatalf("codex skill path: %v", err)
 	}
@@ -580,7 +580,7 @@ description: Keep daily notes and summaries.
 	}
 
 	codex := tools.CodexTool{}
-	codexPath, err := codex.SkillPath("recap")
+	codexPath, err := codex.SkillPath("recap", "")
 	if err != nil {
 		t.Fatalf("codex skill path: %v", err)
 	}

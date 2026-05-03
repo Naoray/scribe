@@ -30,7 +30,7 @@ func (t GeminiTool) Install(skillName, canonicalDir, projectRoot string) ([]stri
 
 // SkillPath is not applicable for GeminiTool — Gemini manages skill paths
 // internally via its CLI and does not expose a predictable filesystem location.
-func (t GeminiTool) SkillPath(skillName string) (string, error) {
+func (t GeminiTool) SkillPath(skillName, projectRoot string) (string, error) {
 	return "", fmt.Errorf("gemini: skill path not available (managed by gemini CLI)")
 }
 

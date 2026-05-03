@@ -29,7 +29,7 @@ type Tool interface {
 	// SkillPath returns the absolute path where this tool expects the skill
 	// symlink (or link file) to live. Used by adoption to remove the old
 	// real directory before Install replaces it with a symlink.
-	SkillPath(skillName string) (string, error)
+	SkillPath(skillName, projectRoot string) (string, error)
 	// CanonicalTarget returns the path inside canonicalDir that this tool's
 	// on-disk projection mirrors (e.g. claude → canonicalDir/SKILL.md; codex
 	// → canonicalDir itself). When ok is false, the tool manages its skills

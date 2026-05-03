@@ -120,7 +120,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			if !inspectable {
 				continue
 			}
-			path, err := tool.SkillPath(name)
+			path, err := tool.SkillPath(name, "")
 			if err != nil {
 				continue
 			}
@@ -239,7 +239,7 @@ func projectionPaths(skill state.InstalledSkill) []string {
 
 func inferToolName(path string, byName map[string]tools.Tool, skillName string) string {
 	for name, tool := range byName {
-		toolPath, err := tool.SkillPath(skillName)
+		toolPath, err := tool.SkillPath(skillName, "")
 		if err == nil && toolPath == path {
 			return name
 		}
