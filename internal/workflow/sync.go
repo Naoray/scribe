@@ -103,6 +103,46 @@ func StepResolveProjectRoot(_ context.Context, b *Bag) error {
 	return nil
 }
 
+// ResolveKitFilter resolves the kit-scoped skill set for the current working
+// directory. Returns the allowed skill names and whether a project file was
+// found. All errors are non-fatal; a missing or malformed project file returns
+// (nil, false) so callers fall back to global behavior.
+func ResolveKitFilter(st *state.State) (filter []string, enabled bool) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, false
+	}
+	projectPath, err := projectfile.Find(wd)
+	if err != nil || projectPath == "" {
+		return nil, false
+	}
+	pf, err := projectfile.Load(projectPath)
+	if err != nil {
+		return nil, false
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return nil, false
+	}
+	kits, err := kit.LoadAll(filepath.Join(scribeDir, "kits"))
+	if err != nil {
+		return nil, false
+	}
+	names := make([]string, 0, len(st.Installed))
+	for name, installed := range st.Installed {
+		if installed.Kind == state.KindPackage {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	resolved, err := kit.Resolve(pf, kits, names)
+	if err != nil {
+		return nil, false
+	}
+	return resolved, true
+}
+
 // StepResolveKitFilter loads the project's .scribe.yaml and resolves its kit
 // references against the user's kit library, leaving the resolved skill names
 // on b.KitFilter. All errors are non-fatal: a missing or malformed project
@@ -112,40 +152,7 @@ func StepResolveKitFilter(_ context.Context, b *Bag) error {
 	if b.ProjectRoot == "" || b.State == nil {
 		return nil
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
-	projectPath, err := projectfile.Find(wd)
-	if err != nil || projectPath == "" {
-		return nil
-	}
-	pf, err := projectfile.Load(projectPath)
-	if err != nil {
-		return nil
-	}
-	scribeDir, err := paths.ScribeDir()
-	if err != nil {
-		return nil
-	}
-	kits, err := kit.LoadAll(filepath.Join(scribeDir, "kits"))
-	if err != nil {
-		return nil
-	}
-	names := make([]string, 0, len(b.State.Installed))
-	for name, installed := range b.State.Installed {
-		if installed.Kind == state.KindPackage {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	resolved, err := kit.Resolve(pf, kits, names)
-	if err != nil {
-		return nil
-	}
-	b.KitFilter = resolved
-	b.KitFilterEnabled = true
+	b.KitFilter, b.KitFilterEnabled = ResolveKitFilter(b.State)
 	return nil
 }
 

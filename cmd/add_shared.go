@@ -20,6 +20,7 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 var githubURLInDescriptionRE = regexp.MustCompile(`https?://github\.com/[^\s)]+`)
@@ -294,10 +295,19 @@ func finishAdd(ctx context.Context, results []addResult, targetRepo string, st *
 
 // autoSync runs a sync for the target registry after adding skills.
 func autoSync(ctx context.Context, targetRepo string, st *state.State, client *gh.Client, targets []tools.Tool, useJSON bool) bool {
+	projectRoot := resolveCurrentProjectRoot()
+	var kitFilter []string
+	var kitFilterEnabled bool
+	if projectRoot != "" && st != nil {
+		kitFilter, kitFilterEnabled = workflow.ResolveKitFilter(st)
+	}
+
 	syncer := &sync.Syncer{
-		Client:      sync.WrapGitHubClient(client),
-		Tools:       targets,
-		ProjectRoot: resolveCurrentProjectRoot(),
+		Client:           sync.WrapGitHubClient(client),
+		Tools:            targets,
+		ProjectRoot:      projectRoot,
+		KitFilter:        kitFilter,
+		KitFilterEnabled: kitFilterEnabled,
 		Emit: func(msg any) {
 			if useJSON {
 				return
