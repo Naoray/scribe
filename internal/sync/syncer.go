@@ -620,7 +620,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				links, err := t.Install(installName, canonicalDir, s.ProjectRoot)
 				if err != nil {
 					if errors.Is(err, tools.ErrRealDirectoryExists) {
-						existing, pathErr := t.SkillPath(installName)
+						existing, pathErr := t.SkillPath(installName, s.ProjectRoot)
 						if pathErr != nil {
 							return &NameConflictError{
 								Conflict:   NameConflict{Name: installName, Tool: t.Name()},
@@ -837,7 +837,7 @@ func (s *Syncer) firstRealDirectoryConflict(name string, targetTools []tools.Too
 		if _, ok := t.CanonicalTarget(""); !ok {
 			continue
 		}
-		path, err := t.SkillPath(name)
+		path, err := t.SkillPath(name, s.ProjectRoot)
 		if err != nil {
 			continue
 		}

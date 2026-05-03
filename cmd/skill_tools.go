@@ -111,7 +111,7 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 		if err := tool.Uninstall(name); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: uninstall from %s: %v\n", toolName, err)
 		}
-		skillPath, _ := tool.SkillPath(name)
+		skillPath, _ := tool.SkillPath(name, "")
 		if skillPath != "" {
 			for p := range newPathSet {
 				if strings.HasPrefix(p, skillPath) || p == skillPath {

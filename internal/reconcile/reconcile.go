@@ -42,8 +42,9 @@ type Summary struct {
 }
 
 type Engine struct {
-	Tools []tools.Tool
-	Now   func() time.Time
+	Tools       []tools.Tool
+	ProjectRoot string
+	Now         func() time.Time
 }
 
 func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
@@ -87,7 +88,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 						return summary, actions, err
 					}
 					summary.Removed++
-					actions = append(actions, Action{Kind: ActionRemoved, Name: name, Tool: inferToolName(path, byName, name), Path: path})
+					actions = append(actions, Action{Kind: ActionRemoved, Name: name, Tool: inferToolName(path, byName, name, e.ProjectRoot), Path: path})
 				}
 			}
 			// Wipe tracked paths — packages never project.
@@ -120,7 +121,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			if !inspectable {
 				continue
 			}
-			path, err := tool.SkillPath(name)
+			path, err := tool.SkillPath(name, e.ProjectRoot)
 			if err != nil {
 				continue
 			}
@@ -128,7 +129,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 
 			if _, err := os.Lstat(path); err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
-					links, installErr := tool.Install(name, canonicalDir, "")
+					links, installErr := tool.Install(name, canonicalDir, e.ProjectRoot)
 					if installErr != nil {
 						return summary, actions, fmt.Errorf("install %s/%s: %w", toolName, name, installErr)
 					}
@@ -155,7 +156,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 					if err := os.RemoveAll(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 						return summary, actions, err
 					}
-					links, installErr := tool.Install(name, canonicalDir, "")
+					links, installErr := tool.Install(name, canonicalDir, e.ProjectRoot)
 					if installErr != nil {
 						return summary, actions, fmt.Errorf("relink %s/%s: %w", toolName, name, installErr)
 					}
@@ -186,7 +187,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			if path == "" {
 				continue
 			}
-			toolName := inferToolName(path, byName, name)
+			toolName := inferToolName(path, byName, name, e.ProjectRoot)
 			// A stale projection is safe to remove whenever it resolves
 			// back into the canonical store — that guarantees it was Scribe
 			// who put it there. Requiring a matching Tool in byName would
@@ -237,9 +238,9 @@ func projectionPaths(skill state.InstalledSkill) []string {
 	return append([]string(nil), skill.Paths...)
 }
 
-func inferToolName(path string, byName map[string]tools.Tool, skillName string) string {
+func inferToolName(path string, byName map[string]tools.Tool, skillName, projectRoot string) string {
 	for name, tool := range byName {
-		toolPath, err := tool.SkillPath(skillName)
+		toolPath, err := tool.SkillPath(skillName, projectRoot)
 		if err == nil && toolPath == path {
 			return name
 		}

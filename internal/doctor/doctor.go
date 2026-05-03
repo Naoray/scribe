@@ -301,12 +301,12 @@ func inspectProjectionDrift(cfg *config.Config, skillName string, skill state.In
 		target, inspectable := tool.CanonicalTarget(canonicalDir)
 		if !inspectable {
 			opaqueTools[toolName] = true
-			if path, err := tool.SkillPath(skillName); err == nil {
+			if path, err := tool.SkillPath(skillName, ""); err == nil {
 				opaquePaths[path] = true
 			}
 			continue
 		}
-		path, err := tool.SkillPath(skillName)
+		path, err := tool.SkillPath(skillName, "")
 		if err != nil {
 			return Issue{
 				Skill:   skillName,
@@ -417,7 +417,7 @@ func inferToolName(path string, cfg *config.Config, skillName string) string {
 		if err != nil {
 			continue
 		}
-		toolPath, err := tool.SkillPath(skillName)
+		toolPath, err := tool.SkillPath(skillName, "")
 		if err == nil && toolPath == path {
 			return tool.Name()
 		}

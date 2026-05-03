@@ -78,7 +78,7 @@ func (m *mockTool) Install(skillName, canonicalDir, projectRoot string) ([]strin
 	return []string{path}, nil
 }
 func (m *mockTool) Uninstall(skillName string) error { return m.uninstallErr }
-func (m *mockTool) SkillPath(skillName string) (string, error) {
+func (m *mockTool) SkillPath(skillName, projectRoot string) (string, error) {
 	return filepath.Join(m.name, skillName), nil
 }
 func (m *mockTool) CanonicalTarget(_ string) (string, bool) { return "", false }

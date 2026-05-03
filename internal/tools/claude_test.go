@@ -13,7 +13,7 @@ func TestClaudeSkillPath(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	tool := ClaudeTool{}
-	got, err := tool.SkillPath("commit")
+	got, err := tool.SkillPath("commit", "")
 	if err != nil {
 		t.Fatalf("SkillPath: %v", err)
 	}

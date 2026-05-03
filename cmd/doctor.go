@@ -376,7 +376,7 @@ func snapshotDoctorSkill(cfg *config.Config, st *state.State, name string) (doct
 			if err != nil {
 				continue
 			}
-			path, err := tool.SkillPath(name)
+			path, err := tool.SkillPath(name, "")
 			if err != nil || strings.TrimSpace(path) == "" {
 				continue
 			}

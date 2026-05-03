@@ -46,7 +46,7 @@ func repairSkillProjections(cfg *config.Config, st *state.State, name string) (s
 			return skillProjectionRepairResult{}, err
 		}
 		_ = tool.Uninstall(name)
-		if path, err := tool.SkillPath(name); err == nil {
+		if path, err := tool.SkillPath(name, ""); err == nil {
 			if err := os.RemoveAll(path); err != nil {
 				return skillProjectionRepairResult{}, fmt.Errorf("clear %s/%s: %w", toolName, name, err)
 			}
