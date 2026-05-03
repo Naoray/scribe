@@ -55,7 +55,7 @@ func SyncTail() []Step {
 }
 
 func StepReconcileSystem(_ context.Context, b *Bag) error {
-	engine := reconcile.Engine{Tools: b.Tools}
+	engine := reconcile.Engine{Tools: b.Tools, ProjectRoot: b.ProjectRoot}
 	summary, actions, err := engine.Run(b.State)
 	if err != nil {
 		return fmt.Errorf("reconcile system: %w", err)

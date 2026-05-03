@@ -80,7 +80,9 @@ func TestConnectInstallAllPartialSingleEnvelopeAndStateSave(t *testing.T) {
 func runScribeHelperWithHome(t *testing.T, home string, args []string) (string, string, int) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=TestScribeHelperProcess", "--"}, args...)...)
-	cmd.Env = append(os.Environ(), "GO_WANT_SCRIBE_HELPER_PROCESS=1", "HOME="+home, partialFixtureEnv+"=1")
+	cmd.Dir = home
+	cmd.Env = withoutEnv(os.Environ(), "HOME", "PWD")
+	cmd.Env = append(cmd.Env, "GO_WANT_SCRIBE_HELPER_PROCESS=1", "HOME="+home, "PWD="+home, partialFixtureEnv+"=1")
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

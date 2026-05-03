@@ -44,6 +44,58 @@ func TestReconcileRepairsMissingCodexProjection(t *testing.T) {
 	}
 }
 
+func TestReconcileUsesProjectRootForCodexProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", os.Getenv("PATH"))
+	projectRoot := t.TempDir()
+
+	canonical, err := tools.WriteToStore("recap", []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}})
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+	canonical, _ = filepath.EvalSymlinks(canonical)
+
+	projectPath := filepath.Join(projectRoot, ".codex", "skills", "recap")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(canonical, projectPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"recap": {
+			Revision:     1,
+			Tools:        []string{"codex"},
+			ToolsMode:    state.ToolsModePinned,
+			ManagedPaths: []string{projectPath},
+		},
+	}}
+
+	engine := reconcile.Engine{
+		Tools:       []tools.Tool{tools.CodexTool{}},
+		ProjectRoot: projectRoot,
+		Now:         func() time.Time { return time.Unix(1, 0).UTC() },
+	}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Installed != 0 || summary.Removed != 0 || summary.Relinked != 0 || len(summary.Conflicts) != 0 {
+		t.Fatalf("summary = %+v, want no changes", summary)
+	}
+	if len(actions) != 1 || actions[0].Kind != reconcile.ActionUnchanged || actions[0].Path != projectPath {
+		t.Fatalf("actions = %+v, want unchanged project projection", actions)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".codex", "skills", "recap")); !os.IsNotExist(err) {
+		t.Fatalf("global codex projection exists or stat failed: %v", err)
+	}
+	if got := st.Installed["recap"].ManagedPaths; len(got) != 1 || got[0] != projectPath {
+		t.Fatalf("ManagedPaths = %v, want [%s]", got, projectPath)
+	}
+}
+
 func TestReconcileClaudeUnchangedOnSecondPass(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

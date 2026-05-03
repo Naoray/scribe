@@ -166,8 +166,26 @@ func runScribeHelperWithTTYStdout(t *testing.T, home string, args []string) (str
 func scribeHelperCommand(t *testing.T, home string, args []string) *exec.Cmd {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=TestScribeHelperProcess", "--"}, args...)...)
-	cmd.Env = append(os.Environ(), "GO_WANT_SCRIBE_HELPER_PROCESS=1", "HOME="+home, partialFixtureEnv+"=1")
+	cmd.Dir = home
+	cmd.Env = withoutEnv(os.Environ(), "HOME", "PWD")
+	cmd.Env = append(cmd.Env, "GO_WANT_SCRIBE_HELPER_PROCESS=1", "HOME="+home, "PWD="+home, partialFixtureEnv+"=1")
 	return cmd
+}
+
+func withoutEnv(env []string, keys ...string) []string {
+	blocked := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		blocked[key] = true
+	}
+	out := env[:0]
+	for _, entry := range env {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && blocked[key] {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func waitExitCode(t *testing.T, cmd *exec.Cmd) int {
