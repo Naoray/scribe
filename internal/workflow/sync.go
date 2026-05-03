@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
@@ -14,6 +15,8 @@ import (
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/kit"
+	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/reconcile"
@@ -34,6 +37,7 @@ func SyncSteps() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
+		{"ResolveKitFilter", StepResolveKitFilter},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
@@ -48,6 +52,7 @@ func SyncTail() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
+		{"ResolveKitFilter", StepResolveKitFilter},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
@@ -90,6 +95,51 @@ func StepResolveProjectRoot(_ context.Context, b *Bag) error {
 		return nil
 	}
 	b.ProjectRoot = filepath.Dir(projectFile)
+	return nil
+}
+
+// StepResolveKitFilter loads the project's .scribe.yaml and resolves its kit
+// references against the user's kit library, leaving the resolved skill names
+// on b.KitFilter. All errors are non-fatal: a missing or malformed project
+// file leaves b.KitFilter nil so the syncer applies no kit filtering and
+// behaves like legacy global sync.
+func StepResolveKitFilter(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" || b.State == nil {
+		return nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	projectPath, err := projectfile.Find(wd)
+	if err != nil || projectPath == "" {
+		return nil
+	}
+	pf, err := projectfile.Load(projectPath)
+	if err != nil {
+		return nil
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return nil
+	}
+	kits, err := kit.LoadAll(filepath.Join(scribeDir, "kits"))
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(b.State.Installed))
+	for name, installed := range b.State.Installed {
+		if installed.Kind == state.KindPackage {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	resolved, err := kit.Resolve(pf, kits, names)
+	if err != nil {
+		return nil
+	}
+	b.KitFilter = resolved
 	return nil
 }
 
