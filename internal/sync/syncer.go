@@ -53,6 +53,12 @@ type Syncer struct {
 	// Used by `scribe install` to install specific skills.
 	SkillFilter []string
 
+	// KitFilter, if non-nil, restricts symlink emission to skills resolved by
+	// the project's kit set. Empty/nil means no kit filtering (legacy behavior).
+	// Computed from the project file by StepResolveKitFilter so `scribe sync`
+	// matches `scribe show` output.
+	KitFilter []string
+
 	// SkipMissing prevents installing skills that are not yet locally installed.
 	// When true, StatusMissing skills are silently skipped — only updates and
 	// removals are processed. Set by `scribe sync` to implement the opt-in
@@ -284,6 +290,19 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 	if len(s.SkillFilter) > 0 {
 		allowed := make(map[string]bool, len(s.SkillFilter))
 		for _, n := range s.SkillFilter {
+			allowed[n] = true
+		}
+		filtered := statuses[:0]
+		for _, sk := range statuses {
+			if allowed[sk.Name] {
+				filtered = append(filtered, sk)
+			}
+		}
+		statuses = filtered
+	}
+	if len(s.KitFilter) > 0 {
+		allowed := make(map[string]bool, len(s.KitFilter))
+		for _, n := range s.KitFilter {
 			allowed[n] = true
 		}
 		filtered := statuses[:0]

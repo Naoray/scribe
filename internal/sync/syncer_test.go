@@ -51,6 +51,77 @@ func (f *syncTestFetcher) GetTree(ctx context.Context, owner, repo, ref string) 
 	return nil, nil
 }
 
+// mockProvider implements provider.Provider for tests.
+type mockProvider struct {
+	entries []manifest.Entry
+	files   []tools.SkillFile
+}
+
+func (m *mockProvider) Discover(_ context.Context, repo string) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{Entries: m.entries, IsTeam: true}, nil
+}
+
+func (m *mockProvider) Fetch(_ context.Context, entry manifest.Entry) ([]provider.File, error) {
+	out := make([]provider.File, len(m.files))
+	for i, f := range m.files {
+		out[i] = provider.File{Path: f.Path, Content: f.Content}
+	}
+	return out, nil
+}
+
+func TestRun_KitFilterLimitsProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+
+	prov := &mockProvider{
+		entries: []manifest.Entry{
+			{Name: "recap", Source: "github:acme/skills@main"},
+			{Name: "debugger", Source: "github:acme/skills@main"},
+			{Name: "coder", Source: "github:acme/skills@main"},
+		},
+		files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# skill\n")}},
+	}
+
+	syncer := &sync.Syncer{
+		Client:      &syncTestFetcher{},
+		Provider:    prov,
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot: projectRoot,
+		KitFilter:   []string{"recap", "coder"},
+		SkipMissing: false,
+	}
+	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
+
+	if err := syncer.Run(context.Background(), "acme/skills", st); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, ok := st.Installed["recap"]; !ok {
+		t.Error("recap should be installed (in kit)")
+	}
+	if _, ok := st.Installed["coder"]; !ok {
+		t.Error("coder should be installed (in kit)")
+	}
+	if _, ok := st.Installed["debugger"]; ok {
+		t.Error("debugger should NOT be installed (not in kit)")
+	}
+
+	recapLink := filepath.Join(projectRoot, ".claude", "skills", "recap")
+	coderLink := filepath.Join(projectRoot, ".claude", "skills", "coder")
+	debuggerLink := filepath.Join(projectRoot, ".claude", "skills", "debugger")
+
+	if _, err := os.Lstat(recapLink); err != nil {
+		t.Errorf("recap symlink missing: %v", err)
+	}
+	if _, err := os.Lstat(coderLink); err != nil {
+		t.Errorf("coder symlink missing: %v", err)
+	}
+	if _, err := os.Lstat(debuggerLink); err == nil {
+		t.Error("debugger symlink should not exist")
+	}
+}
+
 func TestRunWithDiff_DoesNotOverwriteTargetReadme(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
