@@ -1,5 +1,10 @@
 ## Unreleased
 
+## v1.0.9 — 2026-05-03
+
+### Fixed
+- **`scribe sync` now projects only kit-resolved skills** — previously, all installed skills were symlinked into `project/.claude/skills/` and `project/.codex/skills/` regardless of kit membership, producing ~125 projections instead of the expected ~32. `scribe sync` now filters the skill set through the same kit resolver used by `scribe show` and the agent budget check. Skills installed globally but not listed in any project kit are no longer projected into that project.
+
 ## v1.0.5 — 2026-05-02
 
 ### Breaking
