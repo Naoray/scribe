@@ -370,6 +370,49 @@ func TestReconcileSkipsPackages(t *testing.T) {
 	}
 }
 
+func TestRun_KitFilterEnabled_BlocksNonKitProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	storeDir := filepath.Join(home, ".scribe", "skills")
+	for _, name := range []string{"recap", "debugger", "coder"} {
+		dir := filepath.Join(storeDir, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# "+name), 0o644); err != nil {
+			t.Fatalf("write skill: %v", err)
+		}
+	}
+
+	projectRoot := t.TempDir()
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"recap":    {Tools: []string{"claude"}},
+		"debugger": {Tools: []string{"claude"}},
+		"coder":    {Tools: []string{"claude"}},
+	}}
+
+	engine := &reconcile.Engine{
+		Tools:            []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot:      projectRoot,
+		KitFilter:        []string{"recap", "coder"},
+		KitFilterEnabled: true,
+	}
+	if _, _, err := engine.Run(st); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(projectRoot, ".claude", "skills", "recap")); err != nil {
+		t.Errorf("recap symlink missing: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(projectRoot, ".claude", "skills", "coder")); err != nil {
+		t.Errorf("coder symlink missing: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(projectRoot, ".claude", "skills", "debugger")); err == nil {
+		t.Error("debugger symlink should not exist (not in kit)")
+	}
+}
+
 func TestReconcileRemovesStalePackageProjection(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

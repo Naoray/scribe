@@ -84,12 +84,13 @@ func TestRun_KitFilterLimitsProjection(t *testing.T) {
 	}
 
 	syncer := &sync.Syncer{
-		Client:      &syncTestFetcher{},
-		Provider:    prov,
-		Tools:       []tools.Tool{tools.ClaudeTool{}},
-		ProjectRoot: projectRoot,
-		KitFilter:   []string{"recap", "coder"},
-		SkipMissing: false,
+		Client:           &syncTestFetcher{},
+		Provider:         prov,
+		Tools:            []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot:      projectRoot,
+		KitFilter:        []string{"recap", "coder"},
+		KitFilterEnabled: true,
+		SkipMissing:      false,
 	}
 	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
 

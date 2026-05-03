@@ -110,6 +110,46 @@ func TestStepResolveKitFilter_WithProjectFile(t *testing.T) {
 	if len(b.KitFilter) != 1 || b.KitFilter[0] != "recap" {
 		t.Fatalf("KitFilter = %v, want [recap]", b.KitFilter)
 	}
+	if !b.KitFilterEnabled {
+		t.Fatal("KitFilterEnabled should be true after kit resolution")
+	}
+}
+
+func TestStepResolveKitFilter_EmptyKitResolvesZeroSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	// .scribe.yaml lists a kit, but that kit has no skills
+	pfContent := "kits:\n  - empty-kit\n"
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte(pfContent), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	kitsDir := filepath.Join(home, ".scribe", "kits")
+	if err := os.MkdirAll(kitsDir, 0o755); err != nil {
+		t.Fatalf("mkdir kits: %v", err)
+	}
+	// Kit exists but has no skills
+	if err := os.WriteFile(filepath.Join(kitsDir, "empty-kit.yaml"), []byte("name: empty-kit\nskills: []\n"), 0o644); err != nil {
+		t.Fatalf("write kit: %v", err)
+	}
+	t.Chdir(projectDir)
+
+	b := &Bag{
+		ProjectRoot: projectDir,
+		State: &state.State{Installed: map[string]state.InstalledSkill{
+			"recap": {},
+		}},
+	}
+	if err := StepResolveKitFilter(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveKitFilter: %v", err)
+	}
+	if !b.KitFilterEnabled {
+		t.Fatal("KitFilterEnabled should be true when project file exists")
+	}
+	if len(b.KitFilter) != 0 {
+		t.Fatalf("KitFilter = %v, want [] (empty kit)", b.KitFilter)
+	}
 }
 
 func TestStepResolveKitFilter_NoProjectFile(t *testing.T) {

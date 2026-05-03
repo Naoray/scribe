@@ -60,7 +60,12 @@ func SyncTail() []Step {
 }
 
 func StepReconcileSystem(_ context.Context, b *Bag) error {
-	engine := reconcile.Engine{Tools: b.Tools, ProjectRoot: b.ProjectRoot}
+	engine := reconcile.Engine{
+		Tools:            b.Tools,
+		ProjectRoot:      b.ProjectRoot,
+		KitFilter:        b.KitFilter,
+		KitFilterEnabled: b.KitFilterEnabled,
+	}
 	summary, actions, err := engine.Run(b.State)
 	if err != nil {
 		return fmt.Errorf("reconcile system: %w", err)
@@ -140,6 +145,7 @@ func StepResolveKitFilter(_ context.Context, b *Bag) error {
 		return nil
 	}
 	b.KitFilter = resolved
+	b.KitFilterEnabled = true
 	return nil
 }
 
@@ -340,9 +346,10 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		TrustAll:    b.TrustAllFlag,
 		ForceBudget: b.ForceBudget,
 		AliasName:   b.AliasName,
-		SkillFilter: b.SkillFilter,
-		KitFilter:   b.KitFilter,
-		ProjectRoot: b.ProjectRoot,
+		SkillFilter:      b.SkillFilter,
+		KitFilter:        b.KitFilter,
+		KitFilterEnabled: b.KitFilterEnabled,
+		ProjectRoot:      b.ProjectRoot,
 		// Skip missing skills when no explicit filter/--all: scribe sync only updates
 		// what's already installed. scribe install sets SkillFilter or InstallAllFlag
 		// to opt-in to installing new skills.

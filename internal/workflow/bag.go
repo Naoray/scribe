@@ -37,7 +37,8 @@ type Bag struct {
 	// KitFilter is populated by StepResolveKitFilter from the project's
 	// .scribe.yaml. When non-nil, StepSyncSkills passes it to the Syncer so
 	// only kit-resolved skills are projected into the project's tool dirs.
-	KitFilter []string
+	KitFilter        []string
+	KitFilterEnabled bool
 
 	// Populated by steps
 	Config      *config.Config

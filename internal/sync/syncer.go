@@ -57,7 +57,8 @@ type Syncer struct {
 	// the project's kit set. Empty/nil means no kit filtering (legacy behavior).
 	// Computed from the project file by StepResolveKitFilter so `scribe sync`
 	// matches `scribe show` output.
-	KitFilter []string
+	KitFilter        []string
+	KitFilterEnabled bool
 
 	// SkipMissing prevents installing skills that are not yet locally installed.
 	// When true, StatusMissing skills are silently skipped — only updates and
@@ -300,7 +301,7 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 		}
 		statuses = filtered
 	}
-	if len(s.KitFilter) > 0 {
+	if s.KitFilterEnabled {
 		allowed := make(map[string]bool, len(s.KitFilter))
 		for _, n := range s.KitFilter {
 			allowed[n] = true
