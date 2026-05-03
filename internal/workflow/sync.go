@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"charm.land/huh/v2"
 	"github.com/mattn/go-isatty"
@@ -14,6 +15,8 @@ import (
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/kit"
+	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/reconcile"
@@ -34,6 +37,7 @@ func SyncSteps() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
+		{"ResolveKitFilter", StepResolveKitFilter},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
@@ -48,6 +52,7 @@ func SyncTail() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
+		{"ResolveKitFilter", StepResolveKitFilter},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
@@ -55,7 +60,12 @@ func SyncTail() []Step {
 }
 
 func StepReconcileSystem(_ context.Context, b *Bag) error {
-	engine := reconcile.Engine{Tools: b.Tools, ProjectRoot: b.ProjectRoot}
+	engine := reconcile.Engine{
+		Tools:            b.Tools,
+		ProjectRoot:      b.ProjectRoot,
+		KitFilter:        b.KitFilter,
+		KitFilterEnabled: b.KitFilterEnabled,
+	}
 	summary, actions, err := engine.Run(b.State)
 	if err != nil {
 		return fmt.Errorf("reconcile system: %w", err)
@@ -90,6 +100,59 @@ func StepResolveProjectRoot(_ context.Context, b *Bag) error {
 		return nil
 	}
 	b.ProjectRoot = filepath.Dir(projectFile)
+	return nil
+}
+
+// ResolveKitFilter resolves the kit-scoped skill set for the current working
+// directory. Returns the allowed skill names and whether a project file was
+// found. All errors are non-fatal; a missing or malformed project file returns
+// (nil, false) so callers fall back to global behavior.
+func ResolveKitFilter(st *state.State) (filter []string, enabled bool) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, false
+	}
+	projectPath, err := projectfile.Find(wd)
+	if err != nil || projectPath == "" {
+		return nil, false
+	}
+	pf, err := projectfile.Load(projectPath)
+	if err != nil {
+		return nil, false
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return nil, false
+	}
+	kits, err := kit.LoadAll(filepath.Join(scribeDir, "kits"))
+	if err != nil {
+		return nil, false
+	}
+	names := make([]string, 0, len(st.Installed))
+	for name, installed := range st.Installed {
+		if installed.Kind == state.KindPackage {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	resolved, err := kit.Resolve(pf, kits, names)
+	if err != nil {
+		return nil, false
+	}
+	return resolved, true
+}
+
+// StepResolveKitFilter loads the project's .scribe.yaml and resolves its kit
+// references against the user's kit library, leaving the resolved skill names
+// on b.KitFilter. All errors are non-fatal: a missing or malformed project
+// file leaves b.KitFilter nil so the syncer applies no kit filtering and
+// behaves like legacy global sync.
+func StepResolveKitFilter(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" || b.State == nil {
+		return nil
+	}
+	b.KitFilter, b.KitFilterEnabled = ResolveKitFilter(b.State)
 	return nil
 }
 
@@ -290,8 +353,10 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		TrustAll:    b.TrustAllFlag,
 		ForceBudget: b.ForceBudget,
 		AliasName:   b.AliasName,
-		SkillFilter: b.SkillFilter,
-		ProjectRoot: b.ProjectRoot,
+		SkillFilter:      b.SkillFilter,
+		KitFilter:        b.KitFilter,
+		KitFilterEnabled: b.KitFilterEnabled,
+		ProjectRoot:      b.ProjectRoot,
 		// Skip missing skills when no explicit filter/--all: scribe sync only updates
 		// what's already installed. scribe install sets SkillFilter or InstallAllFlag
 		// to opt-in to installing new skills.

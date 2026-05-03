@@ -56,6 +56,7 @@ func connectInstallAllTail() []Step {
 		{Name: "SetSingleRepo", Fn: StepSetSingleRepo},
 		{Name: "ResolveTools", Fn: StepResolveTools},
 		{Name: "ResolveProjectRoot", Fn: StepResolveProjectRoot},
+		{Name: "ResolveKitFilter", Fn: StepResolveKitFilter},
 		{Name: "SyncSkills", Fn: StepConnectSyncError},
 	}
 }

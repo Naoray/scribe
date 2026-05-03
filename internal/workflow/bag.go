@@ -34,6 +34,12 @@ type Bag struct {
 	// are installed. Nil means no filter (all eligible skills processed).
 	SkillFilter []string
 
+	// KitFilter is populated by StepResolveKitFilter from the project's
+	// .scribe.yaml. When non-nil, StepSyncSkills passes it to the Syncer so
+	// only kit-resolved skills are projected into the project's tool dirs.
+	KitFilter        []string
+	KitFilterEnabled bool
+
 	// Populated by steps
 	Config      *config.Config
 	State       *state.State

@@ -42,9 +42,11 @@ type Summary struct {
 }
 
 type Engine struct {
-	Tools       []tools.Tool
-	ProjectRoot string
-	Now         func() time.Time
+	Tools            []tools.Tool
+	ProjectRoot      string
+	KitFilter        []string
+	KitFilterEnabled bool
+	Now              func() time.Time
 }
 
 func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
@@ -72,6 +74,18 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 		return summary, nil, pkgErr
 	}
 
+	kitAllowed := func(name string) bool {
+		if !e.KitFilterEnabled {
+			return true
+		}
+		for _, n := range e.KitFilter {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+
 	for name, skill := range st.Installed {
 		if skill.IsPackage() {
 			// Non-projection invariant: packages own their own wiring.
@@ -97,6 +111,10 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 				skill.ManagedPaths = nil
 				st.Installed[name] = skill
 			}
+			continue
+		}
+
+		if !kitAllowed(name) {
 			continue
 		}
 
