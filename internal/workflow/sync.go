@@ -2,7 +2,10 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +41,8 @@ func SyncSteps() []Step {
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
+		{"ResolveMCPServers", StepResolveMCPServers},
+		{"ProjectClaudeMCPServers", StepProjectClaudeMCPServers},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
@@ -53,6 +58,8 @@ func SyncTail() []Step {
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
+		{"ResolveMCPServers", StepResolveMCPServers},
+		{"ProjectClaudeMCPServers", StepProjectClaudeMCPServers},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
@@ -154,6 +161,119 @@ func StepResolveKitFilter(_ context.Context, b *Bag) error {
 	}
 	b.KitFilter, b.KitFilterEnabled = ResolveKitFilter(b.State)
 	return nil
+}
+
+// ResolveProjectMCPServers resolves kit-declared MCP server names for the
+// current project. All errors are non-fatal; a missing or malformed project
+// file returns (nil, false) so callers do not write runtime settings yet.
+func ResolveProjectMCPServers() (servers []string, enabled bool) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, false
+	}
+	projectPath, err := projectfile.Find(wd)
+	if err != nil || projectPath == "" {
+		return nil, false
+	}
+	pf, err := projectfile.Load(projectPath)
+	if err != nil {
+		return nil, false
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return nil, false
+	}
+	kits, err := kit.LoadAll(filepath.Join(scribeDir, "kits"))
+	if err != nil {
+		return nil, false
+	}
+	resolved, err := kit.ResolveMCPServers(pf, kits)
+	if err != nil {
+		return nil, false
+	}
+	return resolved, true
+}
+
+// StepResolveMCPServers loads the project's .scribe.yaml and resolves
+// kit-declared MCP server names into read-only workflow state. It does not
+// write any agent runtime settings.
+func StepResolveMCPServers(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" {
+		return nil
+	}
+	b.ProjectMCPServers, b.ProjectMCPServersEnabled = ResolveProjectMCPServers()
+	return nil
+}
+
+// StepProjectClaudeMCPServers writes kit-resolved MCP server approvals into
+// shared project Claude settings. Server definitions remain in .mcp.json.
+func StepProjectClaudeMCPServers(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" || !b.ProjectMCPServersEnabled || !hasTool(b.Tools, "claude") {
+		return nil
+	}
+	if err := projectClaudeMCPServers(b.ProjectRoot, b.ProjectMCPServers); err != nil {
+		return fmt.Errorf("project claude MCP servers: %w", err)
+	}
+	return nil
+}
+
+func projectClaudeMCPServers(projectRoot string, servers []string) error {
+	settingsDir := filepath.Join(projectRoot, ".claude")
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+
+	settings := map[string]any{}
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parse %s: %w", settingsPath, err)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", settingsPath, err)
+	}
+
+	resolved := append([]string(nil), servers...)
+	sort.Strings(resolved)
+	settings["enableAllProjectMcpServers"] = false
+	settings["enabledMcpjsonServers"] = resolved
+
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		return fmt.Errorf("create claude settings dir: %w", err)
+	}
+	data, err = json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode claude settings: %w", err)
+	}
+	data = append(data, '\n')
+	tmp, err := os.CreateTemp(settingsDir, ".settings.json.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp claude settings: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp claude settings: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp claude settings: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp claude settings: %w", err)
+	}
+	if err := os.Rename(tmpPath, settingsPath); err != nil {
+		return fmt.Errorf("save claude settings: %w", err)
+	}
+	return nil
+}
+
+func hasTool(tools []tools.Tool, name string) bool {
+	for _, tool := range tools {
+		if tool.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func StepLoadConfig(ctx context.Context, b *Bag) error {
@@ -346,13 +466,13 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	resolved := map[string]sync.SkillStatus{}
 
 	syncer := &sync.Syncer{
-		Client:      sync.WrapGitHubClient(b.Client),
-		Provider:    b.Provider,
-		Tools:       b.Tools,
-		Executor:    &sync.ShellExecutor{},
-		TrustAll:    b.TrustAllFlag,
-		ForceBudget: b.ForceBudget,
-		AliasName:   b.AliasName,
+		Client:           sync.WrapGitHubClient(b.Client),
+		Provider:         b.Provider,
+		Tools:            b.Tools,
+		Executor:         &sync.ShellExecutor{},
+		TrustAll:         b.TrustAllFlag,
+		ForceBudget:      b.ForceBudget,
+		AliasName:        b.AliasName,
 		SkillFilter:      b.SkillFilter,
 		KitFilter:        b.KitFilter,
 		KitFilterEnabled: b.KitFilterEnabled,

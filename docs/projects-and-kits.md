@@ -52,9 +52,12 @@ skills:
   - init-filament
   - tdd
   - debugger
+mcp_servers:
+  - mempalace
+  - laravel-boost
 ```
 
-Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits union; the project may add or remove individual skills on top with `add:` / `remove:`.
+Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits union; the project may add or remove individual skills on top with `add:` / `remove:`. MCP servers can also be declared through kits; `scribe sync` resolves those names as read-only project workflow state for upcoming project-local MCP projection. It does not enforce runtime MCP startup or write agent MCP settings yet.
 
 ### Authoring kits and snippets (today)
 
@@ -63,7 +66,7 @@ A user-facing `scribe kit` / `scribe snippet` CLI is on the v1.1 roadmap. Until 
 Examples:
 
 ```text
-You: Create a kit called web-baseline with tdd, code-review, and commit-message.
+You: Create a kit called web-baseline with tdd, code-review, commit-message, and the mempalace MCP server.
 Agent: <writes ~/.scribe/kits/web-baseline.yaml, runs `scribe sync`>
 
 You: Add a snippet that enforces commit discipline, target Claude and Codex.

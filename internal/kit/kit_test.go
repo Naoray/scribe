@@ -17,6 +17,9 @@ skills:
   - init-react
   - init-tailwind
   - init-*
+mcp_servers:
+  - mempalace
+  - playwright
 source:
   registry: core
   rev: abc123
@@ -34,6 +37,7 @@ source:
 		Name:        "frontend",
 		Description: "Frontend defaults",
 		Skills:      []string{"init-react", "init-tailwind", "init-*"},
+		MCPServers:  []string{"mempalace", "playwright"},
 		Source: &Source{
 			Registry: "core",
 			Rev:      "abc123",
@@ -80,6 +84,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		Name:        "frontend",
 		Description: "Frontend defaults",
 		Skills:      []string{"init-react", "init-tailwind"},
+		MCPServers:  []string{"mempalace"},
 		Source: &Source{
 			Registry: "core",
 			Rev:      "abc123",

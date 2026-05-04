@@ -16,6 +16,7 @@ type Kit struct {
 	Name        string   `yaml:"name"`
 	Description string   `yaml:"description,omitempty"`
 	Skills      []string `yaml:"skills"`
+	MCPServers  []string `yaml:"mcp_servers,omitempty"`
 	Source      *Source  `yaml:"source,omitempty"`
 }
 
@@ -41,6 +42,9 @@ func Load(path string) (*Kit, error) {
 	}
 	if kit.Skills == nil {
 		kit.Skills = []string{}
+	}
+	if kit.MCPServers == nil {
+		kit.MCPServers = []string{}
 	}
 	return &kit, nil
 }

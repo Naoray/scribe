@@ -40,6 +40,12 @@ type Bag struct {
 	KitFilter        []string
 	KitFilterEnabled bool
 
+	// ProjectMCPServers is populated by StepResolveMCPServers from kit-declared
+	// MCP server names. It is read-only workflow state for future projection;
+	// no agent settings are written from this value yet.
+	ProjectMCPServers        []string
+	ProjectMCPServersEnabled bool
+
 	// Populated by steps
 	Config      *config.Config
 	State       *state.State

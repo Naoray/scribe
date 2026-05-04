@@ -17,15 +17,17 @@ import (
 type kitCreateOptions struct {
 	description string
 	skills      []string
+	mcpServers  []string
 	registry    string
 	force       bool
 	json        bool
 }
 
 type kitCreateOutput struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	SkillsCount int    `json:"skills_count"`
+	Name            string `json:"name"`
+	Path            string `json:"path"`
+	SkillsCount     int    `json:"skills_count"`
+	MCPServersCount int    `json:"mcp_servers_count"`
 }
 
 func newKitCommand() *cobra.Command {
@@ -50,6 +52,7 @@ func newKitCreateCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.description, "description", "", "Kit description")
 	cmd.Flags().StringSliceVar(&opts.skills, "skills", nil, "Comma-separated skill names")
+	cmd.Flags().StringSliceVar(&opts.mcpServers, "mcp-servers", nil, "Comma-separated MCP server names")
 	cmd.Flags().StringVar(&opts.registry, "registry", "", "Source registry for this kit")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Overwrite an existing kit")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
@@ -86,6 +89,7 @@ func runKitCreate(cmd *cobra.Command, name string, opts *kitCreateOptions) error
 		Name:        name,
 		Description: opts.description,
 		Skills:      opts.skills,
+		MCPServers:  opts.mcpServers,
 	}
 	if opts.registry != "" {
 		k.Source = &kit.Source{Registry: opts.registry}
@@ -96,15 +100,16 @@ func runKitCreate(cmd *cobra.Command, name string, opts *kitCreateOptions) error
 	}
 
 	out := kitCreateOutput{
-		Name:        name,
-		Path:        kitPath,
-		SkillsCount: len(opts.skills),
+		Name:            name,
+		Path:            kitPath,
+		SkillsCount:     len(opts.skills),
+		MCPServersCount: len(opts.mcpServers),
 	}
 	if opts.json {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Created kit %s at %s with %d skills\n", out.Name, out.Path, out.SkillsCount)
+	fmt.Fprintf(cmd.OutOrStdout(), "Created kit %s at %s with %d skills and %d MCP servers\n", out.Name, out.Path, out.SkillsCount, out.MCPServersCount)
 	return nil
 }
 

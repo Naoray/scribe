@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 func TestStepFilterRegistries_OnlyEnabled(t *testing.T) {
@@ -172,5 +174,191 @@ func TestStepResolveKitFilter_NoProjectFile(t *testing.T) {
 
 	if b.KitFilter != nil {
 		t.Fatalf("KitFilter = %v, want nil (no project scope)", b.KitFilter)
+	}
+}
+
+func TestStepResolveMCPServers_WithProjectFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	pfContent := "kits:\n  - runtime-kit\n"
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte(pfContent), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	kitsDir := filepath.Join(home, ".scribe", "kits")
+	if err := os.MkdirAll(kitsDir, 0o755); err != nil {
+		t.Fatalf("mkdir kits: %v", err)
+	}
+	kitContent := "name: runtime-kit\nskills:\n  - recap\nmcp_servers:\n  - playwright\n  - mempalace\n"
+	if err := os.WriteFile(filepath.Join(kitsDir, "runtime-kit.yaml"), []byte(kitContent), 0o644); err != nil {
+		t.Fatalf("write kit file: %v", err)
+	}
+
+	t.Chdir(projectDir)
+
+	b := &Bag{ProjectRoot: projectDir}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers: %v", err)
+	}
+
+	want := []string{"mempalace", "playwright"}
+	if len(b.ProjectMCPServers) != len(want) {
+		t.Fatalf("ProjectMCPServers = %v, want %v", b.ProjectMCPServers, want)
+	}
+	for i := range want {
+		if b.ProjectMCPServers[i] != want[i] {
+			t.Fatalf("ProjectMCPServers = %v, want %v", b.ProjectMCPServers, want)
+		}
+	}
+	if !b.ProjectMCPServersEnabled {
+		t.Fatal("ProjectMCPServersEnabled should be true after MCP server resolution")
+	}
+}
+
+func TestStepResolveMCPServers_NoProjectFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	emptyDir := t.TempDir()
+	t.Chdir(emptyDir)
+
+	b := &Bag{ProjectRoot: ""}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers: %v", err)
+	}
+	if b.ProjectMCPServers != nil {
+		t.Fatalf("ProjectMCPServers = %v, want nil (no project scope)", b.ProjectMCPServers)
+	}
+	if b.ProjectMCPServersEnabled {
+		t.Fatal("ProjectMCPServersEnabled should be false without project scope")
+	}
+}
+
+func TestStepResolveMCPServers_MalformedProjectFileNonFatal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte("kits:\n  - [broken\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	t.Chdir(projectDir)
+
+	b := &Bag{ProjectRoot: projectDir}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers: %v", err)
+	}
+	if b.ProjectMCPServers != nil {
+		t.Fatalf("ProjectMCPServers = %v, want nil after malformed project file", b.ProjectMCPServers)
+	}
+	if b.ProjectMCPServersEnabled {
+		t.Fatal("ProjectMCPServersEnabled should be false after malformed project file")
+	}
+}
+
+func TestStepProjectClaudeMCPServers_WritesProjectSettings(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+	existing := []byte(`{
+  "permissions": {
+    "allow": ["Bash(go test ./...)"]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": ["old-server"]
+}
+`)
+	if err := os.WriteFile(settingsPath, existing, 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"playwright", "mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    []tools.Tool{tools.ClaudeTool{}},
+	}
+	if err := StepProjectClaudeMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectClaudeMCPServers: %v", err)
+	}
+
+	var got map[string]any
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse settings: %v", err)
+	}
+	if got["enableAllProjectMcpServers"] != false {
+		t.Fatalf("enableAllProjectMcpServers = %v, want false", got["enableAllProjectMcpServers"])
+	}
+	wantServers := []any{"mempalace", "playwright"}
+	servers, ok := got["enabledMcpjsonServers"].([]any)
+	if !ok {
+		t.Fatalf("enabledMcpjsonServers = %T, want array", got["enabledMcpjsonServers"])
+	}
+	if len(servers) != len(wantServers) {
+		t.Fatalf("enabledMcpjsonServers = %v, want %v", servers, wantServers)
+	}
+	for i := range wantServers {
+		if servers[i] != wantServers[i] {
+			t.Fatalf("enabledMcpjsonServers = %v, want %v", servers, wantServers)
+		}
+	}
+	permissions, ok := got["permissions"].(map[string]any)
+	if !ok || permissions["allow"] == nil {
+		t.Fatalf("permissions not preserved: %v", got["permissions"])
+	}
+}
+
+func TestStepProjectClaudeMCPServers_SkipsWhenClaudeInactive(t *testing.T) {
+	projectDir := t.TempDir()
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    nil,
+	}
+	if err := StepProjectClaudeMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectClaudeMCPServers: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("settings file was written or stat failed: %v", err)
+	}
+}
+
+func TestStepProjectClaudeMCPServers_MalformedSettingsFailsWithoutOverwrite(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+	original := []byte(`{"permissions":`)
+	if err := os.WriteFile(settingsPath, original, 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    []tools.Tool{tools.ClaudeTool{}},
+	}
+	if err := StepProjectClaudeMCPServers(context.Background(), b); err == nil {
+		t.Fatal("StepProjectClaudeMCPServers error = nil, want malformed settings error")
+	}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("settings overwritten: %q, want %q", data, original)
 	}
 }
