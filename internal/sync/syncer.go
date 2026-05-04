@@ -1042,7 +1042,7 @@ func (s *Syncer) checkBudgetBeforeProjection(st *state.State, incomingName strin
 		if err != nil {
 			return err
 		}
-		result := ibudget.CheckBudget(skills, agent)
+		result := ibudget.CheckProjectionBudget(skills, agent)
 		switch result.Status {
 		case ibudget.StatusRefuse:
 			return fmt.Errorf("%s\nTry removing one kit, or rerun with --force to project anyway.", ibudget.FormatOverflow(result))

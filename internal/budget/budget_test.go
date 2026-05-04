@@ -111,12 +111,54 @@ func TestCheckBudgetOverflowBreakdown(t *testing.T) {
 	}
 }
 
+func TestCheckProjectionBudgetShortensCodexDescriptions(t *testing.T) {
+	skills := []Skill{
+		skillWithSentenceDescription("a", strings.Repeat("a", 3000)+". "+strings.Repeat("ignored", 100)),
+		skillWithSentenceDescription("b", strings.Repeat("b", 3000)+". "+strings.Repeat("ignored", 100)),
+	}
+
+	raw := CheckBudget(skills, "codex")
+	if raw.Status != StatusRefuse {
+		t.Fatalf("raw Status = %s, want %s", raw.Status, StatusRefuse)
+	}
+
+	projected := CheckProjectionBudget(skills, "codex")
+	if projected.Status == StatusRefuse {
+		t.Fatalf("projected Status = %s, want non-refuse; used %d", projected.Status, projected.Used)
+	}
+	if projected.Used >= raw.Used {
+		t.Fatalf("projected Used = %d, want less than raw %d", projected.Used, raw.Used)
+	}
+}
+
+func TestCheckProjectionBudgetKeepsClaudeRawDescriptions(t *testing.T) {
+	skills := []Skill{
+		skillWithSentenceDescription("a", strings.Repeat("a", 3000)+". "+strings.Repeat("ignored", 100)),
+		skillWithSentenceDescription("b", strings.Repeat("b", 5200)+". "+strings.Repeat("ignored", 100)),
+	}
+
+	result := CheckProjectionBudget(skills, "claude")
+	if result.Status != StatusRefuse {
+		t.Fatalf("Status = %s, want %s", result.Status, StatusRefuse)
+	}
+}
+
 func skillWithDescription(name string, bytes int) Skill {
 	return Skill{
 		Name: name,
 		Content: []byte("---\n" +
 			"name: " + name + "\n" +
 			"description: " + strings.Repeat("x", bytes) + "\n" +
+			"---\n"),
+	}
+}
+
+func skillWithSentenceDescription(name, description string) Skill {
+	return Skill{
+		Name: name,
+		Content: []byte("---\n" +
+			"name: " + name + "\n" +
+			"description: " + description + "\n" +
 			"---\n"),
 	}
 }

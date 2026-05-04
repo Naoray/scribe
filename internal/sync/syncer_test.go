@@ -859,23 +859,23 @@ func TestRunWithDiff_EmitsBudgetWarningForPostChangeProjection(t *testing.T) {
 		t.Fatalf("store dir: %v", err)
 	}
 	projectRoot := t.TempDir()
-	writeStoredSkill(t, storeDir, "existing", strings.Repeat("x", 3600))
+	writeStoredSkill(t, storeDir, "existing", strings.Repeat("x", 5600))
 
 	var events []any
 	syncer := &sync.Syncer{
 		Client: &syncTestFetcher{
-			files: []tools.SkillFile{{Path: "SKILL.md", Content: skillContent("incoming", strings.Repeat("y", 220))}},
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: skillContent("incoming", strings.Repeat("y", 100))}},
 		},
-		Tools:       []tools.Tool{tools.CodexTool{}},
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
 		ProjectRoot: projectRoot,
 		Emit:        func(msg any) { events = append(events, msg) },
 	}
 	st := &state.State{Installed: map[string]state.InstalledSkill{
 		"existing": {
-			Tools: []string{"codex"},
+			Tools: []string{"claude"},
 			Projections: []state.ProjectionEntry{{
 				Project: projectRoot,
-				Tools:   []string{"codex"},
+				Tools:   []string{"claude"},
 			}},
 		},
 	}}
@@ -891,11 +891,11 @@ func TestRunWithDiff_EmitsBudgetWarningForPostChangeProjection(t *testing.T) {
 
 	for _, event := range events {
 		if msg, ok := event.(sync.BudgetWarningMsg); ok {
-			if msg.Agent != "codex" {
-				t.Fatalf("Agent = %q, want codex", msg.Agent)
+			if msg.Agent != "claude" {
+				t.Fatalf("Agent = %q, want claude", msg.Agent)
 			}
-			if !strings.Contains(msg.Message, "Codex budget") {
-				t.Fatalf("Message = %q, want Codex budget warning", msg.Message)
+			if !strings.Contains(msg.Message, "Claude budget") {
+				t.Fatalf("Message = %q, want Claude budget warning", msg.Message)
 			}
 			return
 		}
