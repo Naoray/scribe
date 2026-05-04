@@ -2,7 +2,7 @@
   "packages": [],
   "skills": [
     {
-      "content_hash": "9b369ed6",
+      "content_hash": "9d1196f6",
       "description": "Use when the user wants to install, list, sync, remove, or manage AI...",
       "managed": true,
       "name": "scribe",
