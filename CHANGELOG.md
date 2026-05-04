@@ -1,3 +1,9 @@
+## v1.0.12 — 2026-05-04
+
+### Fixed
+- **`scribe skill tools --disable` now respects project-local projections** — disabling a tool for a skill now removes the symlink from the project-local path (e.g., `.agents/skills/`) and updates the `Projections` state entry, so the budget check correctly excludes the skill for that agent in that project. Previously the global path was unlinked but the project projection persisted.
+- **`scribe upgrade` verifies installed binary version after upgrade** — after a successful Homebrew or `go install` upgrade, scribe now runs `scribe --version` on the resolved binary and confirms it reports the expected release tag. Mismatches return exit code 5 with a remediation hint.
+
 ## v1.0.11 — 2026-05-04
 
 ### Fixed
