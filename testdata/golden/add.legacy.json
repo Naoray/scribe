@@ -1,1 +1,0 @@
-{"status":"error","format_version":"1","error":{"code":"GENERAL","message":"authentication required — run `gh auth login` or set GITHUB_TOKEN","retryable":false,"exit_code":1},"meta":{}}

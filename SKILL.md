@@ -147,11 +147,11 @@ Run `scribe schema <command> --json` before composing an unfamiliar call — ret
 
 ## Project file (`.scribe.yaml`)
 
-If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. The schema and parser ship; CLI surfaces that act on it land per release. Don't synthesize one without being asked.
+If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. Kits are first-class local skill bundles, and `scribe kit create` can scaffold them. Don't synthesize a project file without being asked.
 
-## Authoring kits and snippets (until `scribe kit` / `scribe snippet` ship)
+## Authoring kits and snippets
 
-Kit and snippet creation has no CLI yet. When the user asks to create, edit, or remove a kit or snippet, edit the YAML/Markdown files directly. Run `scribe sync` afterwards to apply.
+Use `scribe kit create` for new kits. Snippet creation has no CLI yet; when the user asks to create, edit, or remove a snippet, edit the Markdown file directly. Run `scribe sync` afterwards to apply.
 
 ### Kit — bundle of skills, declared in `~/.scribe/kits/<name>.yaml`
 
@@ -164,11 +164,19 @@ skills:
   - init-laravel
   - tdd
   - code-review
+mcp_servers:
+  - mempalace
 ```
 
-Required: `apiVersion`, `kind`, `name`, `skills`. `description` is optional but recommended.
+Required: `name`, `skills`. `description`, `mcp_servers`, `apiVersion`, `kind`, and `source` are optional.
 
 Each entry under `skills:` is a skill `name` from `scribe list --json`. Verify the skills exist before writing the kit; a kit referencing an unknown skill will fail at sync time.
+
+Prefer the CLI when creating a kit:
+
+```bash
+scribe kit create laravel-baseline --skills init-laravel,tdd,code-review --mcp-servers mempalace --description "Default skill set for Laravel app work"
+```
 
 ### Snippet — agent rules block, declared in `~/.scribe/snippets/<name>.md`
 
@@ -208,7 +216,7 @@ All four keys are optional. Empty / missing file = no project intent.
 scribe sync --json
 ```
 
-Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.codex/skills/` dirs, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `.cursorrules` (markers preserved; content outside markers untouched).
+Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.codex/skills/` dirs, projects kit-declared MCP server names into project-local Claude settings at `.claude/settings.json`, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `.cursorrules` (markers preserved; content outside markers untouched). Scribe does not start MCP server processes.
 
 ### Codex budget
 

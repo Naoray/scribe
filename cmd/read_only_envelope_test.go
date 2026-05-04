@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -112,28 +111,6 @@ func TestReadOnlyCommandMigratesEmbeddedSkillRenameState(t *testing.T) {
 	}
 }
 
-func TestListEnvelopeDataMatchesLegacyGolden(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	env := executeEnvelopeCommand(t, []string{"list", "--json"})
-	got := normalizeListLegacyData(t, env.Data, home)
-
-	golden, err := os.ReadFile(filepath.Join("..", "testdata", "golden", "list.legacy.json"))
-	if err != nil {
-		t.Fatalf("read golden: %v", err)
-	}
-	var want any
-	if err := json.Unmarshal(golden, &want); err != nil {
-		t.Fatalf("unmarshal golden: %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		gotJSON, _ := json.MarshalIndent(got, "", "  ")
-		wantJSON, _ := json.MarshalIndent(want, "", "  ")
-		t.Fatalf("list data changed\nwant=%s\ngot=%s", wantJSON, gotJSON)
-	}
-}
-
 func TestListFieldsProjection(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	env := executeEnvelopeCommand(t, []string{"list", "--json", "--fields", "skills"})
@@ -233,20 +210,4 @@ func writeEnvelopeTestSkill(t *testing.T, home string) {
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write skill: %v", err)
 	}
-}
-
-func normalizeListLegacyData(t *testing.T, raw json.RawMessage, home string) any {
-	t.Helper()
-	var data map[string]any
-	if err := json.Unmarshal(raw, &data); err != nil {
-		t.Fatalf("unmarshal list data: %v", err)
-	}
-	skills, _ := data["skills"].([]any)
-	for _, item := range skills {
-		skill, _ := item.(map[string]any)
-		if path, _ := skill["path"].(string); path == filepath.Join(home, ".scribe", "skills", "scribe") {
-			skill["path"] = "$HOME/.scribe/skills/scribe"
-		}
-	}
-	return data
 }

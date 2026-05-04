@@ -179,15 +179,15 @@ kits:
   - laravel-stack
 ```
 
-`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`. It also resolves kit-declared `mcp_servers` as read-only project workflow state for upcoming project-local MCP projection; it does not write agent MCP settings or enforce server startup yet.
+`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`. It also projects kit-declared `mcp_servers` into project-local Claude settings at `.claude/settings.json` while preserving user-managed settings. Scribe records server names for Claude approval/configuration; it does not start MCP server processes.
 
 To author a Kit, run:
 
 ```bash
-scribe kit create laravel-stack --skills eloquent,queues,livewire --description "Laravel project defaults"
+scribe kit create laravel-stack --skills eloquent,queues,livewire --mcp-servers mempalace --description "Laravel project defaults"
 ```
 
-That scaffolds `~/.scribe/kits/laravel-stack.yaml`. Use `--registry my-org/scribe-registry` to record `source.registry`.
+That scaffolds `~/.scribe/kits/laravel-stack.yaml`. Use `--mcp-servers` for kit-scoped MCP server names and `--registry my-org/scribe-registry` to record `source.registry`.
 
 ## JSON shapes
 

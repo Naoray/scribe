@@ -67,7 +67,7 @@ Please set it up for me:
   3. Show me `scribe list --json` to confirm.
 ```
 
-## 60-second start
+## Quick start
 
 ```bash
 scribe registry connect ArtistfyHQ/team-skills   # connect once
