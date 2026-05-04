@@ -68,6 +68,53 @@ func TestApplyWritesProjectFileRemovesGlobalSymlinksAndIsIdempotent(t *testing.T
 	}
 }
 
+func TestApplyDoesNotRewriteUserAuthoredKitProjectFileWhenForced(t *testing.T) {
+	tmp := t.TempDir()
+	project := filepath.Join(tmp, "project")
+	store := filepath.Join(tmp, "home", ".scribe", "skills")
+	link := filepath.Join(tmp, "home", ".claude", "skills", "tdd")
+	mustMkdir(t, filepath.Join(store, "tdd"))
+	mustMkdir(t, filepath.Dir(link))
+	mustMkdir(t, project)
+	mustSymlink(t, filepath.Join(store, "tdd"), link)
+
+	projectFile := filepath.Join(project, projectfile.Filename)
+	original := []byte("# user owned\nkits:\n  - core\n")
+	if err := os.WriteFile(projectFile, original, 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	discovery := Discovery{
+		GlobalSymlinks: []GlobalSymlink{{
+			Tool:          "claude",
+			Skill:         "tdd",
+			Path:          link,
+			CanonicalPath: filepath.Join(store, "tdd"),
+		}},
+		Projects: []ProjectCandidate{{Path: project, Source: ".scribe.yaml"}},
+		Skills:   []string{"tdd"},
+	}
+
+	plan, err := BuildPlan(discovery, []string{project}, false, true)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+	result, err := Apply(plan, discovery.Projects)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if result.WroteProjectFiles != 0 {
+		t.Fatalf("WroteProjectFiles = %d, want 0 for user-authored kit file", result.WroteProjectFiles)
+	}
+	data, err := os.ReadFile(projectFile)
+	if err != nil {
+		t.Fatalf("read project file: %v", err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("project file was rewritten:\n%s", string(data))
+	}
+}
+
 func TestMigrationPreservesScribeAgentGlobalSymlink(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
@@ -215,7 +262,7 @@ func TestMigrate_SkipsKitYAMLOnExistingKitFile(t *testing.T) {
 	}
 }
 
-func TestMigrate_ForceOverwritesKitYAML(t *testing.T) {
+func TestMigrate_ForcePreservesKitYAML(t *testing.T) {
 	tmp := t.TempDir()
 	project := filepath.Join(tmp, "project")
 	store := filepath.Join(tmp, "home", ".scribe", "skills")
@@ -249,18 +296,15 @@ func TestMigrate_ForceOverwritesKitYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
-	if result.WroteProjectFiles != 1 {
-		t.Fatalf("WroteProjectFiles = %d, want 1", result.WroteProjectFiles)
+	if result.WroteProjectFiles != 0 {
+		t.Fatalf("WroteProjectFiles = %d, want 0", result.WroteProjectFiles)
 	}
 	got, err := os.ReadFile(projectFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) == string(original) {
-		t.Fatalf("project file = %q, want overwritten", got)
-	}
-	if !strings.Contains(string(got), "tdd") {
-		t.Fatalf("project file = %q, want migrated skill", got)
+	if string(got) != string(original) {
+		t.Fatalf("project file = %q, want unchanged", got)
 	}
 }
 

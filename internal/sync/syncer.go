@@ -15,6 +15,7 @@ import (
 	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
+	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
@@ -273,6 +274,9 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 // Emits events throughout. Updates state incrementally — a failed skill
 // does not prevent successful skills from being recorded.
 func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) error {
+	if err := s.ensureProjectRoot(); err != nil {
+		return err
+	}
 	// First run after upgrading to the packages-store split: reclassify any
 	// legacy skills/<name>/ installs whose tree shape identifies them as
 	// packages. Idempotent — guarded by state.Migrations.
@@ -929,7 +933,28 @@ func (s *Syncer) resolveNameConflict(conflict NameConflict, st *state.State, tar
 // RunWithDiff applies a pre-computed diff (statuses) directly.
 // Used by tests and callers that already have statuses from Diff().
 func (s *Syncer) RunWithDiff(ctx context.Context, teamRepo string, statuses []SkillStatus, st *state.State) error {
+	if err := s.ensureProjectRoot(); err != nil {
+		return err
+	}
 	return s.apply(ctx, teamRepo, statuses, st)
+}
+
+func (s *Syncer) ensureProjectRoot() error {
+	if s.ProjectRoot != "" {
+		return nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	projectPath := filepath.Join(wd, projectfile.Filename)
+	if _, err := os.Stat(projectPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	s.ProjectRoot = wd
+	return nil
 }
 
 const defaultPackageTimeout = 5 * time.Minute
