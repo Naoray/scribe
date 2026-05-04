@@ -75,3 +75,33 @@ func TestPushFilesAtomicClassifiesUpdateRefNonFastForwardAsConflict(t *testing.T
 		t.Fatalf("exit = %d, want conflict; err=%v", clierrors.ExitCode(err), err)
 	}
 }
+
+func TestReleaseAssetDigestFetchesGitHubDigest(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/scribe/releases/assets/123", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("ReleaseAssetDigest method = %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"digest":"sha256:abc123"}`))
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	baseURL, err := url.Parse(server.URL + "/")
+	if err != nil {
+		t.Fatalf("parse test URL: %v", err)
+	}
+	ghClient := github.NewClient(server.Client())
+	ghClient.BaseURL = baseURL
+	client := &Client{gh: ghClient, authenticated: true}
+
+	got, err := client.ReleaseAssetDigest(context.Background(), "acme", "scribe", 123)
+	if err != nil {
+		t.Fatalf("ReleaseAssetDigest() error = %v", err)
+	}
+	if got != "sha256:abc123" {
+		t.Fatalf("ReleaseAssetDigest() = %q, want sha256:abc123", got)
+	}
+}

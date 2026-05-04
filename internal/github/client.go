@@ -468,6 +468,25 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, owner, repo string, i
 	return rc, nil
 }
 
+// ReleaseAssetDigest returns GitHub's SHA-256 digest for a release asset.
+func (c *Client) ReleaseAssetDigest(ctx context.Context, owner, repo string, id int64) (string, error) {
+	req, err := c.gh.NewRequest(http.MethodGet, fmt.Sprintf("repos/%s/%s/releases/assets/%d", owner, repo, id), nil)
+	if err != nil {
+		return "", fmt.Errorf("build release asset request %d from %s/%s: %w", id, owner, repo, err)
+	}
+
+	var asset struct {
+		Digest *string `json:"digest"`
+	}
+	if _, err := c.gh.Do(ctx, req, &asset); err != nil {
+		return "", wrapErr(err, fmt.Sprintf("release asset %d from %s/%s", id, owner, repo))
+	}
+	if asset.Digest == nil {
+		return "", nil
+	}
+	return *asset.Digest, nil
+}
+
 // wrapErr produces user-friendly errors for common GitHub API failures.
 func wrapErr(err error, operation string) error {
 	if err == nil {

@@ -6,6 +6,8 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +15,7 @@ import (
 	"testing"
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	"github.com/google/go-github/v69/github"
 )
 
 func TestDetectMethod(t *testing.T) {
@@ -326,4 +329,161 @@ func TestReplaceBinary(t *testing.T) {
 			t.Fatal("expected error for nonexistent target")
 		}
 	})
+}
+
+type fakeAssetDownloader struct {
+	data    map[int64][]byte
+	digests map[int64]string
+}
+
+func (f fakeAssetDownloader) DownloadReleaseAsset(_ context.Context, _, _ string, id int64) (io.ReadCloser, error) {
+	data, ok := f.data[id]
+	if !ok {
+		return nil, fmt.Errorf("missing asset %d", id)
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (f fakeAssetDownloader) ReleaseAssetDigest(_ context.Context, _, _ string, id int64) (string, error) {
+	return f.digests[id], nil
+}
+
+func TestUpgradeBinaryVerifiesGitHubAssetDigest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("self-upgrade is not supported on Windows")
+	}
+
+	archive := createTarGz(t, []tarEntry{
+		{Name: "scribe", Content: []byte("new-scribe")},
+	})
+	assetName := fmt.Sprintf("scribe_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	assetID := int64(123)
+	digest := "sha256:" + sha256sum(archive)
+	release := &github.RepositoryRelease{
+		Assets: []*github.ReleaseAsset{{
+			ID:   github.Ptr(assetID),
+			Name: github.Ptr(assetName),
+		}},
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "scribe")
+	if err := os.WriteFile(target, []byte("old-scribe"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	origExec := executablePath
+	origSymlinks := evalSymlinks
+	t.Cleanup(func() {
+		executablePath = origExec
+		evalSymlinks = origSymlinks
+	})
+	executablePath = func() (string, error) { return target, nil }
+	evalSymlinks = func(path string) (string, error) { return path, nil }
+
+	err := UpgradeBinary(context.Background(), release, fakeAssetDownloader{
+		data:    map[int64][]byte{assetID: archive},
+		digests: map[int64]string{assetID: digest},
+	})
+	if err != nil {
+		t.Fatalf("UpgradeBinary() error = %v", err)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new-scribe" {
+		t.Fatalf("upgraded binary = %q, want new-scribe", got)
+	}
+}
+
+func TestUpgradeBinaryRejectsMissingGitHubAssetDigest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("self-upgrade is not supported on Windows")
+	}
+
+	assetName := fmt.Sprintf("scribe_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	release := &github.RepositoryRelease{
+		Assets: []*github.ReleaseAsset{{
+			ID:   github.Ptr(int64(123)),
+			Name: github.Ptr(assetName),
+		}},
+	}
+
+	err := UpgradeBinary(context.Background(), release, fakeAssetDownloader{})
+	if err == nil {
+		t.Fatal("UpgradeBinary() error = nil, want missing digest error")
+	}
+	if !strings.Contains(err.Error(), "missing GitHub digest") {
+		t.Fatalf("UpgradeBinary() error = %v, want missing GitHub digest", err)
+	}
+}
+
+func TestUpgradeBinaryRejectsInvalidGitHubAssetDigest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("self-upgrade is not supported on Windows")
+	}
+
+	tests := []struct {
+		name   string
+		digest string
+		want   string
+	}{
+		{name: "malformed", digest: "not-a-digest", want: "invalid digest"},
+		{name: "unsupported algorithm", digest: "sha512:" + strings.Repeat("0", 128), want: "unsupported digest algorithm"},
+		{name: "invalid sha256", digest: "sha256:not-hex", want: "invalid sha256 digest"},
+	}
+
+	assetName := fmt.Sprintf("scribe_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assetID := int64(123)
+			release := &github.RepositoryRelease{
+				Assets: []*github.ReleaseAsset{{
+					ID:   github.Ptr(assetID),
+					Name: github.Ptr(assetName),
+				}},
+			}
+
+			err := UpgradeBinary(context.Background(), release, fakeAssetDownloader{
+				digests: map[int64]string{assetID: tt.digest},
+			})
+			if err == nil {
+				t.Fatal("UpgradeBinary() error = nil, want digest error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("UpgradeBinary() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpgradeBinaryRejectsGitHubAssetDigestMismatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("self-upgrade is not supported on Windows")
+	}
+
+	archive := createTarGz(t, []tarEntry{
+		{Name: "scribe", Content: []byte("new-scribe")},
+	})
+	assetName := fmt.Sprintf("scribe_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	assetID := int64(123)
+	release := &github.RepositoryRelease{
+		Assets: []*github.ReleaseAsset{{
+			ID:   github.Ptr(assetID),
+			Name: github.Ptr(assetName),
+		}},
+	}
+
+	err := UpgradeBinary(context.Background(), release, fakeAssetDownloader{
+		data:    map[int64][]byte{assetID: archive},
+		digests: map[int64]string{assetID: "sha256:" + strings.Repeat("0", 64)},
+	})
+	if err == nil {
+		t.Fatal("UpgradeBinary() error = nil, want checksum mismatch")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("UpgradeBinary() error = %v, want checksum mismatch", err)
+	}
 }
