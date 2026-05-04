@@ -86,24 +86,23 @@ scribe sync
 
 ## What you get
 
-`scribe list` opens an interactive TUI on a terminal. Piped or in CI, it emits the JSON envelope:
+`scribe list` opens an interactive TUI on a terminal. Piped or in CI, it emits the JSON envelope for skills already available on the machine:
 
 ```json
 {
   "status": "ok",
   "format_version": "1",
   "data": {
-    "packages": [
-      { "name": "superpowers", "revision": 1, "sources": ["obra/superpowers"] }
-    ],
+    "packages": [],
     "skills": [
       {
-        "name": "add-init",
-        "description": "Create a new /init-* command.",
+        "name": "review-checklist",
+        "description": "Apply the team's review checklist before opening a PR.",
         "revision": 1,
         "content_hash": "e42bc8ef",
-        "targets": ["claude", "codex", "cursor", "gemini"],
-        "managed": true
+        "targets": ["claude", "codex"],
+        "managed": true,
+        "origin": "local"
       }
     ]
   },
@@ -111,15 +110,16 @@ scribe sync
 }
 ```
 
-`scribe sync` reports a structured envelope per run, with `partial_success` + exit code `10` when any item failed:
+`scribe sync` adopts clean local skills, reconciles projections, and reports a structured envelope per run:
 
 ```json
 {
-  "status": "partial_success",
+  "status": "ok",
   "format_version": "1",
   "data": {
-    "reconcile": { "installed": 2, "relinked": 0, "removed": 2, "conflicts_count": 0 },
-    "summary":   { "failed": 1, "installed": 0, "skipped": 73, "updated": 0 }
+    "adoption": { "adopted": 1, "skipped": 0, "conflicted": 0 },
+    "reconcile": { "installed": 1, "relinked": 2, "removed": 0, "conflicts_count": 0 },
+    "summary": { "failed": 0, "installed": 0, "skipped": 0, "updated": 0 }
   }
 }
 ```
