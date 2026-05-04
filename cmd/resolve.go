@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -83,6 +84,7 @@ func runResolve(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write resolved content to SKILL.md.
+	content = stripConflictMarkerLines(content)
 	skillPath := filepath.Join(skillDir, "SKILL.md")
 	if err := os.WriteFile(skillPath, content, 0o644); err != nil {
 		return fmt.Errorf("write resolved skill: %w", err)
@@ -114,4 +116,18 @@ func runResolve(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Resolved %s → kept %s version (rev %d)\n", skillName, side, skill.Revision)
 	return nil
+}
+
+func stripConflictMarkerLines(content []byte) []byte {
+	lines := bytes.SplitAfter(content, []byte("\n"))
+	out := make([]byte, 0, len(content))
+	for _, line := range lines {
+		trimmed := bytes.TrimSuffix(line, []byte("\n"))
+		trimmed = bytes.TrimSuffix(trimmed, []byte("\r"))
+		if bytes.HasPrefix(trimmed, []byte("<<<<<<< ")) || bytes.HasPrefix(trimmed, []byte("=======")) || bytes.HasPrefix(trimmed, []byte(">>>>>>> ")) {
+			continue
+		}
+		out = append(out, line...)
+	}
+	return out
 }

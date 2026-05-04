@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/state"
@@ -92,6 +93,62 @@ func TestRunResolve_Ours(t *testing.T) {
 	}
 }
 
+func TestRunResolve_OursStripsNestedConflictMarkers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(home, ".scribe", "skills", "cleanup")
+	versionsDir := filepath.Join(skillDir, "versions")
+	if err := os.MkdirAll(versionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	conflicted := []byte("<<<<<<< local\nlocal stuff\n=======\nupstream stuff\n>>>>>>> upstream\n")
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), conflicted, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, ".scribe-base.md"), []byte("upstream stuff\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oursContent := []byte("# Cleanup\n<<<<<<< local\nkeep this\n<<<<<<< nested\nnested local\n=======\nnested upstream\n>>>>>>> nested\n=======\nupstream copy\n>>>>>>> upstream\n")
+	if err := os.WriteFile(filepath.Join(versionsDir, "rev-1.md"), oursContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st := &state.State{
+		SchemaVersion: 2,
+		Installed: map[string]state.InstalledSkill{
+			"cleanup": {Revision: 1, InstalledHash: sync.ComputeFileHash(conflicted), Tools: []string{"claude"}},
+		},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newResolveCommand()
+	cmd.SetArgs([]string{"cleanup", "--ours"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsConflictMarkerLine(string(got)) {
+		t.Fatalf("expected conflict marker lines to be stripped, got %q", string(got))
+	}
+
+	st2, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st2.Installed["cleanup"].InstalledHash != sync.ComputeFileHash(got) {
+		t.Errorf("expected state hash to use stripped content")
+	}
+}
+
 func TestRunResolve_Theirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -167,6 +224,15 @@ func TestRunResolve_Theirs(t *testing.T) {
 	if string(gotBase) != string(theirsContent) {
 		t.Errorf("expected base to equal upstream content, got %q", string(gotBase))
 	}
+}
+
+func containsConflictMarkerLine(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, "<<<<<<< ") || line == "=======" || strings.HasPrefix(line, ">>>>>>> ") {
+			return true
+		}
+	}
+	return false
 }
 
 func TestResolveFlags_MutuallyExclusive(t *testing.T) {
