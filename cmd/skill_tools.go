@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -90,6 +92,7 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 		return skillEditResult{}, fmt.Errorf("canonical store for %q missing: %w", name, err)
 	}
 
+	projectRoot := resolveCurrentProjectRoot()
 	existingManagedPaths := installed.ManagedPaths
 	if len(existingManagedPaths) == 0 {
 		existingManagedPaths = installed.Paths
@@ -108,10 +111,10 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 				continue
 			}
 		}
-		if err := tool.Uninstall(name); err != nil {
+		if err := uninstallSkillProjection(tool, name, projectRoot); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: uninstall from %s: %v\n", toolName, err)
 		}
-		skillPath, _ := tool.SkillPath(name, "")
+		skillPath, _ := tool.SkillPath(name, projectRoot)
 		if skillPath != "" {
 			for p := range newPathSet {
 				if strings.HasPrefix(p, skillPath) || p == skillPath {
@@ -123,7 +126,7 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 
 	for _, toolName := range added {
 		tool := availableByName[toolName]
-		paths, err := tool.Install(name, canonicalDir, "")
+		paths, err := tool.Install(name, canonicalDir, projectRoot)
 		if err != nil {
 			return skillEditResult{}, fmt.Errorf("install into %s: %w", toolName, err)
 		}
@@ -140,6 +143,9 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 
 	installed.Tools = desired
 	installed.ToolsMode = mode
+	if projectRoot != "" {
+		installed.Projections = mergeSkillToolProjection(installed.Projections, projectRoot, desired)
+	}
 	installed.Paths = newPaths
 	installed.ManagedPaths = append([]string(nil), newPaths...)
 	st.Installed[name] = installed
@@ -158,4 +164,37 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 		result.ToolsMode = "inherit"
 	}
 	return result, nil
+}
+
+func uninstallSkillProjection(tool tools.Tool, name, projectRoot string) error {
+	if projectRoot == "" {
+		return tool.Uninstall(name)
+	}
+	skillPath, err := tool.SkillPath(name, projectRoot)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(skillPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	parent := filepath.Dir(skillPath)
+	if parent != filepath.Dir(parent) {
+		_ = os.Remove(parent)
+	}
+	return nil
+}
+
+func mergeSkillToolProjection(projections []state.ProjectionEntry, projectRoot string, toolNames []string) []state.ProjectionEntry {
+	next := state.ProjectionEntry{
+		Project: projectRoot,
+		Tools:   append([]string(nil), toolNames...),
+	}
+	out := append([]state.ProjectionEntry(nil), projections...)
+	for i, projection := range out {
+		if projection.Project == projectRoot {
+			out[i] = next
+			return out
+		}
+	}
+	return append(out, next)
 }
