@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	gogithub "github.com/google/go-github/v69/github"
 
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/upgrade"
 )
@@ -67,8 +69,15 @@ func TestRunUpgradeWithDepsRecordsTimestampOnSuccessfulUpgrade(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	origVersion := Version
+	origInstalledBinaryVersion := installedBinaryVersion
 	Version = "1.2.3"
-	t.Cleanup(func() { Version = origVersion })
+	installedBinaryVersion = func(context.Context) (string, error) {
+		return "scribe version 1.2.4\n", nil
+	}
+	t.Cleanup(func() {
+		Version = origVersion
+		installedBinaryVersion = origInstalledBinaryVersion
+	})
 
 	st := &state.State{
 		Installed:          map[string]state.InstalledSkill{},
@@ -130,6 +139,51 @@ func TestRunUpgradeWithDepsDoesNotRecordTimestampOnFailure(t *testing.T) {
 	}
 	if loaded.ScribeBinaryUpdateCooldownFresh(time.Now().UTC()) {
 		t.Fatal("failed upgrade should not refresh the scribe cooldown")
+	}
+}
+
+func TestRunUpgradeWithDepsFailsWhenInstalledBinaryVersionDoesNotMatchRelease(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	origVersion := Version
+	Version = "1.2.3"
+	t.Cleanup(func() { Version = origVersion })
+
+	binDir := t.TempDir()
+	scribePath := filepath.Join(binDir, "scribe")
+	if err := os.WriteFile(scribePath, []byte("#!/bin/sh\necho 'scribe version 1.2.3'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	st := &state.State{
+		Installed:          map[string]state.InstalledSkill{},
+		BinaryUpdateChecks: map[string]state.BinaryUpdateCheck{},
+	}
+
+	err := runUpgradeWithDeps(context.Background(), st, fakeUpgradeClient{
+		tag: "v1.2.4",
+	}, upgrade.MethodGoInstall, func(context.Context, upgrade.Method, *gogithub.RepositoryRelease, bool) error {
+		return nil
+	}, false)
+	if err == nil {
+		t.Fatal("runUpgradeWithDeps() error = nil, want version mismatch")
+	}
+
+	var ce *clierrors.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("runUpgradeWithDeps() error = %T, want *clierrors.Error", err)
+	}
+	if ce.Code != "UPGRADE_VERSION_MISMATCH" {
+		t.Fatalf("code = %q, want UPGRADE_VERSION_MISMATCH", ce.Code)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load after version mismatch: %v", err)
+	}
+	if loaded.ScribeBinaryUpdateCooldownFresh(time.Now().UTC()) {
+		t.Fatal("version mismatch should not refresh the scribe cooldown")
 	}
 }
 
