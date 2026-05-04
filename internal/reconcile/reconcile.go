@@ -206,6 +206,12 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 				continue
 			}
 			toolName := inferToolName(path, byName, name, e.ProjectRoot)
+			if _, err := os.Lstat(path); err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return summary, actions, err
+			}
 			// A stale projection is safe to remove whenever it resolves
 			// back into the canonical store — that guarantees it was Scribe
 			// who put it there. Requiring a matching Tool in byName would
