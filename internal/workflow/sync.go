@@ -2,7 +2,10 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,6 +42,7 @@ func SyncSteps() []Step {
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
 		{"ResolveMCPServers", StepResolveMCPServers},
+		{"ProjectClaudeMCPServers", StepProjectClaudeMCPServers},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
@@ -55,6 +59,7 @@ func SyncTail() []Step {
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
 		{"ResolveMCPServers", StepResolveMCPServers},
+		{"ProjectClaudeMCPServers", StepProjectClaudeMCPServers},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
@@ -198,6 +203,77 @@ func StepResolveMCPServers(_ context.Context, b *Bag) error {
 	}
 	b.ProjectMCPServers, b.ProjectMCPServersEnabled = ResolveProjectMCPServers()
 	return nil
+}
+
+// StepProjectClaudeMCPServers writes kit-resolved MCP server approvals into
+// shared project Claude settings. Server definitions remain in .mcp.json.
+func StepProjectClaudeMCPServers(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" || !b.ProjectMCPServersEnabled || !hasTool(b.Tools, "claude") {
+		return nil
+	}
+	if err := projectClaudeMCPServers(b.ProjectRoot, b.ProjectMCPServers); err != nil {
+		return fmt.Errorf("project claude MCP servers: %w", err)
+	}
+	return nil
+}
+
+func projectClaudeMCPServers(projectRoot string, servers []string) error {
+	settingsDir := filepath.Join(projectRoot, ".claude")
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+
+	settings := map[string]any{}
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parse %s: %w", settingsPath, err)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", settingsPath, err)
+	}
+
+	resolved := append([]string(nil), servers...)
+	sort.Strings(resolved)
+	settings["enableAllProjectMcpServers"] = false
+	settings["enabledMcpjsonServers"] = resolved
+
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		return fmt.Errorf("create claude settings dir: %w", err)
+	}
+	data, err = json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode claude settings: %w", err)
+	}
+	data = append(data, '\n')
+	tmp, err := os.CreateTemp(settingsDir, ".settings.json.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp claude settings: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp claude settings: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp claude settings: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp claude settings: %w", err)
+	}
+	if err := os.Rename(tmpPath, settingsPath); err != nil {
+		return fmt.Errorf("save claude settings: %w", err)
+	}
+	return nil
+}
+
+func hasTool(tools []tools.Tool, name string) bool {
+	for _, tool := range tools {
+		if tool.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func StepLoadConfig(ctx context.Context, b *Bag) error {

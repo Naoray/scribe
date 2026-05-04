@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 func TestStepFilterRegistries_OnlyEnabled(t *testing.T) {
@@ -253,5 +255,110 @@ func TestStepResolveMCPServers_MalformedProjectFileNonFatal(t *testing.T) {
 	}
 	if b.ProjectMCPServersEnabled {
 		t.Fatal("ProjectMCPServersEnabled should be false after malformed project file")
+	}
+}
+
+func TestStepProjectClaudeMCPServers_WritesProjectSettings(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+	existing := []byte(`{
+  "permissions": {
+    "allow": ["Bash(go test ./...)"]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": ["old-server"]
+}
+`)
+	if err := os.WriteFile(settingsPath, existing, 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"playwright", "mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    []tools.Tool{tools.ClaudeTool{}},
+	}
+	if err := StepProjectClaudeMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectClaudeMCPServers: %v", err)
+	}
+
+	var got map[string]any
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse settings: %v", err)
+	}
+	if got["enableAllProjectMcpServers"] != false {
+		t.Fatalf("enableAllProjectMcpServers = %v, want false", got["enableAllProjectMcpServers"])
+	}
+	wantServers := []any{"mempalace", "playwright"}
+	servers, ok := got["enabledMcpjsonServers"].([]any)
+	if !ok {
+		t.Fatalf("enabledMcpjsonServers = %T, want array", got["enabledMcpjsonServers"])
+	}
+	if len(servers) != len(wantServers) {
+		t.Fatalf("enabledMcpjsonServers = %v, want %v", servers, wantServers)
+	}
+	for i := range wantServers {
+		if servers[i] != wantServers[i] {
+			t.Fatalf("enabledMcpjsonServers = %v, want %v", servers, wantServers)
+		}
+	}
+	permissions, ok := got["permissions"].(map[string]any)
+	if !ok || permissions["allow"] == nil {
+		t.Fatalf("permissions not preserved: %v", got["permissions"])
+	}
+}
+
+func TestStepProjectClaudeMCPServers_SkipsWhenClaudeInactive(t *testing.T) {
+	projectDir := t.TempDir()
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    nil,
+	}
+	if err := StepProjectClaudeMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectClaudeMCPServers: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("settings file was written or stat failed: %v", err)
+	}
+}
+
+func TestStepProjectClaudeMCPServers_MalformedSettingsFailsWithoutOverwrite(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+	original := []byte(`{"permissions":`)
+	if err := os.WriteFile(settingsPath, original, 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    []tools.Tool{tools.ClaudeTool{}},
+	}
+	if err := StepProjectClaudeMCPServers(context.Background(), b); err == nil {
+		t.Fatal("StepProjectClaudeMCPServers error = nil, want malformed settings error")
+	}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("settings overwritten: %q, want %q", data, original)
 	}
 }
