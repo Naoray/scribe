@@ -69,6 +69,15 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 		byName[tool.Name()] = tool
 	}
 
+	if e.ProjectRoot != "" {
+		removed, removedActions, err := e.removeOrphanedGlobalCodexProjections(st, storeDir, byName)
+		if err != nil {
+			return summary, actions, err
+		}
+		summary.Removed += removed
+		actions = append(actions, removedActions...)
+	}
+
 	pkgsDir, pkgErr := tools.PackagesDir()
 	if pkgErr != nil {
 		return summary, nil, pkgErr
@@ -205,6 +214,10 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			if path == "" {
 				continue
 			}
+			if e.isOtherProjectProjection(path, name, skill, byName) {
+				newManaged[path] = true
+				continue
+			}
 			toolName := inferToolName(path, byName, name, e.ProjectRoot)
 			if _, err := os.Lstat(path); err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
@@ -253,6 +266,105 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 	}
 
 	return summary, actions, nil
+}
+
+func (e *Engine) removeOrphanedGlobalCodexProjections(st *state.State, storeDir string, byName map[string]tools.Tool) (int, []Action, error) {
+	codexTool, ok := byName["codex"]
+	if !ok {
+		return 0, nil, nil
+	}
+	skillsDir, err := codexGlobalSkillsDir()
+	if err != nil {
+		return 0, nil, err
+	}
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, nil, nil
+		}
+		return 0, nil, err
+	}
+
+	var removed int
+	var actions []Action
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "" || name == ".system" {
+			continue
+		}
+		path := filepath.Join(skillsDir, name)
+		if !isManagedProjection(path, filepath.Join(storeDir, name)) {
+			continue
+		}
+		if hasTrackedGlobalToolProjection(st.Installed[name], codexTool.Name()) {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return removed, actions, err
+		}
+		if skill, ok := st.Installed[name]; ok {
+			skill.Paths = removePath(skill.Paths, path)
+			skill.ManagedPaths = removePath(skill.ManagedPaths, path)
+			st.Installed[name] = skill
+		}
+		removed++
+		actions = append(actions, Action{Kind: ActionRemoved, Name: name, Tool: codexTool.Name(), Path: path})
+	}
+	return removed, actions, nil
+}
+
+func (e *Engine) isOtherProjectProjection(path, skillName string, skill state.InstalledSkill, byName map[string]tools.Tool) bool {
+	if e.ProjectRoot == "" {
+		return false
+	}
+	for _, projection := range skill.Projections {
+		if projection.Project == "" || projection.Project == e.ProjectRoot {
+			continue
+		}
+		for _, toolName := range projection.Tools {
+			tool, ok := byName[toolName]
+			if !ok {
+				continue
+			}
+			toolPath, err := tool.SkillPath(skillName, projection.Project)
+			if err == nil && toolPath == path {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func codexGlobalSkillsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home dir: %w", err)
+	}
+	return filepath.Join(home, ".agents", "skills"), nil
+}
+
+func hasTrackedGlobalToolProjection(skill state.InstalledSkill, toolName string) bool {
+	for _, projection := range skill.Projections {
+		if projection.Project != "" {
+			continue
+		}
+		for _, tool := range projection.Tools {
+			if tool == toolName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func removePath(paths []string, path string) []string {
+	out := paths[:0]
+	for _, existing := range paths {
+		if existing != path {
+			out = append(out, existing)
+		}
+	}
+	return out
 }
 
 func projectionPaths(skill state.InstalledSkill) []string {
