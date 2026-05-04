@@ -29,7 +29,7 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
-  name_template: "checksums.txt"
+  disable: true
 
 changelog:
   sort: asc

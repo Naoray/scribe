@@ -1,3 +1,11 @@
+## v1.0.13 — 2026-05-04
+
+### Fixed
+- **Release archives no longer publish `checksums.txt`** — GoReleaser now omits the checksum asset, and `scribe upgrade` verifies downloaded archives against GitHub's per-asset SHA256 digest instead.
+- **`scribe resolve --ours` strips conflict markers** — resolving a merge conflict by keeping the local version now removes leftover conflict marker text before saving the skill.
+- **Reconcile removes missing projections cleanly** — stale projection entries are dropped when their target links no longer exist.
+- **Codex project projections and budget checks stay aligned** — project-local Codex projections are preserved correctly, description budget checks model shortened descriptions, and orphaned legacy global Codex links are pruned during project sync.
+
 ## v1.0.12 — 2026-05-04
 
 ### Fixed

@@ -39,3 +39,29 @@ func TestNewClientPrefersGhAuthToken(t *testing.T) {
 		t.Fatal("expected authenticated client from gh auth token")
 	}
 }
+
+func TestNewClientKeepsGhStateOutOfHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GITHUB_TOKEN", "")
+
+	tmpDir := t.TempDir()
+	ghPath := filepath.Join(tmpDir, "gh")
+	script := `#!/bin/sh
+mkdir -p "$XDG_STATE_HOME/gh"
+printf device > "$XDG_STATE_HOME/gh/device-id"
+printf 'gh-token\n'
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", tmpDir)
+
+	client := github.NewClient(t.Context(), "")
+	if !client.IsAuthenticated() {
+		t.Fatal("expected authenticated client from gh auth token")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "state", "gh", "device-id")); !os.IsNotExist(err) {
+		t.Fatalf("gh state written under HOME: %v", err)
+	}
+}

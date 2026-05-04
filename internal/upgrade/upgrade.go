@@ -270,9 +270,10 @@ func UpgradeGoInstall(ctx context.Context) ([]byte, error) {
 // AssetDownloader downloads a release asset by ID.
 type AssetDownloader interface {
 	DownloadReleaseAsset(ctx context.Context, owner, repo string, id int64) (io.ReadCloser, error)
+	ReleaseAssetDigest(ctx context.Context, owner, repo string, id int64) (string, error)
 }
 
-// UpgradeBinary downloads the release asset, verifies its checksum, extracts
+// UpgradeBinary downloads the release asset, verifies its GitHub digest, extracts
 // the binary, and atomically replaces the current executable.
 func UpgradeBinary(ctx context.Context, release *github.RepositoryRelease, downloader AssetDownloader) error {
 	if runtime.GOOS == "windows" {
@@ -289,41 +290,28 @@ func UpgradeBinary(ctx context.Context, release *github.RepositoryRelease, downl
 	}
 
 	assetName := fmt.Sprintf("scribe_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
-	checksumName := "checksums.txt"
 
-	var assetID, checksumID int64
+	var asset *github.ReleaseAsset
 	for _, a := range release.Assets {
-		switch a.GetName() {
-		case assetName:
-			assetID = a.GetID()
-		case checksumName:
-			checksumID = a.GetID()
+		if a.GetName() == assetName {
+			asset = a
+			break
 		}
 	}
-	if assetID == 0 {
+	if asset == nil || asset.GetID() == 0 {
 		return fmt.Errorf("no release asset %q found for %s/%s", assetName, runtime.GOOS, runtime.GOARCH)
 	}
-	if checksumID == 0 {
-		return fmt.Errorf("no checksums.txt found in release")
-	}
-
-	// Download checksum file.
-	checksumRC, err := downloader.DownloadReleaseAsset(ctx, "Naoray", "scribe", checksumID)
+	digest, err := downloader.ReleaseAssetDigest(ctx, "Naoray", "scribe", asset.GetID())
 	if err != nil {
-		return fmt.Errorf("download checksums: %w", err)
+		return fmt.Errorf("fetch %s digest: %w", assetName, err)
 	}
-	checksumData, err := io.ReadAll(checksumRC)
-	checksumRC.Close()
+	expectedHash, err := releaseAssetSHA256(digest)
 	if err != nil {
-		return fmt.Errorf("read checksums: %w", err)
-	}
-	expectedHash, err := findChecksum(checksumData, assetName)
-	if err != nil {
-		return err
+		return fmt.Errorf("verify %s digest: %w", assetName, err)
 	}
 
 	// Download the archive.
-	assetRC, err := downloader.DownloadReleaseAsset(ctx, "Naoray", "scribe", assetID)
+	assetRC, err := downloader.DownloadReleaseAsset(ctx, "Naoray", "scribe", asset.GetID())
 	if err != nil {
 		return fmt.Errorf("download asset: %w", err)
 	}
@@ -353,14 +341,20 @@ func sha256sum(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// findChecksum parses a goreleaser checksums.txt and returns the SHA256
-// for the named asset. Format: "<hash>  <filename>\n"
-func findChecksum(data []byte, assetName string) (string, error) {
-	for _, line := range strings.Split(string(data), "\n") {
-		parts := strings.Fields(line)
-		if len(parts) == 2 && parts[1] == assetName {
-			return parts[0], nil
-		}
+func releaseAssetSHA256(digest string) (string, error) {
+	if digest == "" {
+		return "", fmt.Errorf("release asset is missing GitHub digest")
 	}
-	return "", fmt.Errorf("checksum for %s not found in checksums.txt", assetName)
+
+	algorithm, value, ok := strings.Cut(digest, ":")
+	if !ok {
+		return "", fmt.Errorf("invalid digest %q", digest)
+	}
+	if algorithm != "sha256" {
+		return "", fmt.Errorf("unsupported digest algorithm %q", algorithm)
+	}
+	if _, err := hex.DecodeString(value); err != nil || len(value) != sha256.Size*2 {
+		return "", fmt.Errorf("invalid sha256 digest %q", digest)
+	}
+	return strings.ToLower(value), nil
 }
