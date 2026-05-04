@@ -139,10 +139,12 @@ func enforceCurrentBudget(factory *app.Factory, force bool) error {
 	}
 	set, err := resolveBudgetSet(st)
 	if err != nil {
-		return err
+		// Budget preflight should not mask the sync workflow's authoritative
+		// validation, fetch, or auth errors.
+		return nil
 	}
 	for _, agent := range budgetAgents(cfg) {
-		result := budget.CheckBudget(budgetSkillsForAgent(set, st, agent), agent)
+		result := budget.CheckProjectionBudget(budgetSkillsForAgent(set, st, agent), agent)
 		switch result.Status {
 		case budget.StatusRefuse:
 			if !force {

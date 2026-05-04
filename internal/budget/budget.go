@@ -57,6 +57,29 @@ func EstimateDescriptionBytes(skill Skill) int {
 }
 
 func CheckBudget(skills []Skill, agent string) Result {
+	return checkBudget(skills, agent, EstimateDescriptionBytes)
+}
+
+func CheckProjectionBudget(skills []Skill, agent string) Result {
+	estimator := EstimateDescriptionBytes
+	if strings.EqualFold(agent, "codex") {
+		estimator = EstimateCodexProjectionDescriptionBytes
+	}
+	return checkBudget(skills, agent, estimator)
+}
+
+func EstimateCodexProjectionDescriptionBytes(skill Skill) int {
+	description, body := splitSkill(skill.Content)
+	description = shortenDescription(strings.TrimSpace(description))
+	firstParagraph := shortenDescription(extractFirstParagraph(body))
+	used := len([]byte(description)) + len([]byte(firstParagraph))
+	if description != "" && firstParagraph != "" {
+		used += len("\n\n")
+	}
+	return used
+}
+
+func checkBudget(skills []Skill, agent string, estimate func(Skill) int) Result {
 	limit := AgentBudgets[strings.ToLower(agent)]
 	result := Result{
 		Agent:     strings.ToLower(agent),
@@ -74,7 +97,7 @@ func CheckBudget(skills []Skill, agent string) Result {
 	})
 
 	for _, skill := range ordered {
-		size := EstimateDescriptionBytes(skill)
+		size := estimate(skill)
 		before := result.Used
 		result.Used += size
 		if result.Used >= limit {
@@ -98,6 +121,24 @@ func CheckBudget(skills []Skill, agent string) Result {
 		result.Status = StatusSilent
 	}
 	return result
+}
+
+func shortenDescription(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if idx := strings.IndexAny(s, ".!"); idx > 0 && idx < 80 {
+		return s[:idx+1]
+	}
+	if len(s) <= 80 {
+		return s
+	}
+	cut := strings.LastIndex(s[:80], " ")
+	if cut > 40 {
+		return s[:cut] + "..."
+	}
+	return s[:80] + "..."
 }
 
 func FormatResult(result Result) string {
