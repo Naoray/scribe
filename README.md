@@ -70,14 +70,19 @@ Please set it up for me:
 ## Quick start
 
 ```bash
-scribe registry connect ArtistfyHQ/team-skills   # connect once
-scribe sync                                       # install everything
-scribe list                                       # verify
+scribe list           # see skills already available across tools
+scribe adopt          # claim hand-rolled skills from Claude/Codex/Cursor
+scribe sync           # project managed skills into each detected tool
 ```
 
-Run `scribe sync` again anytime to pick up new skills. Setting up a registry from scratch? `scribe registry create` scaffolds the repo, `scribe.yaml`, and connection in one prompt.
+That is enough to start managing existing local skills between tools. Use `scribe tools` to see detected agents, and `scribe skill tools <name>` to enable, disable, or reset projection for one skill.
 
-For a default starter set, connect `Naoray/scribe-skills-essentials` and run `scribe sync --registry Naoray/scribe-skills-essentials`.
+Registries are for adding shared/upstream skills. Connect one when you want more than your local set:
+
+```bash
+scribe registry connect ArtistfyHQ/team-skills
+scribe sync
+```
 
 ## What you get
 
