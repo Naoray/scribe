@@ -332,6 +332,89 @@ func TestSkillTools_Disable(t *testing.T) {
 	}
 }
 
+func TestSkillTools_DisableUpdatesProjectLocalProjection(t *testing.T) {
+	seedSkillEnv(t)
+
+	home := os.Getenv("HOME")
+	projectRoot := t.TempDir()
+	t.Chdir(projectRoot)
+	if err := os.WriteFile(filepath.Join(projectRoot, ".scribe.yaml"), []byte("add:\n  - commit\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	st, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(home, ".scribe", "skills", "commit")
+	claude := tools.ClaudeTool{}
+	codex := tools.CodexTool{}
+	var paths []string
+	claudePaths, err := claude.Install("commit", canonical, projectRoot)
+	if err != nil {
+		t.Fatalf("claude project install: %v", err)
+	}
+	paths = append(paths, claudePaths...)
+	codexPaths, err := codex.Install("commit", canonical, projectRoot)
+	if err != nil {
+		t.Fatalf("codex project install: %v", err)
+	}
+	paths = append(paths, codexPaths...)
+
+	skill := st.Installed["commit"]
+	skill.Tools = []string{"claude", "codex"}
+	skill.ToolsMode = state.ToolsModeInherit
+	skill.Projections = []state.ProjectionEntry{{
+		Project: projectRoot,
+		Tools:   []string{"claude", "codex"},
+	}}
+	skill.ManagedPaths = paths
+	skill.Paths = append([]string(nil), paths...)
+	st.Installed["commit"] = skill
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit", "--disable", "codex"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	st, err = state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := st.Installed["commit"]
+	if got.ToolsMode != state.ToolsModePinned {
+		t.Fatalf("ToolsMode = %q, want pinned", got.ToolsMode)
+	}
+	if !reflect.DeepEqual(got.Tools, []string{"claude"}) {
+		t.Fatalf("Tools = %v, want [claude]", got.Tools)
+	}
+	projectCodexPath := filepath.Join(projectRoot, ".agents", "skills", "commit")
+	if _, err := os.Lstat(projectCodexPath); !os.IsNotExist(err) {
+		t.Fatalf("project codex projection still exists at %s: %v", projectCodexPath, err)
+	}
+	if _, err := os.Lstat(filepath.Join(projectRoot, ".claude", "skills", "commit")); err != nil {
+		t.Fatalf("project claude projection missing: %v", err)
+	}
+	if len(got.Projections) != 1 || got.Projections[0].Project != projectRoot || !reflect.DeepEqual(got.Projections[0].Tools, []string{"claude"}) {
+		t.Fatalf("Projections = %#v, want project-local claude only", got.Projections)
+	}
+
+	set, err := resolveBudgetSet(st)
+	if err != nil {
+		t.Fatalf("resolveBudgetSet: %v", err)
+	}
+	if skillNames(budgetSkillsForAgent(set, st, "codex")).has("commit") {
+		t.Fatal("codex budget should exclude commit after project-local disable")
+	}
+	if !skillNames(budgetSkillsForAgent(set, st, "claude")).has("commit") {
+		t.Fatal("claude budget should include commit after project-local disable")
+	}
+}
+
 func TestSkillTools_DisableLastTool_ReturnsError(t *testing.T) {
 	seedSkillEnv(t)
 

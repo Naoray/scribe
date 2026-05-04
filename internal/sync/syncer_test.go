@@ -381,6 +381,62 @@ func TestSync_PromotesGlobalProjectionWhenProjectFileExists(t *testing.T) {
 	}
 }
 
+func TestSync_PromotesGlobalProjectionFromCurrentProjectFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		t.Fatalf("store dir: %v", err)
+	}
+	writeStoredSkill(t, storeDir, "recap", "project recap")
+
+	projectRoot := t.TempDir()
+	t.Chdir(projectRoot)
+	if err := os.WriteFile(filepath.Join(projectRoot, ".scribe.yaml"), []byte("add:\n  - recap\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	syncer := &sync.Syncer{
+		Tools: []tools.Tool{tools.ClaudeTool{}},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"recap": {
+			InstalledHash: sync.ComputeFileHash(skillContent("recap", "project recap")),
+			Tools:         []string{"claude"},
+			Projections: []state.ProjectionEntry{{
+				Project: "",
+				Tools:   []string{"claude"},
+			}},
+		},
+	}}
+	current := st.Installed["recap"]
+	statuses := []sync.SkillStatus{{
+		Name:      "recap",
+		Status:    sync.StatusCurrent,
+		Installed: &current,
+		Entry:     &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	installed := st.Installed["recap"]
+	foundProject := false
+	for _, projection := range installed.Projections {
+		if projection.Project == projectRoot && reflect.DeepEqual(projection.Tools, []string{"claude"}) {
+			foundProject = true
+		}
+	}
+	if !foundProject {
+		t.Fatalf("Projections = %#v, want project projection from cwd .scribe.yaml", installed.Projections)
+	}
+	if _, err := os.Lstat(filepath.Join(projectRoot, ".claude", "skills", "recap")); err != nil {
+		t.Fatalf("project symlink missing: %v", err)
+	}
+}
+
 func TestRunWithDiff_MultiProjectProjectionPathsAreIsolated(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	projectOne := t.TempDir()

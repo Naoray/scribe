@@ -64,7 +64,7 @@ func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool, forc
 	selected := normalizeSelectedProjects(selectedProjects)
 	projectFiles := make([]ProjectChange, 0, len(selected))
 	for _, project := range selected {
-		change, err := prepareProjectChange(project, skills, forceMigration)
+		change, err := prepareProjectChange(project, skills)
 		if err != nil {
 			return MigrationPlan{}, err
 		}
@@ -251,7 +251,7 @@ func removeLegacyProjectionTools(projections []state.ProjectionEntry, tools []st
 	return out
 }
 
-func prepareProjectChange(project string, skills []string, force bool) (ProjectChange, error) {
+func prepareProjectChange(project string, skills []string) (ProjectChange, error) {
 	abs, err := filepath.Abs(project)
 	if err != nil {
 		return ProjectChange{}, fmt.Errorf("resolve project path: %w", err)
@@ -261,20 +261,18 @@ func prepareProjectChange(project string, skills []string, force bool) (ProjectC
 	if err != nil {
 		return ProjectChange{}, err
 	}
-	if !force {
-		userAuthored, err := hasKitOrSnippetKey(file)
-		if err != nil {
-			return ProjectChange{}, err
-		}
-		if userAuthored {
-			return ProjectChange{
-				Project:            abs,
-				File:               file,
-				Skills:             append([]string(nil), pf.Add...),
-				Changed:            false,
-				SkippedWriteReason: fmt.Sprintf("skipped writing %s: user-authored kit YAML detected", file),
-			}, nil
-		}
+	userAuthored, err := hasKitOrSnippetKey(file)
+	if err != nil {
+		return ProjectChange{}, err
+	}
+	if userAuthored {
+		return ProjectChange{
+			Project:            abs,
+			File:               file,
+			Skills:             append([]string(nil), pf.Add...),
+			Changed:            false,
+			SkippedWriteReason: fmt.Sprintf("skipped writing %s: user-authored kit YAML detected", file),
+		}, nil
 	}
 
 	addSet := map[string]bool{}
