@@ -109,6 +109,13 @@ func schemaForCommand(cmd *cobra.Command) commandSchema {
 
 func findCommand(root *cobra.Command, path string) (*cobra.Command, error) {
 	path = strings.TrimSpace(strings.TrimPrefix(path, root.CommandPath()+" "))
+	if !strings.Contains(path, " ") {
+		for _, child := range root.Commands() {
+			if child.Name() == path || child.CommandPath() == root.CommandPath()+" "+path {
+				return child, nil
+			}
+		}
+	}
 	var found *cobra.Command
 	walkCommandsForSchema(root, func(cmd *cobra.Command) {
 		if found != nil {
