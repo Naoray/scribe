@@ -80,7 +80,7 @@ That is enough to start managing existing local skills between tools. Use `scrib
 Registries are for adding shared/upstream skills. Connect one when you want more than your local set:
 
 ```bash
-scribe registry connect ArtistfyHQ/team-skills
+scribe registry connect anthropics/skills
 scribe sync
 ```
 
