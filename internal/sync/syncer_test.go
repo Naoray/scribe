@@ -287,6 +287,59 @@ func TestRunWithDiff_RecordsProjectProjection(t *testing.T) {
 	}
 }
 
+func TestRunWithDiff_ProjectProjectionOverridesGlobalPinnedTools(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	projectRoot := t.TempDir()
+
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}},
+		},
+		Tools:       []tools.Tool{tools.CodexTool{}},
+		ProjectRoot: projectRoot,
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"recap": {
+			InstalledHash: sync.ComputeFileHash([]byte("# old recap\n")),
+			Tools:         []string{"claude"},
+			ToolsMode:     state.ToolsModePinned,
+			Projections: []state.ProjectionEntry{{
+				Project: projectRoot,
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+	current := st.Installed["recap"]
+	statuses := []sync.SkillStatus{{
+		Name:      "recap",
+		Status:    sync.StatusOutdated,
+		Installed: &current,
+		Entry:     &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	projectPath := filepath.Join(projectRoot, ".agents", "skills", "recap")
+	if _, err := os.Lstat(projectPath); err != nil {
+		t.Fatalf("project codex projection missing: %v", err)
+	}
+	installed := st.Installed["recap"]
+	if !reflect.DeepEqual(installed.Tools, []string{"claude"}) {
+		t.Fatalf("Tools = %v, want global pin [claude]", installed.Tools)
+	}
+	foundProject := false
+	for _, projection := range installed.Projections {
+		if projection.Project == projectRoot && reflect.DeepEqual(projection.Tools, []string{"codex"}) {
+			foundProject = true
+		}
+	}
+	if !foundProject {
+		t.Fatalf("Projections = %#v, want current project codex projection preserved", installed.Projections)
+	}
+}
+
 func TestRunWithDiff_RecordsGlobalProjectionWhenProjectRootEmpty(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

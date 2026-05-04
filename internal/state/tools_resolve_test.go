@@ -59,6 +59,38 @@ func TestEffectiveTools_PinnedEmptyYieldsEmpty(t *testing.T) {
 	}
 }
 
+func TestEffectiveToolsForProject_ProjectionOverridesPinnedTools(t *testing.T) {
+	sk := InstalledSkill{
+		ToolsMode: ToolsModePinned,
+		Tools:     []string{"claude"},
+		Projections: []ProjectionEntry{{
+			Project: "/repo/project",
+			Tools:   []string{"codex"},
+		}},
+	}
+	got := sk.EffectiveToolsForProject([]string{"claude", "codex"}, "/repo/project")
+	want := []string{"codex"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestEffectiveToolsForProject_FallsBackToPinnedTools(t *testing.T) {
+	sk := InstalledSkill{
+		ToolsMode: ToolsModePinned,
+		Tools:     []string{"claude"},
+		Projections: []ProjectionEntry{{
+			Project: "/repo/other",
+			Tools:   []string{"codex"},
+		}},
+	}
+	got := sk.EffectiveToolsForProject([]string{"claude", "codex"}, "/repo/project")
+	want := []string{"claude"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestNormalizeToolSelection_DedupePreservesOrder(t *testing.T) {
 	got := NormalizeToolSelection([]string{"claude", "cursor", "claude", "", "codex"})
 	want := []string{"claude", "cursor", "codex"}

@@ -598,7 +598,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 			// Filter to the skill's effective tools (pinned mode respects user
 			// selection; inherit mode uses every globally-enabled tool).
-			effectiveTools := selectEffectiveTools(s.Tools, installed)
+			effectiveTools := selectEffectiveTools(s.Tools, installed, s.ProjectRoot)
 
 			if !s.ForceBudget {
 				if err := s.checkBudgetBeforeProjection(st, sk.Name, tFiles, effectiveTools); err != nil {
@@ -693,20 +693,20 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			sources := mergeSources(installed, newSource)
 
 			// Preserve pinned ToolsMode across re-syncs. New skills default to
-			// inherit; for pinned skills we still overwrite Tools with the
-			// resolved names so stale entries (tool uninstalled globally)
-			// don't linger in state.
+			// inherit. Project-scoped projections are tracked separately, so a
+			// project sync must not rewrite the legacy/global Tools pin.
 			toolsMode := state.ToolsModeInherit
 			if installed != nil {
 				toolsMode = installed.ToolsMode
 			}
 
 			managedPaths := mergeManagedPaths(installed, paths)
+			stateTools := stateToolsForProjection(installed, s.ProjectRoot, toolNames)
 			st.RecordInstall(installName, state.InstalledSkill{
 				Revision:      nextRevision(installed),
 				InstalledHash: installedHash,
 				Sources:       sources,
-				Tools:         toolNames,
+				Tools:         stateTools,
 				ToolsMode:     toolsMode,
 				Paths:         append([]string(nil), managedPaths...),
 				Projections:   mergeProjection(installed, s.ProjectRoot, toolNames),
@@ -785,7 +785,7 @@ func (s *Syncer) promoteProjectProjection(name string, st *state.State, summary 
 		summary.Failed++
 		return
 	}
-	effectiveTools := selectEffectiveTools(s.Tools, installed)
+	effectiveTools := selectEffectiveTools(s.Tools, installed, s.ProjectRoot)
 	if !s.ForceBudget {
 		files := []tools.SkillFile{{Path: "SKILL.md", Content: content}}
 		if err := s.checkBudgetBeforeProjection(st, name, files, effectiveTools); err != nil {
@@ -990,16 +990,32 @@ func resolveToolCmds(entry *manifest.Entry, activeTools []tools.Tool) []toolCmd 
 // that should receive this skill, honoring ToolsMode. Order comes from the
 // installed record for pinned mode (preserves user intent); from the global
 // list for inherit mode (preserves tool config order).
-func selectEffectiveTools(global []tools.Tool, installed *state.InstalledSkill) []tools.Tool {
-	if installed == nil || installed.ToolsMode != state.ToolsModePinned {
+func selectEffectiveTools(global []tools.Tool, installed *state.InstalledSkill, projectRoot string) []tools.Tool {
+	if installed == nil {
 		return global
 	}
+	globalNames := make([]string, 0, len(global))
 	byName := make(map[string]tools.Tool, len(global))
 	for _, t := range global {
-		byName[t.Name()] = t
+		name := t.Name()
+		globalNames = append(globalNames, name)
+		byName[name] = t
 	}
-	out := make([]tools.Tool, 0, len(installed.Tools))
-	for _, name := range installed.Tools {
+	effectiveNames := installed.EffectiveToolsForProject(globalNames, projectRoot)
+	if len(effectiveNames) == len(global) {
+		matchesGlobalOrder := true
+		for i, name := range effectiveNames {
+			if global[i].Name() != name {
+				matchesGlobalOrder = false
+				break
+			}
+		}
+		if matchesGlobalOrder {
+			return global
+		}
+	}
+	out := make([]tools.Tool, 0, len(effectiveNames))
+	for _, name := range effectiveNames {
 		if t, ok := byName[name]; ok {
 			out = append(out, t)
 		}
@@ -1088,7 +1104,7 @@ func budgetSkillsForProjection(st *state.State, incomingName string, incomingCon
 		if installed.Kind == state.KindPackage {
 			continue
 		}
-		if name == incomingName || !projectedToAgent(installed, projectRoot, agent) || !pinnedToAgent(installed, agent) {
+		if name == incomingName || !projectedToAgent(installed, projectRoot, agent) {
 			continue
 		}
 		seen[name] = true
@@ -1128,10 +1144,6 @@ func projectedToAgent(installed state.InstalledSkill, projectRoot, agent string)
 	return containsString(installed.Tools, agent)
 }
 
-func pinnedToAgent(installed state.InstalledSkill, agent string) bool {
-	return installed.ToolsMode != state.ToolsModePinned || containsString(installed.Tools, agent)
-}
-
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -1157,6 +1169,13 @@ func mergeProjection(installed *state.InstalledSkill, projectRoot string, toolNa
 		}
 	}
 	return append(projections, next)
+}
+
+func stateToolsForProjection(installed *state.InstalledSkill, projectRoot string, toolNames []string) []string {
+	if installed != nil && installed.ToolsMode == state.ToolsModePinned && projectRoot != "" {
+		return append([]string(nil), installed.Tools...)
+	}
+	return append([]string(nil), toolNames...)
 }
 
 func mergeManagedPaths(installed *state.InstalledSkill, paths []string) []string {
