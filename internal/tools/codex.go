@@ -49,6 +49,8 @@ func (t CodexTool) Install(skillName, canonicalDir, projectRoot string) ([]strin
 	if err := replaceSymlink(link, canonicalDir); err != nil {
 		return nil, fmt.Errorf("symlink codex/%s: %w", skillName, err)
 	}
+	// Remove stale symlinks left at the legacy .codex/skills/ path by older scribe versions.
+	cleanupLegacyCodexLink(skillName, projectRoot)
 	return []string{link}, nil
 }
 
@@ -94,6 +96,19 @@ func codexSkillsDir(projectRoot string) (string, error) {
 		return "", fmt.Errorf("home dir: %w", err)
 	}
 	return filepath.Join(home, ".agents", "skills"), nil
+}
+
+// cleanupLegacyCodexLink removes symlinks that older scribe versions created under
+// .codex/skills/ instead of .agents/skills/. Called after every successful Install
+// so that the next sync transparently migrates existing installations.
+func cleanupLegacyCodexLink(skillName, projectRoot string) {
+	if projectRoot != "" {
+		_ = os.Remove(filepath.Join(projectRoot, ".codex", "skills", skillName))
+		return
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		_ = os.Remove(filepath.Join(home, ".codex", "skills", skillName))
+	}
 }
 
 func ensureCodexCompatibleSkillMD(skillName, canonicalDir string) error {
