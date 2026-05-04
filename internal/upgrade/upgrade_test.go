@@ -4,9 +4,15 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 )
 
 func TestDetectMethod(t *testing.T) {
@@ -221,6 +227,65 @@ func TestNeedsUpgrade(t *testing.T) {
 				t.Errorf("NeedsUpgrade() upgrade = %v, want %v", upgrade, tt.wantUpgrade)
 			}
 		})
+	}
+}
+
+func TestUpgradeHomebrewRefreshesTapAndRejectsVersionMismatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test")
+	}
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "brew.log")
+	brewPath := filepath.Join(dir, "brew")
+	script := `#!/bin/sh
+echo "$*" >> "` + logPath + `"
+case "$1 $2" in
+  "update ")
+    exit 0
+    ;;
+  "upgrade scribe")
+    exit 0
+    ;;
+  "list --versions")
+    if [ "$3" = "scribe" ]; then
+      echo "scribe 1.2.3"
+      exit 0
+    fi
+    ;;
+esac
+echo "unexpected brew args: $*" >&2
+exit 64
+`
+	if err := os.WriteFile(brewPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := UpgradeHomebrew(context.Background(), "v1.2.4")
+	if err == nil {
+		t.Fatal("UpgradeHomebrew() error = nil, want version mismatch")
+	}
+
+	var ce *clierrors.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("UpgradeHomebrew() error = %T, want *clierrors.Error", err)
+	}
+	if ce.Code != "UPGRADE_VERSION_MISMATCH" {
+		t.Fatalf("code = %q, want UPGRADE_VERSION_MISMATCH", ce.Code)
+	}
+	if ce.Remediation != "brew tap is stale; run 'brew update' and retry" {
+		t.Fatalf("remediation = %q", ce.Remediation)
+	}
+
+	logBytes, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	got := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+	want := []string{"update", "upgrade scribe", "list --versions scribe"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("brew calls = %q, want %q", got, want)
 	}
 }
 

@@ -136,7 +136,7 @@ func doUpgrade(ctx context.Context, method upgrade.Method, release *gogithub.Rep
 			spin.stop()
 		}
 		// Brew has its own progress output — don't wrap with spinner.
-		_, upgradeErr = upgrade.UpgradeHomebrew(ctx)
+		_, upgradeErr = upgrade.UpgradeHomebrew(ctx, release.GetTagName())
 	case upgrade.MethodGoInstall:
 		_, upgradeErr = upgrade.UpgradeGoInstall(ctx)
 		if spin != nil {
