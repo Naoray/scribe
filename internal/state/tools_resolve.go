@@ -17,17 +17,25 @@ func (s InstalledSkill) EffectiveTools(available []string) []string {
 	if s.ToolsMode != ToolsModePinned {
 		return append([]string(nil), available...)
 	}
-	availSet := make(map[string]bool, len(available))
-	for _, a := range available {
-		availSet[a] = true
+	return intersectTools(s.Tools, available)
+}
+
+// EffectiveToolsForProject returns the tool names a skill should be installed
+// into for a specific project scope.
+//
+// Project projections are more specific than the legacy/global Tools pin. This
+// lets one project's projected tool set survive unrelated per-skill trimming in
+// another scope.
+func (s InstalledSkill) EffectiveToolsForProject(available []string, projectRoot string) []string {
+	if s.IsPackage() {
+		return append([]string(nil), available...)
 	}
-	out := make([]string, 0, len(s.Tools))
-	for _, t := range s.Tools {
-		if availSet[t] {
-			out = append(out, t)
+	for _, projection := range s.Projections {
+		if projection.Project == projectRoot {
+			return intersectTools(projection.Tools, available)
 		}
 	}
-	return out
+	return s.EffectiveTools(available)
 }
 
 // NormalizeToolSelection dedupes a user-provided tool list while preserving
@@ -41,6 +49,20 @@ func NormalizeToolSelection(in []string) []string {
 		}
 		seen[t] = true
 		out = append(out, t)
+	}
+	return out
+}
+
+func intersectTools(selected, available []string) []string {
+	availSet := make(map[string]bool, len(available))
+	for _, a := range available {
+		availSet[a] = true
+	}
+	out := make([]string, 0, len(selected))
+	for _, t := range selected {
+		if availSet[t] {
+			out = append(out, t)
+		}
 	}
 	return out
 }

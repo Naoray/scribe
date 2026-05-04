@@ -119,7 +119,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 		}
 
 		canonicalDir := filepath.Join(storeDir, name)
-		expectedTools := skill.EffectiveTools(activeNames)
+		expectedTools := skill.EffectiveToolsForProject(activeNames, e.ProjectRoot)
 		expectedPaths := make(map[string]string, len(expectedTools))
 		newManaged := make(map[string]bool)
 		var conflicts []state.ProjectionConflict

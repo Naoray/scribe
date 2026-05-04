@@ -28,7 +28,7 @@ func TestBudgetSkillsForProjectionExcludesPinnedSkillWithoutAgent(t *testing.T) 
 			Tools:     []string{"claude"},
 			Projections: []state.ProjectionEntry{{
 				Project: projectRoot,
-				Tools:   []string{"codex"},
+				Tools:   []string{"claude"},
 			}},
 		},
 		"codex-skill": {
@@ -55,6 +55,39 @@ func TestBudgetSkillsForProjectionExcludesPinnedSkillWithoutAgent(t *testing.T) 
 	}
 	if !names.has("incoming") {
 		t.Fatal("codex budget should include incoming")
+	}
+}
+
+func TestBudgetSkillsForProjectionUsesCurrentProjectToolsOverGlobalPin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		t.Fatalf("store dir: %v", err)
+	}
+	writeProjectionBudgetSkill(t, storeDir, "project-codex", "codex")
+
+	projectRoot := t.TempDir()
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"project-codex": {
+			ToolsMode: state.ToolsModePinned,
+			Tools:     []string{"claude"},
+			Projections: []state.ProjectionEntry{{
+				Project: projectRoot,
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+
+	skills, err := budgetSkillsForProjection(st, "incoming", []byte("incoming"), projectRoot, "codex")
+	if err != nil {
+		t.Fatalf("budgetSkillsForProjection: %v", err)
+	}
+
+	names := projectionBudgetSkillNames(skills)
+	if !names.has("project-codex") {
+		t.Fatal("codex budget should include current project codex projection despite global claude pin")
 	}
 }
 
