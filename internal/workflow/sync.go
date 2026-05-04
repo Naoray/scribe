@@ -38,6 +38,7 @@ func SyncSteps() []Step {
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
+		{"ResolveMCPServers", StepResolveMCPServers},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
@@ -53,6 +54,7 @@ func SyncTail() []Step {
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
+		{"ResolveMCPServers", StepResolveMCPServers},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
@@ -153,6 +155,48 @@ func StepResolveKitFilter(_ context.Context, b *Bag) error {
 		return nil
 	}
 	b.KitFilter, b.KitFilterEnabled = ResolveKitFilter(b.State)
+	return nil
+}
+
+// ResolveProjectMCPServers resolves kit-declared MCP server names for the
+// current project. All errors are non-fatal; a missing or malformed project
+// file returns (nil, false) so callers do not write runtime settings yet.
+func ResolveProjectMCPServers() (servers []string, enabled bool) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, false
+	}
+	projectPath, err := projectfile.Find(wd)
+	if err != nil || projectPath == "" {
+		return nil, false
+	}
+	pf, err := projectfile.Load(projectPath)
+	if err != nil {
+		return nil, false
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return nil, false
+	}
+	kits, err := kit.LoadAll(filepath.Join(scribeDir, "kits"))
+	if err != nil {
+		return nil, false
+	}
+	resolved, err := kit.ResolveMCPServers(pf, kits)
+	if err != nil {
+		return nil, false
+	}
+	return resolved, true
+}
+
+// StepResolveMCPServers loads the project's .scribe.yaml and resolves
+// kit-declared MCP server names into read-only workflow state. It does not
+// write any agent runtime settings.
+func StepResolveMCPServers(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" {
+		return nil
+	}
+	b.ProjectMCPServers, b.ProjectMCPServersEnabled = ResolveProjectMCPServers()
 	return nil
 }
 
@@ -346,13 +390,13 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	resolved := map[string]sync.SkillStatus{}
 
 	syncer := &sync.Syncer{
-		Client:      sync.WrapGitHubClient(b.Client),
-		Provider:    b.Provider,
-		Tools:       b.Tools,
-		Executor:    &sync.ShellExecutor{},
-		TrustAll:    b.TrustAllFlag,
-		ForceBudget: b.ForceBudget,
-		AliasName:   b.AliasName,
+		Client:           sync.WrapGitHubClient(b.Client),
+		Provider:         b.Provider,
+		Tools:            b.Tools,
+		Executor:         &sync.ShellExecutor{},
+		TrustAll:         b.TrustAllFlag,
+		ForceBudget:      b.ForceBudget,
+		AliasName:        b.AliasName,
 		SkillFilter:      b.SkillFilter,
 		KitFilter:        b.KitFilter,
 		KitFilterEnabled: b.KitFilterEnabled,

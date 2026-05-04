@@ -151,9 +151,9 @@ If a project root has `.scribe.yaml`, it declares per-project intent — `kits`,
 
 ### Kits
 
-A Kit is a named YAML bundle of skills stored at `~/.scribe/kits/<name>.yaml`.
+A Kit is a named YAML bundle of skills and optional MCP server names stored at `~/.scribe/kits/<name>.yaml`.
 
-Schema: `{name, description?, skills[], source?{registry, rev?}}`
+Schema: `{name, description?, skills[], mcp_servers?, source?{registry, rev?}}`
 
 Example:
 
@@ -164,6 +164,8 @@ skills:
   - eloquent
   - queues
   - livewire
+mcp_servers:
+  - mempalace
 source:
   registry: my-org/scribe-registry
 ```
@@ -177,7 +179,7 @@ kits:
   - laravel-stack
 ```
 
-`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`.
+`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`. It also resolves kit-declared `mcp_servers` as read-only project workflow state for upcoming project-local MCP projection; it does not write agent MCP settings or enforce server startup yet.
 
 To author a Kit, run:
 

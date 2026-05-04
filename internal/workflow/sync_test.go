@@ -174,3 +174,84 @@ func TestStepResolveKitFilter_NoProjectFile(t *testing.T) {
 		t.Fatalf("KitFilter = %v, want nil (no project scope)", b.KitFilter)
 	}
 }
+
+func TestStepResolveMCPServers_WithProjectFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	pfContent := "kits:\n  - runtime-kit\n"
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte(pfContent), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	kitsDir := filepath.Join(home, ".scribe", "kits")
+	if err := os.MkdirAll(kitsDir, 0o755); err != nil {
+		t.Fatalf("mkdir kits: %v", err)
+	}
+	kitContent := "name: runtime-kit\nskills:\n  - recap\nmcp_servers:\n  - playwright\n  - mempalace\n"
+	if err := os.WriteFile(filepath.Join(kitsDir, "runtime-kit.yaml"), []byte(kitContent), 0o644); err != nil {
+		t.Fatalf("write kit file: %v", err)
+	}
+
+	t.Chdir(projectDir)
+
+	b := &Bag{ProjectRoot: projectDir}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers: %v", err)
+	}
+
+	want := []string{"mempalace", "playwright"}
+	if len(b.ProjectMCPServers) != len(want) {
+		t.Fatalf("ProjectMCPServers = %v, want %v", b.ProjectMCPServers, want)
+	}
+	for i := range want {
+		if b.ProjectMCPServers[i] != want[i] {
+			t.Fatalf("ProjectMCPServers = %v, want %v", b.ProjectMCPServers, want)
+		}
+	}
+	if !b.ProjectMCPServersEnabled {
+		t.Fatal("ProjectMCPServersEnabled should be true after MCP server resolution")
+	}
+}
+
+func TestStepResolveMCPServers_NoProjectFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	emptyDir := t.TempDir()
+	t.Chdir(emptyDir)
+
+	b := &Bag{ProjectRoot: ""}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers: %v", err)
+	}
+	if b.ProjectMCPServers != nil {
+		t.Fatalf("ProjectMCPServers = %v, want nil (no project scope)", b.ProjectMCPServers)
+	}
+	if b.ProjectMCPServersEnabled {
+		t.Fatal("ProjectMCPServersEnabled should be false without project scope")
+	}
+}
+
+func TestStepResolveMCPServers_MalformedProjectFileNonFatal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte("kits:\n  - [broken\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	t.Chdir(projectDir)
+
+	b := &Bag{ProjectRoot: projectDir}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers: %v", err)
+	}
+	if b.ProjectMCPServers != nil {
+		t.Fatalf("ProjectMCPServers = %v, want nil after malformed project file", b.ProjectMCPServers)
+	}
+	if b.ProjectMCPServersEnabled {
+		t.Fatal("ProjectMCPServersEnabled should be false after malformed project file")
+	}
+}
