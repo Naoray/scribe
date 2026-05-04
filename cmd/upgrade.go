@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	gogithub "github.com/google/go-github/v69/github"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/upgrade"
@@ -29,6 +32,8 @@ var upgradeCheck bool
 var currentVersion = func() string {
 	return resolveVersion(Version, readBuildInfo())
 }
+
+var installedBinaryVersion = queryInstalledBinaryVersion
 
 func newUpgradeCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -116,10 +121,15 @@ func runUpgradeWithDeps(ctx context.Context, st *state.State, client upgradeClie
 		return err
 	}
 
+	if err := verifyInstalledBinaryVersion(ctx, latestTag); err != nil {
+		return err
+	}
+
 	st.RecordScribeBinaryUpdateSuccess()
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("save state: %w", err)
 	}
+	fmt.Printf("Successfully upgraded to %s\n", latestTag)
 	return nil
 }
 
@@ -136,7 +146,7 @@ func doUpgrade(ctx context.Context, method upgrade.Method, release *gogithub.Rep
 			spin.stop()
 		}
 		// Brew has its own progress output — don't wrap with spinner.
-		_, upgradeErr = upgrade.UpgradeHomebrew(ctx)
+		_, upgradeErr = upgrade.UpgradeHomebrew(ctx, release.GetTagName())
 	case upgrade.MethodGoInstall:
 		_, upgradeErr = upgrade.UpgradeGoInstall(ctx)
 		if spin != nil {
@@ -153,6 +163,48 @@ func doUpgrade(ctx context.Context, method upgrade.Method, release *gogithub.Rep
 		return fmt.Errorf("upgrade failed: %w", upgradeErr)
 	}
 
-	fmt.Printf("Successfully upgraded to %s\n", release.GetTagName())
 	return nil
+}
+
+func verifyInstalledBinaryVersion(ctx context.Context, releaseTag string) error {
+	out, err := installedBinaryVersion(ctx)
+	if err != nil {
+		return clierrors.Wrap(
+			fmt.Errorf("verify installed scribe version: %w", err),
+			"UPGRADE_VERSION_MISMATCH",
+			clierrors.ExitConflict,
+			clierrors.WithRemediation("ensure `scribe` is on PATH and retry"),
+		)
+	}
+	if versionOutputMatchesTag(out, releaseTag) {
+		return nil
+	}
+	return clierrors.Wrap(
+		fmt.Errorf("installed scribe version does not match %s (%s)", releaseTag, strings.TrimSpace(out)),
+		"UPGRADE_VERSION_MISMATCH",
+		clierrors.ExitConflict,
+		clierrors.WithRemediation("ensure `which scribe` points to the upgraded binary and retry"),
+	)
+}
+
+func queryInstalledBinaryVersion(ctx context.Context) (string, error) {
+	path, err := exec.LookPath("scribe")
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("%s --version: %s: %w", path, string(out), err)
+	}
+	return string(out), nil
+}
+
+func versionOutputMatchesTag(out, releaseTag string) bool {
+	want := strings.TrimPrefix(strings.TrimSpace(releaseTag), "v")
+	for _, field := range strings.Fields(out) {
+		if strings.TrimPrefix(field, "v") == want {
+			return true
+		}
+	}
+	return false
 }

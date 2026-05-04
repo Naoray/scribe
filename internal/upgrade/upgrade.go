@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/google/go-github/v69/github"
 )
 
@@ -22,7 +23,7 @@ import (
 type Method int
 
 const (
-	MethodHomebrew  Method = iota
+	MethodHomebrew Method = iota
 	MethodGoInstall
 	MethodCurlBinary
 )
@@ -206,14 +207,54 @@ func ReplaceBinary(targetPath string, newContent []byte) error {
 	return nil
 }
 
-// UpgradeHomebrew runs `brew upgrade scribe`.
-func UpgradeHomebrew(ctx context.Context) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "brew", "upgrade", "scribe")
-	out, err := cmd.CombinedOutput()
+// UpgradeHomebrew refreshes Homebrew metadata, runs `brew upgrade scribe`,
+// and verifies the installed formula version matches releaseTag.
+func UpgradeHomebrew(ctx context.Context, releaseTag string) ([]byte, error) {
+	var combined []byte
+
+	updateCmd := exec.CommandContext(ctx, "brew", "update")
+	updateOut, err := updateCmd.CombinedOutput()
+	combined = append(combined, updateOut...)
 	if err != nil {
-		return out, fmt.Errorf("brew upgrade: %s: %w", string(out), err)
+		return combined, fmt.Errorf("brew update: %s: %w", string(updateOut), err)
 	}
-	return out, nil
+
+	upgradeCmd := exec.CommandContext(ctx, "brew", "upgrade", "scribe")
+	upgradeOut, err := upgradeCmd.CombinedOutput()
+	combined = append(combined, upgradeOut...)
+	if err != nil {
+		return combined, fmt.Errorf("brew upgrade: %s: %w", string(upgradeOut), err)
+	}
+
+	listCmd := exec.CommandContext(ctx, "brew", "list", "--versions", "scribe")
+	listOut, err := listCmd.CombinedOutput()
+	combined = append(combined, listOut...)
+	if err != nil {
+		return combined, fmt.Errorf("brew list --versions scribe: %s: %w", string(listOut), err)
+	}
+	if !brewVersionsContain(listOut, releaseTag) {
+		installed := strings.TrimSpace(string(listOut))
+		if installed == "" {
+			installed = "scribe not listed"
+		}
+		return combined, clierrors.Wrap(
+			fmt.Errorf("installed Homebrew scribe version does not match %s (%s)", releaseTag, installed),
+			"UPGRADE_VERSION_MISMATCH",
+			clierrors.ExitConflict,
+			clierrors.WithRemediation("brew tap is stale; run 'brew update' and retry"),
+		)
+	}
+	return combined, nil
+}
+
+func brewVersionsContain(out []byte, releaseTag string) bool {
+	want := strings.TrimPrefix(strings.TrimSpace(releaseTag), "v")
+	for _, field := range strings.Fields(string(out)) {
+		if strings.TrimPrefix(field, "v") == want {
+			return true
+		}
+	}
+	return false
 }
 
 // UpgradeGoInstall runs `go install github.com/Naoray/scribe/cmd/scribe@latest`.
