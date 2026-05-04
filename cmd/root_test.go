@@ -303,6 +303,27 @@ func TestRoot_LegacyCompatBannerThrottleFailureDoesNotBlockCommand(t *testing.T)
 	}
 }
 
+func TestRoot_LegacyCompatBannerEmitsOncePerDay(t *testing.T) {
+	home := setupLegacyCompatBannerHome(t)
+
+	stdout, stderr := executeRootForLegacyCompatBannerTest(t, home, []string{"list", "--json"})
+	if !strings.Contains(stderr, state.LegacyGlobalProjectionCompatBanner) {
+		t.Fatalf("first stderr missing compat banner:\n%s", stderr)
+	}
+	var anyJSON interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &anyJSON); err != nil {
+		t.Fatalf("first stdout not clean JSON: %v\nstdout=%q\nstderr=%q", err, stdout, stderr)
+	}
+
+	stdout, stderr = executeRootForLegacyCompatBannerTest(t, home, []string{"list", "--json"})
+	if strings.Contains(stderr, state.LegacyGlobalProjectionCompatBanner) {
+		t.Fatalf("second stderr should not repeat compat banner:\n%s", stderr)
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &anyJSON); err != nil {
+		t.Fatalf("second stdout not clean JSON: %v\nstdout=%q\nstderr=%q", err, stdout, stderr)
+	}
+}
+
 func TestRoot_LegacyCompatBannerCorruptTimestampDoesNotBlockCommand(t *testing.T) {
 	home := setupLegacyCompatBannerHome(t)
 	timestampPath := filepath.Join(home, ".scribe", "legacy-global-projection-banner.date")
