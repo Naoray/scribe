@@ -114,3 +114,65 @@ func TestResolve(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveMCPServers(t *testing.T) {
+	tests := []struct {
+		name          string
+		projectFile   *projectfile.ProjectFile
+		availableKits map[string]*Kit
+		want          []string
+		wantErr       string
+	}{
+		{
+			name:        "empty project file",
+			projectFile: &projectfile.ProjectFile{},
+			want:        []string{},
+		},
+		{
+			name: "single kit returns its MCP servers",
+			projectFile: &projectfile.ProjectFile{
+				Kits: []string{"agent-runtime"},
+			},
+			availableKits: map[string]*Kit{
+				"agent-runtime": {Name: "agent-runtime", MCPServers: []string{"mempalace", "playwright"}},
+			},
+			want: []string{"mempalace", "playwright"},
+		},
+		{
+			name: "multiple kits union without duplicates",
+			projectFile: &projectfile.ProjectFile{
+				Kits: []string{"memory", "browser"},
+			},
+			availableKits: map[string]*Kit{
+				"memory":  {Name: "memory", MCPServers: []string{"mempalace", "github"}},
+				"browser": {Name: "browser", MCPServers: []string{"playwright", "github"}},
+			},
+			want: []string{"github", "mempalace", "playwright"},
+		},
+		{
+			name: "missing kit returns error with name",
+			projectFile: &projectfile.ProjectFile{
+				Kits: []string{"missing"},
+			},
+			wantErr: "missing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveMCPServers(tt.projectFile, tt.availableKits)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ResolveMCPServers() error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveMCPServers() error = %v", err)
+			}
+			if strings.Join(got, "\x00") != strings.Join(tt.want, "\x00") {
+				t.Fatalf("ResolveMCPServers() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
