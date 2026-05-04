@@ -14,7 +14,10 @@ import (
 
 const toolCodex = "codex"
 
-// CodexTool exposes Scribe-managed skills to Codex via ~/.codex/skills.
+// CodexTool exposes Scribe-managed skills to Codex via ~/.agents/skills,
+// which is the directory Codex's native skill discovery reads from.
+// (Codex still keeps config/state under ~/.codex, but skill projections
+// must land in ~/.agents/skills/<name> to be visible to Codex sessions.)
 type CodexTool struct{}
 
 func (t CodexTool) Name() string { return toolCodex }
@@ -58,6 +61,14 @@ func (t CodexTool) Uninstall(skillName string) error {
 	if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove codex/%s: %w", skillName, err)
 	}
+	// Backwards-compat: also clean up stale projections at the legacy
+	// ~/.codex/skills/<name> path that prior scribe versions created.
+	if home, herr := os.UserHomeDir(); herr == nil {
+		legacyLink := filepath.Join(home, ".codex", "skills", skillName)
+		if err := os.Remove(legacyLink); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove legacy codex/%s: %w", skillName, err)
+		}
+	}
 	return nil
 }
 
@@ -76,13 +87,13 @@ func (t CodexTool) CanonicalTarget(canonicalDir string) (string, bool) {
 
 func codexSkillsDir(projectRoot string) (string, error) {
 	if projectRoot != "" {
-		return filepath.Join(projectRoot, ".codex", "skills"), nil
+		return filepath.Join(projectRoot, ".agents", "skills"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("home dir: %w", err)
 	}
-	return filepath.Join(home, ".codex", "skills"), nil
+	return filepath.Join(home, ".agents", "skills"), nil
 }
 
 func ensureCodexCompatibleSkillMD(skillName, canonicalDir string) error {

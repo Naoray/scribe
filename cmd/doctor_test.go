@@ -97,7 +97,7 @@ func TestDoctorFixRepairsAffectedProjections(t *testing.T) {
 		t.Fatalf("EvalSymlinks canonical: %v", err)
 	}
 
-	codexPath := filepath.Join(home, ".codex", "skills", "recap")
+	codexPath := filepath.Join(home, ".agents", "skills", "recap")
 	resolved, err := filepath.EvalSymlinks(codexPath)
 	if err != nil {
 		t.Fatalf("EvalSymlinks codex: %v", err)
@@ -220,7 +220,7 @@ func TestDoctorFixCleansZeroEffectiveToolDrift(t *testing.T) {
 	}
 
 	home := os.Getenv("HOME")
-	stalePath := filepath.Join(home, ".codex", "skills", "recap")
+	stalePath := filepath.Join(home, ".agents", "skills", "recap")
 	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
 		t.Fatalf("stale projection still exists at %s", stalePath)
 	}

@@ -100,7 +100,7 @@ description: Keep daily notes and summaries.
 # Recap
 `))
 
-	codexPath := filepath.Join(home, ".codex", "skills", "recap")
+	codexPath := filepath.Join(home, ".agents", "skills", "recap")
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -378,7 +378,7 @@ description: Keep daily notes and summaries.
 # Recap
 `))
 
-	codexPath := filepath.Join(home, ".codex", "skills", "recap")
+	codexPath := filepath.Join(home, ".agents", "skills", "recap")
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}

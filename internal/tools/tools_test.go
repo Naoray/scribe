@@ -166,7 +166,7 @@ func TestScribeAgentAlwaysProjectsGlobal(t *testing.T) {
 
 	wants := []string{
 		filepath.Join(home, ".claude", "skills", "scribe"),
-		filepath.Join(home, ".codex", "skills", "scribe"),
+		filepath.Join(home, ".agents", "skills", "scribe"),
 		filepath.Join(home, ".cursor", "rules", "scribe.mdc"),
 	}
 	got := []string{claudePaths[0], codexPaths[0], cursorPaths[0]}
@@ -412,7 +412,7 @@ func TestCodexInstallProjectRootWritesProjectLocalPath(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	want := filepath.Join(projectRoot, ".codex", "skills", "deploy")
+	want := filepath.Join(projectRoot, ".agents", "skills", "deploy")
 	if len(paths) != 1 || paths[0] != want {
 		t.Fatalf("paths = %v, want [%s]", paths, want)
 	}

@@ -35,7 +35,7 @@ func TestReconcileRepairsMissingCodexProjection(t *testing.T) {
 		t.Fatalf("Installed = %d, want 1", summary.Installed)
 	}
 
-	path := filepath.Join(home, ".codex", "skills", "recap")
+	path := filepath.Join(home, ".agents", "skills", "recap")
 	if resolved, err := filepath.EvalSymlinks(path); err != nil || resolved != canonical {
 		t.Fatalf("codex skill link = %q, %v; want %q", resolved, err, canonical)
 	}
@@ -56,7 +56,7 @@ func TestReconcileUsesProjectRootForCodexProjection(t *testing.T) {
 	}
 	canonical, _ = filepath.EvalSymlinks(canonical)
 
-	projectPath := filepath.Join(projectRoot, ".codex", "skills", "recap")
+	projectPath := filepath.Join(projectRoot, ".agents", "skills", "recap")
 	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestReconcileUsesProjectRootForCodexProjection(t *testing.T) {
 	if len(actions) != 1 || actions[0].Kind != reconcile.ActionUnchanged || actions[0].Path != projectPath {
 		t.Fatalf("actions = %+v, want unchanged project projection", actions)
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".codex", "skills", "recap")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(home, ".agents", "skills", "recap")); !os.IsNotExist(err) {
 		t.Fatalf("global codex projection exists or stat failed: %v", err)
 	}
 	if got := st.Installed["recap"].ManagedPaths; len(got) != 1 || got[0] != projectPath {
@@ -185,7 +185,7 @@ func TestReconcileNormalizesSameHashDirectory(t *testing.T) {
 		t.Fatalf("WriteToStore: %v", err)
 	}
 	canonical, _ = filepath.EvalSymlinks(canonical)
-	toolPath := filepath.Join(home, ".codex", "skills", "recap")
+	toolPath := filepath.Join(home, ".agents", "skills", "recap")
 	if err := os.MkdirAll(toolPath, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestReconcilePreservesDivergentDirectoryAsConflict(t *testing.T) {
 	if _, err := tools.WriteToStore("recap", []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\ncanonical\n")}}); err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
-	toolPath := filepath.Join(home, ".codex", "skills", "recap")
+	toolPath := filepath.Join(home, ".agents", "skills", "recap")
 	if err := os.MkdirAll(toolPath, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestReconcileDetectsCodexSubfileDrift(t *testing.T) {
 	if _, err := tools.WriteToStore("recap", files); err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
-	toolPath := filepath.Join(home, ".codex", "skills", "recap")
+	toolPath := filepath.Join(home, ".agents", "skills", "recap")
 	if err := os.MkdirAll(filepath.Join(toolPath, "scripts"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestReconcileRemovesStaleManagedProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteToStore: %v", err)
 	}
-	toolPath := filepath.Join(home, ".codex", "skills", "recap")
+	toolPath := filepath.Join(home, ".agents", "skills", "recap")
 	if err := os.MkdirAll(filepath.Dir(toolPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestReconcileSkipsPackages(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "gstack")); err == nil {
 		t.Error("claude skills/gstack symlink was created for a package")
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".codex", "skills", "gstack")); err == nil {
+	if _, err := os.Lstat(filepath.Join(home, ".agents", "skills", "gstack")); err == nil {
 		t.Error("codex skills/gstack symlink was created for a package")
 	}
 }

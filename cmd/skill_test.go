@@ -184,7 +184,7 @@ func TestSkillRepair_ManagedWins(t *testing.T) {
 
 	home := os.Getenv("HOME")
 	canonical := filepath.Join(home, ".scribe", "skills", "commit")
-	codexPath := filepath.Join(home, ".codex", "skills", "commit")
+	codexPath := filepath.Join(home, ".agents", "skills", "commit")
 	if err := os.MkdirAll(codexPath, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestSkillRepair_ToolWins(t *testing.T) {
 	seedSkillEnv(t)
 
 	home := os.Getenv("HOME")
-	codexPath := filepath.Join(home, ".codex", "skills", "commit")
+	codexPath := filepath.Join(home, ".agents", "skills", "commit")
 	if err := os.MkdirAll(codexPath, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
