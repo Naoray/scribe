@@ -1,4 +1,15 @@
-## Unreleased
+## v1.0.11 — 2026-05-04
+
+### Fixed
+- **Stale `.codex/skills/` symlinks cleaned up on next sync** — older scribe versions created symlinks under `.codex/skills/` instead of `.agents/skills/`. Running `scribe sync` now silently removes those legacy links so Codex no longer sees duplicate or phantom skill entries.
+
+## v1.0.10 — 2026-05-04
+
+### Fixed
+- **Codex skills now project to `.agents/skills/` not `.codex/skills/`** — Codex CLI reads skills from `~/.agents/skills/` (and project-local `.agents/skills/`). Scribe was writing to the wrong path; symlinks now land in the correct location.
+
+### Docs
+- Added `scribe kit create` to the commands reference.
 
 ## v1.0.9 — 2026-05-03
 
