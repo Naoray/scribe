@@ -321,6 +321,40 @@ func TestReconcileRemovesStaleManagedProjection(t *testing.T) {
 	}
 }
 
+func TestReconcileDropsMissingRecordedProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	missingPath := filepath.Join(home, ".anvil", "worktrees", "old", ".cursor", "rules", "recap.mdc")
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"recap": {
+			Revision:     1,
+			Tools:        []string{"cursor"},
+			ToolsMode:    state.ToolsModePinned,
+			Paths:        []string{missingPath},
+			ManagedPaths: []string{missingPath},
+		},
+	}}
+
+	engine := reconcile.Engine{Tools: nil, Now: func() time.Time { return time.Unix(5, 0).UTC() }}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Installed != 0 || summary.Relinked != 0 || summary.Removed != 0 || len(summary.Conflicts) != 0 {
+		t.Fatalf("summary = %+v, want missing recorded projection dropped silently", summary)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("actions = %+v, want none for missing recorded projection", actions)
+	}
+	if got := st.Installed["recap"].ManagedPaths; len(got) != 0 {
+		t.Fatalf("ManagedPaths = %v, want empty", got)
+	}
+	if got := st.Installed["recap"].Paths; len(got) != 0 {
+		t.Fatalf("Paths = %v, want empty", got)
+	}
+}
+
 func TestReconcileSkipsPackages(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
