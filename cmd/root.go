@@ -63,6 +63,22 @@ const (
 
 type legacyGlobalProjectionCompatKey struct{}
 
+func addNoInteractionFlag(cmd *cobra.Command, usage string, keepLegacyShort bool) {
+	cmd.Flags().BoolP("no-interaction", "n", false, usage)
+	if keepLegacyShort {
+		cmd.Flags().BoolP("yes", "y", false, "Deprecated alias for --no-interaction")
+	} else {
+		cmd.Flags().Bool("yes", false, "Deprecated alias for --no-interaction")
+	}
+	_ = cmd.Flags().MarkHidden("yes")
+}
+
+func noInteractionFlagPassed(cmd *cobra.Command) bool {
+	noInteraction, _ := cmd.Flags().GetBool("no-interaction")
+	yes, _ := cmd.Flags().GetBool("yes")
+	return noInteraction || yes
+}
+
 func Execute() {
 	err := rootCmd.Execute()
 	mode := envFromArgs(os.Args)

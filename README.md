@@ -64,7 +64,7 @@ Repo: https://github.com/Naoray/scribe (setup steps: /blob/main/SKILL.md)
 
 Please set it up for me:
   1. If `scribe --version` fails, install it (prefer brew, fall back to release binary, last resort `go install`).
-  2. Register Scribe's own agent-facing skill: `scribe add Naoray/scribe:scribe --yes --json`
+  2. Register Scribe's own agent-facing skill: `scribe add Naoray/scribe:scribe --no-interaction --json`
   3. Show me `scribe list --json` to confirm.
 ```
 
@@ -79,7 +79,7 @@ scribe show           # show the resolved project skill set and per-agent budget
 
 That is enough to start managing existing local skills between tools. Use `scribe tools` to see detected agents, and `scribe skill tools <name>` to enable, disable, or reset projection for one skill.
 
-Drop a `.scribe.yaml` at the repo root to declare which kits, snippets, extra skills, or MCP server names this project wants — `scribe sync` then projects exactly that set into `<project>/.claude/skills/` + `<project>/.agents/skills/`, writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus `.cursor/rules/<name>.mdc`, and records MCP server names in `.claude/settings.json` (definitions must already exist in `.mcp.json`; scribe does not start MCP processes). See [`docs/projects-and-kits.md`](docs/projects-and-kits.md).
+Drop a `.scribe.yaml` at the repo root to declare which kits, snippets, extra skills, or MCP server names this project wants — `scribe sync` then projects exactly that set into `<project>/.claude/skills/` + `<project>/.agents/skills/`, writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus `.cursor/rules/<name>.mdc`, and scopes selected MCP definitions from `.mcp.json` into Claude, Codex, and Cursor project config. Scribe does not start MCP processes. See [`docs/projects-and-kits.md`](docs/projects-and-kits.md).
 
 Registries are for adding shared/upstream skills. Connect one when you want more than your local set:
 

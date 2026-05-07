@@ -64,7 +64,7 @@ func TestSyncPartialSingleEnvelopeAndStateSave(t *testing.T) {
 
 func TestAdoptPartialSingleEnvelope(t *testing.T) {
 	home := setupAdoptPartialHome(t)
-	stdout, stderr, code := runScribeHelperWithHome(t, home, []string{"adopt", "--yes", "--json"})
+	stdout, stderr, code := runScribeHelperWithHome(t, home, []string{"adopt", "--no-interaction", "--json"})
 
 	assertPartialSubprocessEnvelope(t, stdout, stderr, code)
 }

@@ -43,7 +43,7 @@ Do not run multiple global-to-projects migrations concurrently.
 
 Examples:
   scribe migrate global-to-projects --project . --dry-run
-  scribe migrate global-to-projects --project . --yes
+  scribe migrate global-to-projects --project . --no-interaction
   scribe migrate global-to-projects --undo`,
 		Args: cobra.NoArgs,
 		RunE: runGlobalToProjects,
@@ -51,7 +51,7 @@ Examples:
 	cmd.Flags().Bool("dry-run", false, "Preview migration without writing .scribe.yaml or removing global symlinks")
 	cmd.Flags().Bool("force", false, "Allow migration even if a project exceeds an agent skill budget")
 	cmd.Flags().Bool("undo", false, "Restore the latest global-to-projects migration snapshot")
-	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
+	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	cmd.Flags().StringArray("project", nil, "Project directory to keep the current global skill set (repeatable; skips prompt)")
 	return markJSONSupported(cmd)
 }
@@ -64,7 +64,7 @@ func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector pr
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	forceBudget, _ := cmd.Flags().GetBool("force")
 	undo, _ := cmd.Flags().GetBool("undo")
-	yes, _ := cmd.Flags().GetBool("yes")
+	yes := noInteractionFlagPassed(cmd)
 	jsonFlag := jsonFlagPassed(cmd)
 	projectFlags, _ := cmd.Flags().GetStringArray("project")
 

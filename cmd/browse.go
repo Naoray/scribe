@@ -33,7 +33,7 @@ func newBrowseCommand() *cobra.Command {
 	cmd.Flags().String("query", "", "Filter remote skills by query")
 	cmd.Flags().String("install", "", "Install a skill by exact name or owner/repo:skill")
 	cmd.Flags().String("registry", "", "Limit browse/install to one connected registry")
-	cmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	return cmd
 }
 
@@ -41,7 +41,7 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 	query, _ := cmd.Flags().GetString("query")
 	installRef, _ := cmd.Flags().GetString("install")
 	registryFilter, _ := cmd.Flags().GetString("registry")
-	yes, _ := cmd.Flags().GetBool("yes")
+	yes := noInteractionFlagPassed(cmd)
 	useJSON, _ := cmd.Flags().GetBool("json")
 	useJSON = useJSON || !isatty.IsTerminal(os.Stdout.Fd())
 

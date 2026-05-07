@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"sort"
 
 	"charm.land/huh/v2"
+	"github.com/BurntSushi/toml"
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/adopt"
@@ -43,7 +45,7 @@ func SyncSteps() []Step {
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
 		{"ResolveMCPServers", StepResolveMCPServers},
-		{"ProjectClaudeMCPServers", StepProjectClaudeMCPServers},
+		{"ProjectMCPServers", StepProjectMCPServers},
 		{"ProjectSnippets", StepProjectSnippets},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
@@ -61,7 +63,7 @@ func SyncTail() []Step {
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
 		{"ResolveMCPServers", StepResolveMCPServers},
-		{"ProjectClaudeMCPServers", StepProjectClaudeMCPServers},
+		{"ProjectMCPServers", StepProjectMCPServers},
 		{"ProjectSnippets", StepProjectSnippets},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
@@ -208,6 +210,37 @@ func StepResolveMCPServers(_ context.Context, b *Bag) error {
 	return nil
 }
 
+// StepProjectMCPServers writes project-resolved MCP server selections into each
+// active tool's project config. Server definitions remain in .mcp.json for
+// Claude, and are copied from .mcp.json for Codex and Cursor project configs.
+func StepProjectMCPServers(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" || !b.ProjectMCPServersEnabled {
+		return nil
+	}
+	if hasTool(b.Tools, "claude") {
+		if err := projectClaudeMCPServers(b.ProjectRoot, b.ProjectMCPServers); err != nil {
+			return fmt.Errorf("project claude MCP servers: %w", err)
+		}
+	}
+	if hasTool(b.Tools, "codex") || hasTool(b.Tools, "cursor") {
+		definitions, err := loadProjectMCPDefinitions(b.ProjectRoot, b.ProjectMCPServers)
+		if err != nil {
+			return err
+		}
+		if hasTool(b.Tools, "codex") {
+			if err := projectCodexMCPServers(b.ProjectRoot, b.ProjectMCPServers, definitions); err != nil {
+				return fmt.Errorf("project codex MCP servers: %w", err)
+			}
+		}
+		if hasTool(b.Tools, "cursor") {
+			if err := projectCursorMCPServers(b.ProjectRoot, b.ProjectMCPServers, definitions); err != nil {
+				return fmt.Errorf("project cursor MCP servers: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 // StepProjectClaudeMCPServers writes project-resolved MCP server approvals into
 // shared project Claude settings. Server definitions remain in .mcp.json.
 func StepProjectClaudeMCPServers(_ context.Context, b *Bag) error {
@@ -306,6 +339,34 @@ func removeLegacyCursorSnippets(projectRoot string, snippets []snippet.Snippet, 
 	return paths, nil
 }
 
+type projectMCPFile struct {
+	MCPServers map[string]map[string]any `json:"mcpServers"`
+}
+
+func loadProjectMCPDefinitions(projectRoot string, servers []string) (map[string]map[string]any, error) {
+	if len(servers) == 0 {
+		return map[string]map[string]any{}, nil
+	}
+	path := filepath.Join(projectRoot, ".mcp.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var file projectMCPFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	selected := make(map[string]map[string]any, len(servers))
+	for _, server := range sortedStrings(servers) {
+		def, ok := file.MCPServers[server]
+		if !ok {
+			return nil, fmt.Errorf("MCP server %q declared by .scribe.yaml/kits but missing from .mcp.json", server)
+		}
+		selected[server] = cloneMap(def)
+	}
+	return selected, nil
+}
+
 func projectClaudeMCPServers(projectRoot string, servers []string) error {
 	settingsDir := filepath.Join(projectRoot, ".claude")
 	settingsPath := filepath.Join(settingsDir, "settings.json")
@@ -352,6 +413,192 @@ func projectClaudeMCPServers(projectRoot string, servers []string) error {
 	}
 	if err := os.Rename(tmpPath, settingsPath); err != nil {
 		return fmt.Errorf("save claude settings: %w", err)
+	}
+	return nil
+}
+
+func projectCodexMCPServers(projectRoot string, servers []string, definitions map[string]map[string]any) error {
+	configDir := filepath.Join(projectRoot, ".codex")
+	configPath := filepath.Join(configDir, "config.toml")
+	sidecarPath := filepath.Join(configDir, "scribe-mcp.json")
+
+	config := map[string]any{}
+	data, err := os.ReadFile(configPath)
+	if err == nil && len(bytes.TrimSpace(data)) > 0 {
+		if err := toml.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("parse %s: %w", configPath, err)
+		}
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+
+	mcpServers := map[string]any{}
+	if existing, ok := config["mcp_servers"].(map[string]any); ok {
+		for name, def := range existing {
+			mcpServers[name] = def
+		}
+	}
+	managed, err := readManagedMCPServers(sidecarPath)
+	if err != nil {
+		return err
+	}
+	for _, name := range managed {
+		delete(mcpServers, name)
+	}
+	for _, name := range sortedStrings(servers) {
+		mcpServers[name] = codexMCPDefinition(definitions[name])
+	}
+	config["mcp_servers"] = mcpServers
+
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return fmt.Errorf("create codex config dir: %w", err)
+	}
+	data, err = toml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("encode codex config: %w", err)
+	}
+	if err := atomicWriteFile(configPath, data, ".config.toml.*.tmp"); err != nil {
+		return fmt.Errorf("save codex config: %w", err)
+	}
+	if err := writeManagedMCPServers(sidecarPath, servers); err != nil {
+		return err
+	}
+	return nil
+}
+
+func projectCursorMCPServers(projectRoot string, servers []string, definitions map[string]map[string]any) error {
+	configDir := filepath.Join(projectRoot, ".cursor")
+	configPath := filepath.Join(configDir, "mcp.json")
+	sidecarPath := filepath.Join(configDir, "scribe-mcp.json")
+
+	config := map[string]any{}
+	data, err := os.ReadFile(configPath)
+	if err == nil && len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("parse %s: %w", configPath, err)
+		}
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+
+	mcpServers := map[string]any{}
+	if existing, ok := config["mcpServers"].(map[string]any); ok {
+		for name, def := range existing {
+			mcpServers[name] = def
+		}
+	}
+	managed, err := readManagedMCPServers(sidecarPath)
+	if err != nil {
+		return err
+	}
+	for _, name := range managed {
+		delete(mcpServers, name)
+	}
+	for _, name := range sortedStrings(servers) {
+		mcpServers[name] = cloneMap(definitions[name])
+	}
+	config["mcpServers"] = mcpServers
+
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return fmt.Errorf("create cursor config dir: %w", err)
+	}
+	data, err = json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode cursor config: %w", err)
+	}
+	data = append(data, '\n')
+	if err := atomicWriteFile(configPath, data, ".mcp.json.*.tmp"); err != nil {
+		return fmt.Errorf("save cursor config: %w", err)
+	}
+	if err := writeManagedMCPServers(sidecarPath, servers); err != nil {
+		return err
+	}
+	return nil
+}
+
+type managedMCPProjection struct {
+	Servers []string `json:"servers"`
+}
+
+func readManagedMCPServers(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var projection managedMCPProjection
+	if err := json.Unmarshal(data, &projection); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return projection.Servers, nil
+}
+
+func writeManagedMCPServers(path string, servers []string) error {
+	data, err := json.MarshalIndent(managedMCPProjection{Servers: sortedStrings(servers)}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode managed MCP projection: %w", err)
+	}
+	data = append(data, '\n')
+	if err := atomicWriteFile(path, data, ".scribe-mcp.json.*.tmp"); err != nil {
+		return fmt.Errorf("save managed MCP projection: %w", err)
+	}
+	return nil
+}
+
+func codexMCPDefinition(def map[string]any) map[string]any {
+	out := cloneMap(def)
+	if headers, ok := out["headers"]; ok {
+		if _, exists := out["http_headers"]; !exists {
+			out["http_headers"] = headers
+		}
+		delete(out, "headers")
+	}
+	if _, ok := out["enabled"]; !ok {
+		out["enabled"] = true
+	}
+	delete(out, "type")
+	return out
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func sortedStrings(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return out
+}
+
+func atomicWriteFile(path string, data []byte, pattern string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create %s dir: %w", filepath.Dir(path), err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), pattern)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
 	}
 	return nil
 }
@@ -507,7 +754,7 @@ func StepAdopt(_ context.Context, b *Bag) error {
 	if mode == "prompt" {
 		if !isTTY || b.JSONFlag {
 			b.Formatter.OnAdoptionSkipped(
-				`adoption mode is "prompt" but stdin is not a terminal — skipping adoption; run "scribe adopt --yes" or set adoption.mode to auto/off`,
+				`adoption mode is "prompt" but stdin is not a terminal — skipping adoption; run "scribe adopt --no-interaction" or set adoption.mode to auto/off`,
 			)
 		} else {
 			b.Formatter.OnAdoptionSkipped(`prompt mode — run 'scribe adopt' to review candidates`)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/state"
@@ -590,5 +591,143 @@ func TestStepProjectClaudeMCPServers_MalformedSettingsFailsWithoutOverwrite(t *t
 	}
 	if string(data) != string(original) {
 		t.Fatalf("settings overwritten: %q, want %q", data, original)
+	}
+}
+
+func TestStepProjectMCPServers_ProjectsCodexAndCursorFromMCPJSON(t *testing.T) {
+	projectDir := t.TempDir()
+	mcpJSON := `{
+  "mcpServers": {
+    "mempalace": {
+      "command": "mempalace",
+      "args": ["serve"],
+      "env": {"TOKEN": "abc"}
+    },
+    "figma": {
+      "url": "https://mcp.figma.com/mcp",
+      "headers": {"X-Figma-Region": "us-east-1"}
+    },
+    "unused": {
+      "command": "unused"
+    }
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(projectDir, ".mcp.json"), []byte(mcpJSON), 0o644); err != nil {
+		t.Fatalf("write .mcp.json: %v", err)
+	}
+
+	cursorDir := filepath.Join(projectDir, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+		t.Fatalf("mkdir cursor dir: %v", err)
+	}
+	existingCursor := `{
+  "mcpServers": {
+    "manual": {"command": "manual"},
+    "old-managed": {"command": "old"}
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(cursorDir, "mcp.json"), []byte(existingCursor), 0o644); err != nil {
+		t.Fatalf("write cursor mcp: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cursorDir, "scribe-mcp.json"), []byte(`{"servers":["old-managed"]}`), 0o644); err != nil {
+		t.Fatalf("write cursor sidecar: %v", err)
+	}
+
+	codexDir := filepath.Join(projectDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatalf("mkdir codex dir: %v", err)
+	}
+	existingCodex := `[mcp_servers.manual]
+command = "manual"
+
+[mcp_servers.old-managed]
+command = "old"
+`
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(existingCodex), 0o644); err != nil {
+		t.Fatalf("write codex config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "scribe-mcp.json"), []byte(`{"servers":["old-managed"]}`), 0o644); err != nil {
+		t.Fatalf("write codex sidecar: %v", err)
+	}
+
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"figma", "mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    []tools.Tool{tools.CodexTool{}, tools.CursorTool{}},
+	}
+	if err := StepProjectMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectMCPServers: %v", err)
+	}
+
+	cursorData, err := os.ReadFile(filepath.Join(cursorDir, "mcp.json"))
+	if err != nil {
+		t.Fatalf("read cursor mcp: %v", err)
+	}
+	var cursorConfig struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(cursorData, &cursorConfig); err != nil {
+		t.Fatalf("parse cursor mcp: %v", err)
+	}
+	if _, ok := cursorConfig.MCPServers["manual"]; !ok {
+		t.Fatalf("cursor manual server not preserved: %#v", cursorConfig.MCPServers)
+	}
+	if _, ok := cursorConfig.MCPServers["old-managed"]; ok {
+		t.Fatalf("cursor old managed server not removed: %#v", cursorConfig.MCPServers)
+	}
+	if got := cursorConfig.MCPServers["figma"]["url"]; got != "https://mcp.figma.com/mcp" {
+		t.Fatalf("cursor figma url = %v", got)
+	}
+	if got := cursorConfig.MCPServers["mempalace"]["command"]; got != "mempalace" {
+		t.Fatalf("cursor mempalace command = %v", got)
+	}
+
+	codexData, err := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	if err != nil {
+		t.Fatalf("read codex config: %v", err)
+	}
+	var codexConfig struct {
+		MCPServers map[string]map[string]any `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(codexData, &codexConfig); err != nil {
+		t.Fatalf("parse codex config: %v", err)
+	}
+	if _, ok := codexConfig.MCPServers["manual"]; !ok {
+		t.Fatalf("codex manual server not preserved: %#v", codexConfig.MCPServers)
+	}
+	if _, ok := codexConfig.MCPServers["old-managed"]; ok {
+		t.Fatalf("codex old managed server not removed: %#v", codexConfig.MCPServers)
+	}
+	if got := codexConfig.MCPServers["figma"]["url"]; got != "https://mcp.figma.com/mcp" {
+		t.Fatalf("codex figma url = %v", got)
+	}
+	if _, ok := codexConfig.MCPServers["figma"]["headers"]; ok {
+		t.Fatalf("codex headers key should be converted: %#v", codexConfig.MCPServers["figma"])
+	}
+	if _, ok := codexConfig.MCPServers["figma"]["http_headers"]; !ok {
+		t.Fatalf("codex http_headers missing: %#v", codexConfig.MCPServers["figma"])
+	}
+	if got := codexConfig.MCPServers["mempalace"]["command"]; got != "mempalace" {
+		t.Fatalf("codex mempalace command = %v", got)
+	}
+}
+
+func TestStepProjectMCPServers_RequiresDefinitionsForCodexCursor(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, ".mcp.json"), []byte(`{"mcpServers":{}}`), 0o644); err != nil {
+		t.Fatalf("write .mcp.json: %v", err)
+	}
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    []tools.Tool{tools.CodexTool{}},
+	}
+	err := StepProjectMCPServers(context.Background(), b)
+	if err == nil || !strings.Contains(err.Error(), "missing from .mcp.json") {
+		t.Fatalf("StepProjectMCPServers error = %v, want missing definition error", err)
 	}
 }

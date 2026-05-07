@@ -15,7 +15,7 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe install --all` | Install every catalog entry from a registry in one shot |
 | `scribe adopt [name]` | Import hand-rolled skills from `~/.claude/skills` etc. into the canonical store |
 | `scribe remove <skill>` | Remove a skill from this machine (records a deny-list entry so it does not come back on the next sync) |
-| `scribe sync` | Reconcile the current project: resolve `.scribe.yaml` (kits, snippets, MCP, add/remove), project skills into `<project>/.claude/skills/` and `<project>/.agents/skills/`, write snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`, and record MCP server names in `.claude/settings.json` |
+| `scribe sync` | Reconcile the current project: resolve `.scribe.yaml` (kits, snippets, MCP, add/remove), project skills into `<project>/.claude/skills/` and `<project>/.agents/skills/`, write snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`, and scope selected `.mcp.json` definitions into Claude, Codex, and Cursor project config |
 | `scribe show` | Show the resolved project skill set and per-agent budgets |
 | `scribe check` | Check connected registries for lockfile updates without modifying anything |
 | `scribe update --apply` | Refresh registry lockfiles after review (omit `--apply` for a dry-run report) |

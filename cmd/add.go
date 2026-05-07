@@ -65,12 +65,12 @@ Examples:
   scribe add                          # browse everything
   scribe add react                    # search "react"
   scribe add antfu/skills:nuxt        # direct install
-  scribe add antfu/skills:nuxt --yes  # non-interactive
+  scribe add antfu/skills:nuxt --no-interaction  # non-interactive
   scribe add react --json             # machine-readable search`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runAdd,
 	}
-	cmd.Flags().Bool("yes", false, "Skip confirmation prompts")
+	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
 	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
@@ -79,7 +79,7 @@ Examples:
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
-	skipConfirm, _ := cmd.Flags().GetBool("yes")
+	skipConfirm := noInteractionFlagPassed(cmd)
 	jsonFlag := jsonFlagPassed(cmd)
 	registryFilter, _ := cmd.Flags().GetString("registry")
 	forceBudget, _ := cmd.Flags().GetBool("force")

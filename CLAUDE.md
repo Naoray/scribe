@@ -55,9 +55,9 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 
 | Command | Flags | Output schema |
 |---|---|---|
-| `scribe add` | --alias, --force, --json, --registry, --yes | yes |
-| `scribe adopt` | --dry-run, --json, --verbose, --yes | yes |
-| `scribe browse` | --install, --json, --query, --registry, --yes | no |
+| `scribe add` | --alias, --force, --json, --no-interaction, --registry | yes |
+| `scribe adopt` | --dry-run, --json, --no-interaction, --verbose | yes |
+| `scribe browse` | --install, --json, --no-interaction, --query, --registry | no |
 | `scribe check` | --json | yes |
 | `scribe config adoption` | --add-path, --json, --mode, --remove-path | no |
 | `scribe config set editor` | --json | no |
@@ -71,11 +71,12 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe init` | --force, --json | yes |
 | `scribe install` | --alias, --all, --force, --json, --registry | no |
 | `scribe kit create` | --description, --force, --json, --mcp-servers, --registry, --skills | no |
+| `scribe kit` | --json | no |
 | `scribe list` | --fields, --json, --registry, --remote | yes |
-| `scribe migrate global-to-projects` | --dry-run, --force, --json, --project, --undo, --yes | yes |
+| `scribe migrate global-to-projects` | --dry-run, --force, --json, --no-interaction, --project, --undo | yes |
 | `scribe migrate` | --json | no |
 | `scribe push` | --json | yes |
-| `scribe registry add` | --install, --json, --registry, --yes | no |
+| `scribe registry add` | --install, --json, --no-interaction, --registry | no |
 | `scribe registry connect` | --install-all, --json | yes |
 | `scribe registry create` | --json, --owner, --private, --repo, --team | no |
 | `scribe registry disable` | --json | no |
@@ -85,7 +86,7 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe registry migrate` | --json | no |
 | `scribe registry resync` | --json | no |
 | `scribe registry` | --json | no |
-| `scribe remove` | --json, --yes | no |
+| `scribe remove` | --json, --no-interaction | no |
 | `scribe resolve` | --json, --ours, --theirs | no |
 | `scribe restore` | --json | no |
 | `scribe schema` | --all, --json, --markdown | no |
@@ -95,7 +96,7 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe skill tools` | --disable, --enable, --json, --reset | no |
 | `scribe skill` | --json | no |
 | `scribe status` | --json | yes |
-| `scribe sync` | --alias, --all, --force, --json, --registry, --trust-all | yes |
+| `scribe sync` | --alias, --force, --json, --registry, --trust-all | yes |
 | `scribe tools add` | --detect, --install, --json, --path, --uninstall | no |
 | `scribe tools disable` | --json | no |
 | `scribe tools enable` | --json | no |

@@ -43,7 +43,7 @@ Examples:
 		Args: cobra.MaximumNArgs(1),
 		RunE: runRegistryAdd,
 	}
-	cmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Target registry (owner/repo)")
 	cmd.Flags().StringArray("install", nil, "Per-tool install command for package refs (tool=command, repeatable)")
@@ -51,7 +51,7 @@ Examples:
 }
 
 func runRegistryAdd(cmd *cobra.Command, args []string) error {
-	addYes, _ := cmd.Flags().GetBool("yes")
+	addYes := noInteractionFlagPassed(cmd)
 	addJSON, _ := cmd.Flags().GetBool("json")
 	addRegistry, _ := cmd.Flags().GetString("registry")
 	installFlags, _ := cmd.Flags().GetStringArray("install")
