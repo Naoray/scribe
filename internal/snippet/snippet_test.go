@@ -34,8 +34,12 @@ func TestProjectWritesManagedBlocksIdempotently(t *testing.T) {
 		t.Fatalf("CLAUDE.md missing user content or snippet:\n%s", first)
 	}
 
-	if _, err := Project(project, []Snippet{sn}, []string{"claude", "codex"}); err != nil {
+	paths, err = Project(project, []Snippet{sn}, []string{"claude", "codex"})
+	if err != nil {
 		t.Fatalf("Project again: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("paths = %v, want no changed targets", paths)
 	}
 	second, err := os.ReadFile(filepath.Join(project, "CLAUDE.md"))
 	if err != nil {
@@ -133,8 +137,12 @@ func TestProjectWritesCursorRule(t *testing.T) {
 		Body:        []byte("# Agent Commit Discipline\n"),
 	}
 
-	if _, err := Project(project, []Snippet{sn}, []string{"cursor"}); err != nil {
+	paths, err := Project(project, []Snippet{sn}, []string{"cursor"})
+	if err != nil {
 		t.Fatalf("Project: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("paths = %v, want one changed target", paths)
 	}
 	data, err := os.ReadFile(filepath.Join(project, ".cursor", "rules", "commit-discipline.mdc"))
 	if err != nil {
@@ -142,6 +150,13 @@ func TestProjectWritesCursorRule(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "alwaysApply: false") || !strings.Contains(string(data), "Agent Commit Discipline") {
 		t.Fatalf("cursor rule missing expected content:\n%s", data)
+	}
+	paths, err = Project(project, []Snippet{sn}, []string{"cursor"})
+	if err != nil {
+		t.Fatalf("Project again: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("paths = %v, want no changed targets", paths)
 	}
 }
 

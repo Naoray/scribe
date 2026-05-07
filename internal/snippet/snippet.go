@@ -271,6 +271,13 @@ func writeCursorRules(projectRoot string, snippets []Snippet) ([]string, error) 
 		if err != nil {
 			return paths, err
 		}
+		existing, err := os.ReadFile(path)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return paths, fmt.Errorf("read cursor snippet %q: %w", sn.Name, err)
+		}
+		if bytes.Equal(existing, content) {
+			continue
+		}
 		if err := os.WriteFile(path, content, 0o644); err != nil {
 			return paths, fmt.Errorf("write cursor snippet %q: %w", sn.Name, err)
 		}
@@ -370,6 +377,9 @@ func writeManagedBlocks(path string, snippets []Snippet) (string, error) {
 	}
 	next := renderManagedBlocks(string(existing), snippets)
 	if next == "" && len(existing) == 0 {
+		return "", nil
+	}
+	if string(existing) == next {
 		return "", nil
 	}
 	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
