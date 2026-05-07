@@ -526,10 +526,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		KitFilter:        b.KitFilter,
 		KitFilterEnabled: b.KitFilterEnabled,
 		ProjectRoot:      b.ProjectRoot,
-		// Skip missing skills when no explicit filter/--all: scribe sync only updates
-		// what's already installed. scribe install sets SkillFilter or InstallAllFlag
-		// to opt-in to installing new skills.
-		SkipMissing: !b.InstallAllFlag && len(b.SkillFilter) == 0,
+		SkipMissing:      workflowSkipMissing(b),
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:
@@ -630,6 +627,21 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	}
 
 	return nil
+}
+
+func workflowSkipMissing(b *Bag) bool {
+	if b == nil {
+		return true
+	}
+	if b.InstallAllFlag || len(b.SkillFilter) > 0 {
+		return false
+	}
+	// A project .scribe.yaml is declarative intent. Plain `scribe sync` should
+	// converge the kit-resolved project loadout, including missing skills.
+	if b.KitFilterEnabled {
+		return false
+	}
+	return true
 }
 
 func PromptNameConflictResolution(conflict sync.NameConflict) (sync.NameConflictResolution, error) {

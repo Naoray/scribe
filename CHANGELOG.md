@@ -4,6 +4,7 @@
 - **Snippets now project during `scribe sync`** — `.scribe.yaml` `snippets:` entries load `~/.scribe/snippets/<name>.md`, strip frontmatter, and write managed rules into `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and Cursor `.cursor/rules/*.mdc` targets.
 - **Project files can declare MCP servers directly** — `.scribe.yaml` now supports `mcp:` and `mcp_servers:` alongside kit-declared MCP server names.
 - **`scribe show` and `scribe explain` understand snippets** — project snippets show with byte size/targets, and `scribe explain <snippet>` can render snippet source.
+- **Plain `scribe sync` converges project kits** — when `.scribe.yaml` declares kits, sync installs missing kit-resolved skills without requiring an extra flag.
 
 ## v1.0.13 — 2026-05-04
 

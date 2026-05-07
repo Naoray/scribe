@@ -118,6 +118,21 @@ func TestStepResolveKitFilter_WithProjectFile(t *testing.T) {
 	}
 }
 
+func TestWorkflowSkipMissingInstallsProjectKitSkills(t *testing.T) {
+	if workflowSkipMissing(&Bag{KitFilterEnabled: true}) {
+		t.Fatal("project kit sync should not skip missing skills")
+	}
+	if !workflowSkipMissing(&Bag{}) {
+		t.Fatal("legacy sync should skip missing skills")
+	}
+	if workflowSkipMissing(&Bag{SkillFilter: []string{"recap"}}) {
+		t.Fatal("explicit skill filter should not skip missing skills")
+	}
+	if workflowSkipMissing(&Bag{InstallAllFlag: true}) {
+		t.Fatal("--all should not skip missing skills")
+	}
+}
+
 func TestStepResolveKitFilter_EmptyKitResolvesZeroSkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
