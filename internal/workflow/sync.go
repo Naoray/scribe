@@ -166,7 +166,7 @@ func StepResolveKitFilter(_ context.Context, b *Bag) error {
 	return nil
 }
 
-// ResolveProjectMCPServers resolves kit-declared MCP server names for the
+// ResolveProjectMCPServers resolves project- and kit-declared MCP server names for the
 // current project. All errors are non-fatal; a missing or malformed project
 // file returns (nil, false) so callers do not write runtime settings yet.
 func ResolveProjectMCPServers() (servers []string, enabled bool) {
@@ -198,8 +198,8 @@ func ResolveProjectMCPServers() (servers []string, enabled bool) {
 }
 
 // StepResolveMCPServers loads the project's .scribe.yaml and resolves
-// kit-declared MCP server names into read-only workflow state. It does not
-// write any agent runtime settings.
+// project MCP server names into read-only workflow state. It does not write
+// any agent runtime settings.
 func StepResolveMCPServers(_ context.Context, b *Bag) error {
 	if b.ProjectRoot == "" {
 		return nil
@@ -208,7 +208,7 @@ func StepResolveMCPServers(_ context.Context, b *Bag) error {
 	return nil
 }
 
-// StepProjectClaudeMCPServers writes kit-resolved MCP server approvals into
+// StepProjectClaudeMCPServers writes project-resolved MCP server approvals into
 // shared project Claude settings. Server definitions remain in .mcp.json.
 func StepProjectClaudeMCPServers(_ context.Context, b *Bag) error {
 	if b.ProjectRoot == "" || !b.ProjectMCPServersEnabled || !hasTool(b.Tools, "claude") {
@@ -280,7 +280,7 @@ func projectClaudeMCPServers(projectRoot string, servers []string) error {
 		return fmt.Errorf("read %s: %w", settingsPath, err)
 	}
 
-	resolved := append([]string(nil), servers...)
+	resolved := append([]string{}, servers...)
 	sort.Strings(resolved)
 	settings["enableAllProjectMcpServers"] = false
 	settings["enabledMcpjsonServers"] = resolved

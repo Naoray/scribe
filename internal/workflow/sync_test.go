@@ -446,6 +446,55 @@ func TestStepProjectClaudeMCPServers_WritesProjectSettings(t *testing.T) {
 	}
 }
 
+func TestProjectClaudeMCPServers_UpdatesWhenProjectMCPChanges(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	projectPath := filepath.Join(projectDir, projectfile.Filename)
+	if err := os.WriteFile(projectPath, []byte("mcp:\n  - mempalace\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	t.Chdir(projectDir)
+
+	b := &Bag{
+		ProjectRoot: projectDir,
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+	}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers initial: %v", err)
+	}
+	if err := StepProjectClaudeMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectClaudeMCPServers initial: %v", err)
+	}
+
+	if err := os.WriteFile(projectPath, []byte("mcp: []\n"), 0o644); err != nil {
+		t.Fatalf("clear project mcp: %v", err)
+	}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers cleared: %v", err)
+	}
+	if err := StepProjectClaudeMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectClaudeMCPServers cleared: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(projectDir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse settings: %v", err)
+	}
+	servers, ok := got["enabledMcpjsonServers"].([]any)
+	if !ok {
+		t.Fatalf("enabledMcpjsonServers = %T, want array", got["enabledMcpjsonServers"])
+	}
+	if len(servers) != 0 {
+		t.Fatalf("enabledMcpjsonServers = %v, want empty after clearing mcp", servers)
+	}
+}
+
 func TestStepProjectClaudeMCPServers_SkipsWhenClaudeInactive(t *testing.T) {
 	projectDir := t.TempDir()
 	b := &Bag{
