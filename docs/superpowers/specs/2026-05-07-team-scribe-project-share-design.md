@@ -1,11 +1,12 @@
 # Team-Sharable Scribe Projects — Design
 
-Status: draft v3 (2026-05-07, second counselor pass)
+Status: draft v3.1 (2026-05-07, third counselor pass — final polish)
 Scope: v1 — kits + skills only. Snippets and MCP server definitions deferred to v2.
 
 Revision history:
 - v1 → v2 (2026-05-07): rewrite after Opus + Codex counselor review. Reuses `internal/lockfile`. Adds explicit `OriginProject`. Picks `lockfile.HashFiles` for content hashing. Adds drift matrix, trust model, and Frankenstein-folder protection. Removes `scribe sync --update-lock`. Hardens Boost interop against `replaceSymlink`'s real-dir refusal.
 - v2 → v3 (2026-05-07): second counselor pass. Extends `ProjectLockfile.Entry` with a frozen fetch descriptor (path, source repo, type, per-tool install commands) so teammate sync no longer depends on a live registry manifest. Defines the content-hash file set explicitly with git-tracked-only selection and LF normalization. Hardens `OriginRegistry` classification against zero-value legacy state. Threads Boost ownership through `state.InstalledSkill.ExcludedTools` so reconcile and installer agree. Unifies `CommandHash` on the lockfile-format SHA-256. Distinguishes project-lock validation from registry-side `validateInstalledAgainstLock`. Specifies qualified `add:` parsing. Adds `state.VendorState` for first-seen tracking. Adds project-skill command semantics. Drops the spurious `OriginAdopted` row.
+- v3 → v3.1 (2026-05-07): third counselor pass — final polish. R3-1: hash-set git mode now uses `git ls-files --cached --others --exclude-standard` so freshly-vendored-but-not-yet-staged files are included (closes the first-author-run blocker). R3-2: `ExcludedTools` moves from `state.InstalledSkill` (global) to `state.ProjectionEntry` (per-project), and the filter is applied in `EffectiveToolsForProject` as well as `EffectiveTools`. R3-3: split package `install_command_hash` semantics — lockfile self-consistency mismatch is a validation error (exit 8); approval-state-vs-lockfile mismatch triggers re-approval. Drift matrix purged of any "re-fetched manifest commands" wording.
 
 ## Problem
 
@@ -188,10 +189,12 @@ Why each field:
 
 **Content-hash file set — explicit allow-list.** The `content_hash` field is computed by `lockfile.HashFiles` over a deterministic, closed set of files inside the skill folder:
 
-1. **When the skill folder is inside a git working tree:** include exactly the files reported by `git ls-files <skill-dir>` (filtered to regular files, excluding submodules). This guarantees author + teammate compute the hash over the same file set regardless of `.gitignore` differences, presence of editor swap files, or platform metadata.
+1. **When the skill folder is inside a git working tree:** include exactly the files reported by `git ls-files --cached --others --exclude-standard <skill-dir>` (filtered to regular files, excluding submodules). The `--cached --others --exclude-standard` triplet covers tracked files *plus* untracked-not-ignored files — the second part is essential because `scribe project sync` writes vendored files into `.ai/skills/<name>/` *before* the author runs `git add`, so plain `git ls-files <skill-dir>` would return an empty or partial set on the very first author run, producing a `.scribe-content-hash` that doesn't match the post-commit teammate verify.
 2. **When not inside git** (e.g. `~/.scribe/skills/<name>/` global cache): include every file under the skill root *except* the explicit denylist below.
 3. **Denylist (always excluded, in both modes):** `.git/`, `versions/` (existing exclusion), `.DS_Store`, `Thumbs.db`, `*.swp`, `*.swo`, `.idea/`, `.vscode/`, `node_modules/`, `*.bak.*`, `.scribe-content-hash` itself.
 4. **Line-ending normalization:** every file's content is normalized (`\r\n` → `\n`) before hashing. This eliminates Windows `core.autocrlf=true` divergence.
+
+The git-mode rule must produce identical results before and after the author commits the vendored files: `--cached --others --exclude-standard` includes both tracked and untracked-not-ignored files, so the hash is stable across the commit boundary. Tests must cover: (a) fresh repo, vendor + hash *before* `git add`; (b) same repo *after* commit; (c) teammate clone — all three must produce the same `.scribe-content-hash`.
 
 The same ruleset is used to compute and verify the per-skill `.scribe-content-hash` marker. The hash function lives at `internal/lockfile/hashset.go` (new helper alongside `HashFiles`).
 
@@ -236,12 +239,13 @@ Registry-side `Syncer.validateInstalledAgainstLock` assumes the lockfile is the 
 **v1 introduces `validateProjectLock(*ProjectLockfile, statuses []SkillStatus)`** as a sibling routine in `internal/sync/`:
 
 For each `ProjectEntry`:
-1. Read cache state at `~/.scribe/skills/<name>/` and any associated state.
-2. If `cache.commit_sha != entry.commit_sha` → mark for refetch (do not error).
-3. If cache absent → mark for fetch.
-4. After fetch (or if cache matched), recompute `content_hash` over the fetched bytes using D6's hash-set rules.
-5. Mismatch → exit 6 with remediation.
-6. For package-type entries, verify `install_command_hash` against the frozen commands in the entry; mismatch → require re-approval through the existing package approval flow (which in v3 stores the full SHA-256, see D6).
+1. **Self-consistency check (always first):** for package-type entries, recompute `lockfile.CommandHash(Install, Update, Installs, Updates)` over the entry's own frozen command fields and compare against the entry's `install_command_hash`. Mismatch indicates lockfile corruption or tampering, not approval drift — exit 8 (validation) with "lockfile self-inconsistency: install_command_hash does not match the embedded command fields. The lockfile may be tampered or hand-edited."
+2. Read cache state at `~/.scribe/skills/<name>/` and any associated state.
+3. If `cache.commit_sha != entry.commit_sha` → mark for refetch (do not error).
+4. If cache absent → mark for fetch.
+5. After fetch (or if cache matched), recompute `content_hash` over the fetched bytes using D6's hash-set rules.
+6. Mismatch → exit 6 with remediation.
+7. For package-type entries, compare the lockfile's `install_command_hash` against the user's stored *approval-state* hash (existing approval-state path in `internal/sync` / `internal/state`). Mismatch here is **approval drift** (e.g. lockfile bumped to a newer command set, or first run on a new machine) — trigger the existing package approval prompt; on approval, update the approval-state hash. This is distinct from step 1: step 1 catches a tampered lockfile; step 7 catches an unapproved-but-internally-consistent command set.
 
 Crucially, `validateProjectLock` *expects* cache divergence and refetches; it does not error on stale name-keyed cache. Two-project alternation works without manual cleanup.
 
@@ -262,21 +266,29 @@ Boost research (scratchpad id 1316) confirms `boost:update` reads `.ai/skills/` 
 
 **v3 fix: ownership is recorded in state, not just at the installer.**
 
-When a skill is classified as vendored under a Boost project (detected by `composer.json` containing `laravel/boost` plus presence of `.ai/skills/<name>/`), `state.InstalledSkill` carries an explicit tool-exclusion field:
+When a skill is classified as vendored under a Boost project (detected by `composer.json` containing `laravel/boost` plus presence of `.ai/skills/<name>/`), the **per-project** `state.ProjectionEntry` carries an explicit tool-exclusion field:
 
 ```go
-type InstalledSkill struct {
+type ProjectionEntry struct {
     // ... existing fields ...
-    ExcludedTools []string `json:"excluded_tools,omitempty"` // tools NOT projected by scribe (e.g. "claude" in Boost projects)
+    ExcludedTools []string `json:"excluded_tools,omitempty"` // tools NOT projected by scribe in THIS project (e.g. "claude" in Boost projects)
 }
 ```
 
-`EffectiveTools(available)` (existing helper at `internal/state/tools_resolve.go`) is extended to subtract `ExcludedTools` from the resolved tool list. This:
+The field lives on `ProjectionEntry`, not `InstalledSkill`, because the same skill can be vendored in project A (Boost — exclude Claude) *and* registry-pinned in project B (non-Boost — all tools). A global field on `InstalledSkill` would flip on every project switch and corrupt reconcile state.
+
+Both helpers in `internal/state/tools_resolve.go` apply the filter:
+
+- `EffectiveTools(available)` — used outside a project — does not consult `ExcludedTools` (no project context).
+- `EffectiveToolsForProject(activeNames, projectRoot)` — used by reconcile and project-aware install paths — looks up the matching `ProjectionEntry` for `projectRoot` and subtracts its `ExcludedTools` from the resolved tool list.
+
+This:
 
 - Keeps installer code simple (`tool.Install` is never called for excluded tools).
 - Makes `ReconcilePre`/`ReconcilePost` see "Claude is not expected" — they don't try to repair the symlink, so no `ErrRealDirectoryExists`.
-- Survives state save/load.
-- Excludes only specific tools per skill, not globally; registry-pinned skills in the same project still project to all tools.
+- Per-project: `tdd` vendored in Boost project A and registry-pinned in non-Boost project B coexist with correct projections.
+- Survives state save/load (existing `ProjectionEntry` already round-trips per project).
+- Excludes only specific tools per skill per project, not globally.
 
 **Boost ownership table:**
 
@@ -351,8 +363,8 @@ state.OriginRegistry  ───┘                            .ai/scribe.lock  (
 |---|---|
 | `internal/lockfile/lockfile.go` | Add `ProjectLockfile` + `ProjectEntry` (with `SourceRepo`, `Path`, `Type`, `Install`, `Update`, `Installs`, `Updates`) + `kind: ProjectLock` discriminator. Parser dispatches on `kind:`. Embed existing `Entry`. |
 | `internal/sync/executor.go` | `CommandHash` becomes a thin alias to `internal/lockfile.CommandHash`. Drop the 16-hex-char path; state file v3 stores full SHA-256 for package approval. |
-| `internal/state/state.go` | Add `OriginProject` constant. Add `ExcludedTools []string` to `InstalledSkill`. Add `state.VendorState` map (or sibling fields) keyed by skill name with `FirstSeenAt`. Bump state file format to v3; existing entries migrate with empty defaults. |
-| `internal/state/tools_resolve.go` | `EffectiveTools(available)` subtracts `s.ExcludedTools` from the resolved set so reconcile and installers see the same expected-projection set. |
+| `internal/state/state.go` | Add `OriginProject` constant. Add `ExcludedTools []string` to `state.ProjectionEntry` (per-project, not the global `InstalledSkill`). Add `state.VendorState` map (or sibling fields) keyed by skill name with `FirstSeenAt`. Bump state file format to v3; existing entries migrate with empty defaults. |
+| `internal/state/tools_resolve.go` | `EffectiveToolsForProject(activeNames, projectRoot)` looks up the matching `ProjectionEntry` and subtracts its `ExcludedTools` from the resolved set so reconcile and project-aware installers see the same expected-projection set. `EffectiveTools(available)` (no project context) is unchanged. |
 | `internal/sync/syncer.go` | Add `validateProjectLock` distinct from `validateInstalledAgainstLock`; consult `projectstore.Resolver`; team-share-mode snippet+MCP behavior changed (warn, don't error, when sources missing); package approval re-checks against full SHA-256 `install_command_hash` from `ProjectEntry`. |
 | `cmd/sync.go` | Detects team-share mode (presence of `.ai/scribe.lock`); removes `--update-lock` flag (the operation must use `scribe project sync` instead). |
 
@@ -418,7 +430,8 @@ Each row pairs two sources of truth and names the owner that resolves disagreeme
 | Vendored `.ai/skills/S/` | `.scribe-content-hash` mismatch with actual files | User edited or git-merged | `scribe sync` exits 8 (Frankenstein protection) |
 | Vendored `.ai/skills/S/` | `~/.scribe/skills/S/` differs (author edited locally) | **Project wins** | Used as projection source; global cache untouched |
 | Lockfile entry `S` | `~/.scribe/skills/S/` has different commit_sha (e.g. another project) | **Lockfile wins** | `validateProjectLock` re-fetches into cache, verifies `content_hash` |
-| Lockfile entry `S` install_command_hash | Re-fetched manifest commands | Hash mismatch → re-approval | Existing approval prompt reused |
+| Lockfile entry `S` `install_command_hash` | Recomputed `CommandHash` over the entry's own frozen Install/Update/Installs/Updates | Self-inconsistent → **lockfile tampered**, exit 8 | `validateProjectLock` step 1 |
+| Lockfile entry `S` `install_command_hash` | User's approval-state hash for `S` | Mismatch → **re-approval needed** | Existing approval prompt; updates approval-state hash |
 | `~/.scribe/state.json` says skill `S` Origin=Project | No `.ai/skills/S/` in repo | Author hasn't run `project sync` yet | Surface in `--check` |
 | `~/.scribe/state.json` missing entry for vendored skill | Vendored `.ai/skills/S/` exists | Migration / fresh clone | `scribe sync` populates state from project artifacts |
 | `~/.scribe/state.json` entry for vendored skill missing `ExcludedTools` in Boost project | Boost project detected | `scribe sync` writes `ExcludedTools=["claude"]` and continues | Idempotent on subsequent runs |
@@ -433,8 +446,10 @@ A reviewer-friendly table of what's reused vs. introduced:
 | `internal/lockfile.HashFiles`, `HashDir` | `HashFiles` reused | `HashSet` wraps with allow-list + LF | — |
 | `internal/lockfile.CommandHash` | yes | becomes single canonical source | replaces `internal/sync.CommandHash` |
 | `internal/state.Origin` constants | `OriginRegistry`, `OriginLocal`, `OriginBootstrap` reused | + new `OriginProject` | — |
-| `state.InstalledSkill` | yes | + `ExcludedTools`, + new `state.VendorState` map | — |
-| `state.tools_resolve.EffectiveTools` | yes | reads `ExcludedTools` | — |
+| `state.InstalledSkill` | yes | unchanged | — |
+| `state.ProjectionEntry` | yes | + `ExcludedTools` | — |
+| `state.VendorState` (new sibling map) | — | introduced | — |
+| `state.tools_resolve.EffectiveToolsForProject` | yes | subtracts per-project `ExcludedTools` | — |
 | `internal/sync.Syncer` registry-side path | yes | snippet/MCP teamshare-mode flags, `validateProjectLock` sibling | — |
 | `internal/snippet` | yes | call-site change in sync | — |
 
@@ -500,3 +515,11 @@ State file format bumps to v3 to accommodate `ExcludedTools`, `VendorState`, and
 - First-seen warning state field → resolved (v3): `state.VendorState` map.
 - Project skill commands semantics → resolved (v3): D4 specifies `create` and `claim`.
 - `--adopt` flag inconsistency → resolved (v3): `--force` covers adoption; no separate flag.
+- Hash-set git mode missed first-vendor-before-`git add` → resolved (v3.1): `git ls-files --cached --others --exclude-standard` covers tracked + untracked-not-ignored.
+- `ExcludedTools` on global `InstalledSkill` would corrupt cross-project projections → resolved (v3.1): moved to per-project `state.ProjectionEntry`; `EffectiveToolsForProject` applies the filter.
+- Package `install_command_hash` blurred corruption vs approval drift → resolved (v3.1): `validateProjectLock` step 1 self-consistency check (exit 8 on tamper); step 7 approval-drift check (re-approval prompt).
+
+## Round-3 minors not addressed in v3.1 (parking lot)
+
+- R3-4 (Codex): connect-gate ownership between `source_registry` and `source_repo` — recommended rule (require `source_registry` connected; require `source_repo` connected only when private/cross-namespace) is implementation-time decision, not protocol-blocking.
+- R3-5 (Opus NV2): Boost detection escape hatch (`.ai/scribe-tools.yaml claude: external`) for non-composer projects — add when first non-composer Boost-style consumer reports the issue.
