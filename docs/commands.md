@@ -53,6 +53,9 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe tools` | List, enable, or disable detected tools machine-wide |
 | `scribe tools add` | Register a custom tool integration (`--detect`, `--install`, `--path`, `--uninstall`) |
 | `scribe kit create <name>` | Create a local kit — a named list of skills and MCP servers scoped to a project (saved to `~/.scribe/kits/<name>.yaml`). Use `--skills`, `--mcp-servers`, and `--registry` to populate it. Reference the kit by name in a project's `.scribe.yaml` under `kits:`. |
+| `scribe kit list` | List local kits from `~/.scribe/kits/*.yaml`. Supports `--fields` and `--json` for agent-readable output. |
+| `scribe kit show <name>` | Show one local kit, including skills and source metadata. |
+| `scribe project init` | Create a committed project `.scribe.yaml` for repo-local loadouts. Use `--kits a,b` for non-interactive setup or pick from local kits interactively. |
 
 ## Conflicts and recovery
 
