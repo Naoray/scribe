@@ -1,10 +1,11 @@
 # Team-Sharable Scribe Projects — Design
 
-Status: draft v2 (2026-05-07, post-counselor-review)
+Status: draft v3 (2026-05-07, second counselor pass)
 Scope: v1 — kits + skills only. Snippets and MCP server definitions deferred to v2.
 
 Revision history:
 - v1 → v2 (2026-05-07): rewrite after Opus + Codex counselor review. Reuses `internal/lockfile`. Adds explicit `OriginProject`. Picks `lockfile.HashFiles` for content hashing. Adds drift matrix, trust model, and Frankenstein-folder protection. Removes `scribe sync --update-lock`. Hardens Boost interop against `replaceSymlink`'s real-dir refusal.
+- v2 → v3 (2026-05-07): second counselor pass. Extends `ProjectLockfile.Entry` with a frozen fetch descriptor (path, source repo, type, per-tool install commands) so teammate sync no longer depends on a live registry manifest. Defines the content-hash file set explicitly with git-tracked-only selection and LF normalization. Hardens `OriginRegistry` classification against zero-value legacy state. Threads Boost ownership through `state.InstalledSkill.ExcludedTools` so reconcile and installer agree. Unifies `CommandHash` on the lockfile-format SHA-256. Distinguishes project-lock validation from registry-side `validateInstalledAgainstLock`. Specifies qualified `add:` parsing. Adds `state.VendorState` for first-seen tracking. Adds project-skill command semantics. Drops the spurious `OriginAdopted` row.
 
 ## Problem
 
@@ -18,12 +19,12 @@ Gap: the **artifacts those names refer to** aren't shared. Today:
 
 A teammate cloning the repo and running `scribe sync` will fail-fast on any reference whose source is missing on their machine.
 
-We want: *clone repo → `scribe sync` works → identical skill loadout to the author.*
+We want: *clone repo → connect referenced registries → `scribe sync` works → identical kits-and-skills loadout to the author.*
 
 ## Goals
 
-1. Teammate cloning a scribe-enabled repo can run `scribe sync` and get the same kits + skills installed as the author, deterministically.
-2. The repo carries enough information to reproduce the kits-and-skills loadout — no hidden author-machine state required.
+1. Teammate cloning a scribe-enabled repo runs `scribe registry connect <repo>` for any referenced registries they don't already have, then runs `scribe sync` and gets the same kits + skills installed as the author. Deterministic given those connect prerequisites. (Goal narrowed from v2: connect prerequisites are explicit; not "zero-setup".)
+2. The repo carries enough information to reproduce the kits-and-skills loadout — no hidden author-machine state required beyond connected-registry credentials.
 3. Author has a single command to publish their loadout into the repo.
 4. Project-local artifacts coexist with the author's global `~/.scribe/` store; project precedence wins.
 5. Adding team-share to a project does **not** silently leak the author's personal/private skills into the team repo.
@@ -44,19 +45,30 @@ We want: *clone repo → `scribe sync` works → identical skill loadout to the 
 Two kinds of skills, each shared differently:
 
 - **Project-authored skills** — created explicitly for a project via a new `scribe project skill create` command (or migrated via `scribe project skill claim`). Marked in machine state with a new `Origin = OriginProject`. Vendored as full folders inside the repo at `.ai/skills/<name>/`.
-- **Registry skills** — pulled from a connected registry. Pinned in `.ai/scribe.lock` (entry per skill: `commit_sha` + `content_hash` + optional `install_command_hash`). Teammate's `scribe sync` fetches each pinned commit into the existing name-keyed cache (`~/.scribe/skills/<name>/`) and symlinks into agent skill directories.
+- **Registry skills** — pulled from a connected registry. Pinned in `.ai/scribe.lock` with a self-contained `ProjectEntry` (see D5). Teammate's `scribe sync` fetches each pinned commit into the existing name-keyed cache (`~/.scribe/skills/<name>/`) and symlinks into agent skill directories.
 
-**Vendoring is opt-in, not inferred.** Specifically:
+**Vendoring is opt-in, not inferred.**
 
 | Origin | Default action in `scribe project sync` |
 |---|---|
 | `OriginProject` | Auto-vendor into `.ai/skills/<name>/` |
-| `OriginRegistry` | Auto-pin into `.ai/scribe.lock` |
+| `OriginRegistry` (with valid sources — see below) | Auto-pin into `.ai/scribe.lock` |
+| `OriginRegistry` (zero-value, no usable `Sources`) | **Refuse** with hint to reinstall via `scribe install` or claim via `scribe project skill claim` |
 | `OriginLocal` | **Refuse** unless `--vendor <name>` flag explicitly opts the skill in (sets `Origin = OriginProject` on success) |
 | `OriginBootstrap` | **Skip** entirely; bootstrap skills are part of the binary contract and must not be vendored |
-| `OriginAdopted` | Same as `OriginLocal` — refuse without explicit `--vendor` |
 
-This addresses the "silent private-skill leak" risk: the author must explicitly elect each personal skill into the team repo. The default is safe.
+`OriginRegistry` is the zero value of `state.Origin` (per `internal/state/state.go`). Legacy or corrupted state entries can have `Origin == OriginRegistry` without populated `Sources`, which would otherwise produce unpinnable lockfile entries. **`OriginRegistry` is necessary but not sufficient** for auto-pinning. The classification rule:
+
+1. `Origin == OriginRegistry` AND
+2. `len(InstalledSkill.Sources) >= 1` AND
+3. The chosen source has a non-empty `SourceRepo` (or `Registry`) and a known `Path`/ref AND
+4. The on-disk content under `~/.scribe/skills/<name>/` matches the source's recorded `LastSHA`/`BlobSHAs` for that ref
+
+Otherwise refuse and surface remediation.
+
+`OriginAdopted` is *not* a real origin in current state; `scribe adopt` produces `OriginLocal`. Adopted skills follow the `OriginLocal` row above.
+
+This addresses the "silent private-skill leak" risk and the "zero-value-Registry pin" risk together: the author must hold a valid registry source for every auto-pinned skill, and explicitly elect each personal skill into the team repo. The default is safe.
 
 ### D2 — Repo layout
 
@@ -91,13 +103,30 @@ The split is intentional. `scribe sync` running inside an author's repo never si
 
 Naming concern: `scribe project sync` next to `scribe sync` is provisional. Alternatives considered: `scribe vendor`, `scribe project publish`, `scribe project bundle`. Final naming will be locked during implementation; this spec uses `scribe project sync` consistently.
 
-### D4 — Layering: project + global, project precedence
+### D4 — Project skill commands
+
+`scribe project skill create <name>` — creates a new project-authored skill. Behavior:
+- Writes `~/.scribe/skills/<name>/` exactly like the existing `scribe skill create`.
+- Sets `state.InstalledSkill{Origin: OriginProject}` for that name.
+- Does NOT write to `.ai/skills/` directly; vendoring happens at `scribe project sync` time. This keeps "create" a machine-side authoring action and "publish" a project-side action.
+- Refuses if a skill of that name already exists with a different origin (suggests `scribe project skill claim` instead).
+
+`scribe project skill claim <name>` — converts an existing local-origin skill to project-origin. Behavior:
+- Refuses if `Origin == OriginRegistry` (would silently detach from registry source — user must explicitly remove + recreate, or vendor with `--vendor` and accept the consequences).
+- Refuses if `Origin == OriginBootstrap` (binary-shipped contract).
+- Sets `Origin = OriginProject` for `OriginLocal` skills.
+- One-time, idempotent for same input.
+- Does not modify on-disk skill content.
+
+Both commands respect `--json` and emit the project envelope.
+
+### D5 — Layering: project + global, project precedence
 
 Inside a scribe project, kits resolve from `.ai/kits/*.yaml` first, then from `~/.scribe/kits/*.yaml`. On name conflict, project wins. Same applies to skills: `.ai/skills/<name>/` (vendored) takes precedence over anything resolved from the lockfile or global cache.
 
 The merge is implemented through a new `internal/projectstore` package that exposes a `Resolver` composing two `Store` layers (project + global) — *not* a `LoadAllMerged` shortcut on `internal/kit`. This keeps the layering reusable for future v2 snippet/MCP shipping.
 
-### D5 — Lockfile: extend `internal/lockfile`, don't duplicate
+### D6 — Lockfile: extend `internal/lockfile` with self-contained project entries
 
 The existing `internal/lockfile` package already defines:
 
@@ -120,38 +149,59 @@ type Entry struct {
 }
 ```
 
-This struct is registry-side (lives at a registry repo's root, fetched by `FetchFile(... "scribe.lock", "HEAD")`). Project-side team-share needs a closely-related but distinguishable shape, because:
-- A registry-side lockfile pins skills *within one registry*; the `Registry` field is mandatory and singular.
-- A project-side lockfile pins skills across *multiple registries* — each entry's `SourceRegistry` is the source of truth.
+The registry-side struct is fetched from a registry repo's root by `FetchFile(... "scribe.lock", "HEAD")` and works in tandem with a live `manifest.Entry`. Project-side team-share needs more: the project lockfile is the canonical fetch contract on the teammate machine, and the live registry manifest may have moved or been edited since the author published.
 
-**Decision: extend the package with a discriminator and a project-side type, sharing parsing + hashing infrastructure.**
+**Decision: extend the package with a discriminator and a project-side type that embeds the existing `Entry` plus a frozen fetch descriptor.**
 
 ```go
 const ProjectFilename = "scribe.lock"   // when found at .ai/scribe.lock
 const ProjectKind     = "ProjectLock"
 
 type ProjectLockfile struct {
-    FormatVersion int     `yaml:"format_version"`
-    Kind          string  `yaml:"kind"`           // "ProjectLock"
-    GeneratedAt   string  `yaml:"generated_at,omitempty"`
-    GeneratedBy   string  `yaml:"generated_by,omitempty"`
-    Entries       []Entry `yaml:"entries"`        // reuses existing Entry
+    FormatVersion int            `yaml:"format_version"`
+    Kind          string         `yaml:"kind"`           // "ProjectLock"
+    GeneratedAt   string         `yaml:"generated_at,omitempty"`
+    GeneratedBy   string         `yaml:"generated_by,omitempty"`
+    Entries       []ProjectEntry `yaml:"entries"`
+}
+
+type ProjectEntry struct {
+    Entry          `yaml:",inline"`                    // embeds: name, source_registry, commit_sha, content_hash, install_command_hash
+    SourceRepo     string            `yaml:"source_repo,omitempty"`     // owner/repo of skill source if different from source_registry
+    Path           string            `yaml:"path,omitempty"`            // path within source repo (defaults to name)
+    Type           string            `yaml:"type,omitempty"`            // "skill" | "package", default "skill"
+    Install        string            `yaml:"install,omitempty"`         // global install command frozen from manifest
+    Update         string            `yaml:"update,omitempty"`          // global update command frozen from manifest
+    Installs       map[string]string `yaml:"installs,omitempty"`        // per-tool install commands, frozen
+    Updates        map[string]string `yaml:"updates,omitempty"`         // per-tool update commands, frozen
 }
 ```
 
-- Parser disambiguates by inspecting `kind:` first; missing or empty `kind:` → existing registry-side `Lockfile{Registry, Entries}`.
-- Same `Entry` struct: `name`, `source_registry`, `commit_sha`, `content_hash`, `install_command_hash`.
-- Same hashing primitives: `lockfile.HashFiles(files []File)` for content_hash, `lockfile.CommandHash(parts...)` for install_command_hash.
+Why each field:
+- `SourceRepo` distinguishes catalog `source` from registry `source_registry` (a registry can list a skill that lives in a different repo).
+- `Path` carries `manifest.Entry.Path` so a skill named `tdd` registered at `skills/tdd-pro/` is fetchable.
+- `Type` lets project sync apply the existing package-vs-skill split (packages bypass per-tool routing).
+- `Install`/`Update`/`Installs`/`Updates` are frozen at lock time; together with `install_command_hash`, they make package commands reproducible and approval-gateable on the teammate machine even if the registry catalog later drifts.
 
-**Hash mechanism — single source of truth.** The `content_hash` field is computed by `lockfile.HashFiles` over the skill folder's *installable files* (the same set used by registry-side hashing today). This:
-- Resolves the "blob_sha vs tree hash vs SKILL.md sha" ambiguity flagged by both counselors.
-- Reuses code paths already exercised in production.
-- Catches `scripts/run.sh`-only changes (the case the SKILL.md-only blob hash misses).
-- Field name in the lockfile is `content_hash`, not `blob_sha`. The v1 draft's name was wrong.
+- Parser disambiguates by inspecting `kind:` first; missing or empty `kind:` → existing registry-side `Lockfile{Registry, Entries}`.
+- Hashing primitives: `lockfile.HashFiles(files []File)` for `content_hash`. Command hashing: see "CommandHash unification" below.
+
+**Content-hash file set — explicit allow-list.** The `content_hash` field is computed by `lockfile.HashFiles` over a deterministic, closed set of files inside the skill folder:
+
+1. **When the skill folder is inside a git working tree:** include exactly the files reported by `git ls-files <skill-dir>` (filtered to regular files, excluding submodules). This guarantees author + teammate compute the hash over the same file set regardless of `.gitignore` differences, presence of editor swap files, or platform metadata.
+2. **When not inside git** (e.g. `~/.scribe/skills/<name>/` global cache): include every file under the skill root *except* the explicit denylist below.
+3. **Denylist (always excluded, in both modes):** `.git/`, `versions/` (existing exclusion), `.DS_Store`, `Thumbs.db`, `*.swp`, `*.swo`, `.idea/`, `.vscode/`, `node_modules/`, `*.bak.*`, `.scribe-content-hash` itself.
+4. **Line-ending normalization:** every file's content is normalized (`\r\n` → `\n`) before hashing. This eliminates Windows `core.autocrlf=true` divergence.
+
+The same ruleset is used to compute and verify the per-skill `.scribe-content-hash` marker. The hash function lives at `internal/lockfile/hashset.go` (new helper alongside `HashFiles`).
+
+This resolves the v2 risk that `.DS_Store` / line-ending differences would trigger spurious Frankenstein exits on a clean teammate clone.
+
+**CommandHash unification.** Two implementations exist today: `internal/sync.CommandHash` (returns 16 hex chars, used for package approval state) and `internal/lockfile.CommandHash` (returns full SHA-256). v3 makes the lockfile version canonical. Migration: `internal/sync.CommandHash` becomes a thin alias to `internal/lockfile.CommandHash`; package approval state is upgraded on next read (state file v3 records full hash; v2 short hashes compare as upgrade-required, prompting re-approval via the existing approval flow). Lockfile entries always carry the full SHA-256.
 
 Vendored skills are not in the lockfile — their `.scribe-content-hash` marker file (next section) is their pin.
 
-### D6 — Vendored-skill content fingerprint
+### D7 — Vendored-skill content fingerprint
 
 Each vendored skill folder contains a `.scribe-content-hash` file at its root:
 
@@ -163,13 +213,13 @@ generated_at: 2026-05-07T14:23:00Z
 generated_by: scribe@v0.8.0
 ```
 
-Computed via `lockfile.HashFiles` over the folder's installable files (excluding `.scribe-content-hash` itself). On `scribe sync`:
+Computed via the hash-set rules in D6 (git-tracked-only when in git, deterministic denylist otherwise; LF-normalized; excludes `.scribe-content-hash` itself). On `scribe sync`:
 - Recompute the hash and compare against the marker file.
 - Mismatch → exit 8 (validation) with "Frankenstein folder detected; the vendored content was modified outside `scribe project sync`. Reconcile by running `scribe project sync --force` (overwrite) or restoring the file you edited."
 
 This blocks the git per-file merge case where two authors push divergent vendor states and git produces a folder that exists in no single author's tree.
 
-### D7 — Drift handling: fail-fast, lockfile is canonical
+### D8 — Drift handling: fail-fast, lockfile is canonical
 
 If `.scribe.yaml` references a skill not in the lockfile (and not vendored), exit 8 (validation) with a remediation pointing to `scribe project sync`.
 
@@ -179,6 +229,74 @@ If a lockfile entry's `content_hash` doesn't match the fetched content, exit 6 (
 
 This rule eliminates the "two pin sources of truth" risk: machine state can be rebuilt from lockfile + vendored content, but the lockfile is always written from a deliberate author action.
 
+### D9 — Project-lock validation algorithm (distinct from registry-side)
+
+Registry-side `Syncer.validateInstalledAgainstLock` assumes the lockfile is the *latest registry state* and refuses installations that disagree. Reusing it for project-lock teammate sync would fail in the very common case of a stale name-keyed cache from another project pinning a different commit.
+
+**v1 introduces `validateProjectLock(*ProjectLockfile, statuses []SkillStatus)`** as a sibling routine in `internal/sync/`:
+
+For each `ProjectEntry`:
+1. Read cache state at `~/.scribe/skills/<name>/` and any associated state.
+2. If `cache.commit_sha != entry.commit_sha` → mark for refetch (do not error).
+3. If cache absent → mark for fetch.
+4. After fetch (or if cache matched), recompute `content_hash` over the fetched bytes using D6's hash-set rules.
+5. Mismatch → exit 6 with remediation.
+6. For package-type entries, verify `install_command_hash` against the frozen commands in the entry; mismatch → require re-approval through the existing package approval flow (which in v3 stores the full SHA-256, see D6).
+
+Crucially, `validateProjectLock` *expects* cache divergence and refetches; it does not error on stale name-keyed cache. Two-project alternation works without manual cleanup.
+
+### D10 — `add:` parsing: bare names vs qualified refs
+
+`.scribe.yaml` `add:` and `remove:` accept either:
+
+- **Bare name** (e.g. `tdd`): resolves through machine state. If two registries both contain a skill named `tdd`, exit 8 with hint to qualify the entry. Disambiguation is the author's responsibility; project sync refuses ambiguous bare names.
+- **Qualified ref** (e.g. `Naoray/scribe:tdd`): resolves directly to that registry/repo + skill. Always wins over a bare name with the same skill identifier (project precedence applies inside the qualified refs already).
+
+The kit transitive resolution follows the same rule: kit `Skills:` entries that are bare names use the disambiguation logic; qualified refs resolve directly.
+
+`scribe project sync` records the resolved source in the lockfile entry's `source_registry` + `source_repo` + `path`, so the lockfile is unambiguous regardless of how the intent was specified.
+
+### D11 — Laravel Boost interop (state-level ownership filter)
+
+Boost research (scratchpad id 1316) confirms `boost:update` reads `.ai/skills/` as input and writes a *real folder copy* into `.claude/skills/<name>/`. Counselor review caught two consequences: (a) scribe's `tools.replaceSymlink` returns `ErrRealDirectoryExists` when its target is a real directory, and (b) scribe's `ReconcilePre`/`ReconcilePost` recompute expected projections from state and active tools, so a naive "skip Claude in installer" still leaves Claude in the expected-projection set and reconcile re-creates the conflict.
+
+**v3 fix: ownership is recorded in state, not just at the installer.**
+
+When a skill is classified as vendored under a Boost project (detected by `composer.json` containing `laravel/boost` plus presence of `.ai/skills/<name>/`), `state.InstalledSkill` carries an explicit tool-exclusion field:
+
+```go
+type InstalledSkill struct {
+    // ... existing fields ...
+    ExcludedTools []string `json:"excluded_tools,omitempty"` // tools NOT projected by scribe (e.g. "claude" in Boost projects)
+}
+```
+
+`EffectiveTools(available)` (existing helper at `internal/state/tools_resolve.go`) is extended to subtract `ExcludedTools` from the resolved tool list. This:
+
+- Keeps installer code simple (`tool.Install` is never called for excluded tools).
+- Makes `ReconcilePre`/`ReconcilePost` see "Claude is not expected" — they don't try to repair the symlink, so no `ErrRealDirectoryExists`.
+- Survives state save/load.
+- Excludes only specific tools per skill, not globally; registry-pinned skills in the same project still project to all tools.
+
+**Boost ownership table:**
+
+| Skill source | scribe `ExcludedTools` | Result |
+|---|---|---|
+| Vendored at `.ai/skills/<name>/`, project is Boost | `["claude"]` | Boost owns `.claude/skills/<name>/`; scribe owns codex/cursor/gemini |
+| Vendored, project is non-Boost | `[]` | scribe owns all tools |
+| Registry-pinned (lockfile entry) | `[]` | scribe owns all tools (Boost can't see registry skills) |
+
+Documentation: spec includes a "Boost projects: run order" note recommending `boost:update && scribe sync` as the canonical sequence; the operations are idempotent under D7's content-hash check. The state-level filter ensures correctness independent of run order.
+
+### D12 — Trust model (v1 baseline)
+
+- Registry skills carry `install_command_hash` in lockfile entries (full SHA-256 per D6); scribe refuses to run install commands when the hash doesn't match the registry's manifest. Carries over from existing per-machine sync flow.
+- Vendored skills do not carry an install-command pin in v1; they have no install commands today (skill `SKILL.md` is content-only). If/when project-authored skills gain runtime install commands, this gap must be closed before that feature ships.
+- Connected-registries gate: scribe only fetches from registries the user has explicitly `scribe registry connect`-ed. Lockfile entries pointing to non-connected registries → exit 4 (permission) with hint to run `scribe registry connect <repo>`. (Goal #1 acknowledges this prerequisite.)
+- First-time projection of vendored content: `scribe sync` consults `state.VendorState` (new map keyed by skill name on `state.State`) for `FirstSeenAt`. When absent, scribe warns once with the path before symlinking, and writes the timestamp. User is expected to inspect repo content; scribe does not sandbox or validate skill bodies.
+
+This baseline is intentionally conservative for v1; richer signing or registry allow-listing is parking-lot.
+
 ## Architecture
 
 ### Author flow
@@ -187,58 +305,105 @@ This rule eliminates the "two pin sources of truth" risk: machine state can be r
 ~/.scribe/kits/foo.yaml ─┐
 ~/.scribe/skills/bar/    ├──► scribe project sync ──► .ai/kits/foo.yaml
 state.OriginProject only │                            .ai/skills/bar/{SKILL.md,...,.scribe-content-hash}
-state.OriginRegistry  ───┘                            .ai/scribe.lock
+state.OriginRegistry  ───┘                            .ai/scribe.lock  (ProjectEntry per registry skill)
                                                       (state stays unchanged)
 ```
 
-1. Author edits `.scribe.yaml` (existing flow).
-2. `scribe project sync` reads intent, classifies each referenced skill by `Origin`, vendors `OriginProject`, pins `OriginRegistry`, refuses `OriginLocal`/`OriginAdopted` without `--vendor`, skips `OriginBootstrap`. Writes `.scribe-content-hash` markers. Computes new lockfile, shows diff, asks confirmation (or `--force`).
+1. Author edits `.scribe.yaml` (existing flow). Optionally invokes `scribe project skill create` / `scribe project skill claim` to mark project-authored skills.
+2. `scribe project sync` reads intent, classifies each referenced skill by `Origin` + sources validity, vendors `OriginProject`, pins valid `OriginRegistry`, refuses zero-value `OriginRegistry` and `OriginLocal` without `--vendor`, skips `OriginBootstrap`. Writes `.scribe-content-hash` markers using the D6 hash-set. Computes new lockfile, shows diff, asks confirmation (or `--force`). Records `state.InstalledSkill.ExcludedTools` for vendored skills in Boost projects.
 3. Author commits `.ai/` along with `.scribe.yaml`. Pushes.
 
 ### Teammate flow
 
 ```
 .scribe.yaml          ─┐
-.ai/kits/             ├──► scribe sync ──► ~/.claude/skills/<links>
-.ai/skills/           │                    ~/.codex/skills/<links>  (skipped in Boost projects)
-.ai/scribe.lock       │                    ~/.scribe/skills/<name>/  (cache, name-keyed)
-                      └──► fetch + verify pinned skills
+.ai/kits/             ├──► scribe sync ──► ~/.claude/skills/<links>  (subject to ExcludedTools)
+.ai/skills/           │                    ~/.codex/skills/<links>
+.ai/scribe.lock       │                    ~/.scribe/skills/<name>/  (cache, name-keyed; refetch on stale)
+                      └──► fetch + verify pinned skills via validateProjectLock
 ```
 
-1. Teammate clones, runs `scribe sync` in the repo.
-2. Sync detects `.ai/scribe.lock` present → "team-share mode."
-3. For each lockfile entry: ensure `~/.scribe/skills/<name>/` cache matches `commit_sha`; fetch from `source_registry@commit_sha` if absent or stale; verify against `content_hash`; fail-fast on mismatch.
-4. For each vendored skill under `.ai/skills/<name>/`: verify `.scribe-content-hash` matches recomputed hash; symlink into agent skill dirs *unless* the project is a Boost project and Boost owns Claude projection (D8 below).
-5. Snippet projection: in team-share mode, missing `~/.scribe/snippets/<name>.md` is a *no-op with warning*, not an error. Existing managed blocks in `CLAUDE.md`/`AGENTS.md` are preserved (the author's commit carries them). Documented as a v1 limitation; full snippet vendoring is v2.
-6. MCP projection unchanged. Missing local MCP server definitions for names referenced in `.scribe.yaml` produces a warning, not an error.
+1. Teammate clones, runs `scribe registry connect <repo>` for each registry referenced in `.ai/scribe.lock` they don't already have, runs `scribe sync` in the repo.
+2. Sync detects `.ai/scribe.lock` present → enters team-share mode.
+3. Loads merged kits via `projectstore.Resolver`. Project entries win on conflict.
+4. For each `ProjectEntry`: runs `validateProjectLock` (D9) — refetches stale name-keyed cache, validates `content_hash` against fetched content, checks `install_command_hash` for packages. Fail-fast on mismatch.
+5. For each vendored skill under `.ai/skills/<name>/`: verifies `.scribe-content-hash` matches recomputed hash; on first sight on this machine, warns and writes `state.VendorState.FirstSeenAt`; symlinks into agent skill dirs filtered by `ExcludedTools`.
+6. Snippet projection: in team-share mode, missing `~/.scribe/snippets/<name>.md` is a *no-op with warning*, not an error. Existing managed blocks in `CLAUDE.md`/`AGENTS.md` are preserved. `internal/sync` snippet step gains a `teamShareMode bool` flag.
+7. MCP projection: `StepProjectMCPServers` similarly downgrades missing-source errors to warnings in team-share mode (today it errors when `.mcp.json` or definitions are absent).
+8. Existing per-tool projection logic continues unchanged for non-vendored, non-team-share targets. `EffectiveTools(available)` is the single point that subtracts `ExcludedTools`, so installer + reconcile see the same expected set.
 
-### D8 — Laravel Boost interop
+## Components
 
-Boost research (scratchpad id 1316) confirms `boost:update` reads `.ai/skills/` as input and writes a *real folder copy* into `.claude/skills/<name>/`. Counselor review caught the consequence: scribe's `tools.replaceSymlink` returns `ErrRealDirectoryExists` when its target is a real directory, so a naive `scribe sync` after `boost:update` would fail, not converge.
+### New
 
-**Behavior in Boost projects** (detected by `composer.json` containing `laravel/boost`):
+| Path | Purpose |
+|---|---|
+| `internal/projectstore/projectstore.go` | Reads `.ai/skills/`, `.ai/kits/`, `.ai/scribe.lock` from a project root; verifies `.scribe-content-hash` markers |
+| `internal/projectstore/resolver.go` | `Resolver` composes [project, global] stores with project precedence |
+| `internal/lockfile/hashset.go` | `HashSet(skillDir string) (string, error)` — git-tracked-or-denylist file selection + LF normalization, then `HashFiles` |
+| `cmd/project.go` | Parent `scribe project` command group |
+| `cmd/project_sync.go` | `scribe project sync` (with `--check`, `--force`, `--vendor <name>`, `--json`) |
+| `cmd/project_skill.go` | `scribe project skill create`, `scribe project skill claim` |
 
-| Skill source | Claude projection owner | Codex/other projection owner |
-|---|---|---|
-| Vendored at `.ai/skills/<name>/` | **Boost** (scribe skips Claude) | **scribe** |
-| Registry-pinned via lockfile | **scribe** | **scribe** |
+### Extended
 
-Vendored skills coexist by ownership split: Boost handles Claude (its convention); scribe handles non-Claude tools. Both project from the same `.ai/skills/<name>/` source, so end content matches.
+| Path | Change |
+|---|---|
+| `internal/lockfile/lockfile.go` | Add `ProjectLockfile` + `ProjectEntry` (with `SourceRepo`, `Path`, `Type`, `Install`, `Update`, `Installs`, `Updates`) + `kind: ProjectLock` discriminator. Parser dispatches on `kind:`. Embed existing `Entry`. |
+| `internal/sync/executor.go` | `CommandHash` becomes a thin alias to `internal/lockfile.CommandHash`. Drop the 16-hex-char path; state file v3 stores full SHA-256 for package approval. |
+| `internal/state/state.go` | Add `OriginProject` constant. Add `ExcludedTools []string` to `InstalledSkill`. Add `state.VendorState` map (or sibling fields) keyed by skill name with `FirstSeenAt`. Bump state file format to v3; existing entries migrate with empty defaults. |
+| `internal/state/tools_resolve.go` | `EffectiveTools(available)` subtracts `s.ExcludedTools` from the resolved set so reconcile and installers see the same expected-projection set. |
+| `internal/sync/syncer.go` | Add `validateProjectLock` distinct from `validateInstalledAgainstLock`; consult `projectstore.Resolver`; team-share-mode snippet+MCP behavior changed (warn, don't error, when sources missing); package approval re-checks against full SHA-256 `install_command_hash` from `ProjectEntry`. |
+| `cmd/sync.go` | Detects team-share mode (presence of `.ai/scribe.lock`); removes `--update-lock` flag (the operation must use `scribe project sync` instead). |
 
-Registry-pinned skills are not in `.ai/skills/`, so Boost never sees them; scribe owns all projections.
+### Untouched
 
-Documentation: spec includes a "Boost projects: run order" note recommending `boost:update && scribe sync` as the canonical sequence (idempotent under D6's content-hash check), and explains that Claude skill links are managed by Boost in such projects.
+- `.scribe.yaml` schema. v1 is a storage layer change, not an intent change.
+- `internal/snippet/` API surface; v1 only changes the *call site* in sync to handle team-share-mode missing-source as a warning.
 
-Non-Boost projects retain the original behavior: scribe symlinks all targets including Claude.
+## Resolution algorithm
 
-### D9 — Trust model (v1 baseline)
+### `scribe project sync`
 
-- Registry skills carry `install_command_hash` in lockfile entries (existing field); scribe refuses to run install commands when the hash doesn't match the registry's manifest. Carries over from existing per-machine sync flow.
-- Vendored skills do not carry an install-command pin in v1; they have no install commands today (skill.SKILL.md is content-only). If/when project-authored skills gain runtime install commands, this gap must be closed before v1 can ship that feature.
-- Connected-registries gate: scribe only fetches from registries the user has explicitly `scribe registry connect`-ed. Lockfile entries pointing to non-connected registries → exit 4 (permission) with hint to run `scribe registry connect`.
-- First-time projection of vendored content: `scribe sync` warns when symlinking a `.ai/skills/<name>/` not previously seen on this machine, with the path. User is expected to inspect repo content; scribe does not sandbox or validate skill bodies.
+1. Walk project root upward to find `.scribe.yaml`.
+2. Parse intent: `kits:`, `add:`, `mcp:`, `remove:`. For each `add:` entry, split by `:` to detect qualified refs per D10.
+3. For each kit name in `kits:`:
+   - If `~/.scribe/kits/<name>.yaml` doesn't exist → exit 3.
+   - Compare project-side `.ai/kits/<name>.yaml` if present.
+     - Identical → no-op.
+     - Project newer (mtime + diff) → exit 5 unless `--force`.
+     - Otherwise copy and update vendoring state.
+4. For each entry in `add:` (qualified ref or bare name) and each transitive skill from kits:
+   - Resolve to `(SourceRepo, Path, registry)` per D10. Bare names that resolve to multiple registries → exit 8.
+   - Read state. Apply D1 classification.
+   - `OriginProject` → vendor as folder copy. Compute `.scribe-content-hash` via D6 hash-set and write into folder. Update vendoring state. In Boost projects, set `state.InstalledSkill.ExcludedTools = ["claude"]` for this name.
+   - `OriginRegistry` (with valid sources) → resolve `commit_sha` from registry, fetch content, compute `content_hash` via D6 hash-set, snapshot `manifest.Entry` fields into `ProjectEntry` (Path, Type, Install, Update, Installs, Updates, install_command_hash via `lockfile.CommandHash`). Write into `.ai/scribe.lock`.
+   - `OriginRegistry` (zero-value, no usable sources) → exit 5 with remediation.
+   - `OriginLocal` / adopted → exit 5 with `--vendor <name>` hint, OR vendor + claim if the flag was passed.
+   - `OriginBootstrap` → skip with informational note.
+5. Compare lockfile entries against `add:` ∪ kits' transitive skills. Drop stale entries.
+6. Sort lockfile deterministically and write atomically (`tmp + rename`).
+7. If `--check`, compute the diff against on-disk content; non-empty diff → exit 8.
+8. Print summary; emit JSON envelope when `--json`.
 
-This baseline is intentionally conservative for v1; richer signing or registry allow-listing is parking-lot.
+### `scribe sync` (extended)
+
+1. Existing project root detection.
+2. If `.ai/scribe.lock` present → enter team-share mode.
+3. Load merged kits via `projectstore.Resolver`. Project entries win on conflict.
+4. Run `validateProjectLock` (D9):
+   - For each `ProjectEntry`, check cache `~/.scribe/skills/<name>/`.
+   - Stale or absent → fetch using `SourceRepo`/`Path`/`commit_sha` (NOT `manifest.Entry`; the lockfile is self-contained).
+   - Verify `content_hash` over fetched bytes using D6 hash-set. Fail-fast on mismatch (exit 6).
+   - For package-type, verify `install_command_hash`; mismatch → require re-approval.
+5. For vendored skills under `.ai/skills/<name>/`:
+   - Verify `.scribe-content-hash` matches recomputed hash via D6 hash-set. Mismatch → exit 8 (Frankenstein protection).
+   - If `state.VendorState[name].FirstSeenAt` is empty, warn with the path and write the current timestamp.
+   - Symlink into agent skill dirs per `EffectiveTools(available)` minus `ExcludedTools`.
+   - If a target real directory blocks the symlink in a non-Boost project, surface exit 5.
+6. Snippet projection: in team-share mode, missing source → log warning and skip. Otherwise unchanged.
+7. MCP projection: in team-share mode, missing `.mcp.json` or server definitions → log warning and skip. Otherwise unchanged.
+8. Existing per-tool projection logic continues unchanged for non-vendored, non-team-share targets.
 
 ## Drift Matrix
 
@@ -252,74 +417,26 @@ Each row pairs two sources of truth and names the owner that resolves disagreeme
 | `.ai/scribe.lock` entry for `S` | `.scribe.yaml` doesn't reference `S` (and no kit transitively does) | Stale pin; `scribe project sync` removes | Surface in `--check` |
 | Vendored `.ai/skills/S/` | `.scribe-content-hash` mismatch with actual files | User edited or git-merged | `scribe sync` exits 8 (Frankenstein protection) |
 | Vendored `.ai/skills/S/` | `~/.scribe/skills/S/` differs (author edited locally) | **Project wins** | Used as projection source; global cache untouched |
-| Lockfile entry `S` | `~/.scribe/skills/S/` has different commit_sha | **Lockfile wins** | `scribe sync` re-fetches into cache, verifies content_hash |
+| Lockfile entry `S` | `~/.scribe/skills/S/` has different commit_sha (e.g. another project) | **Lockfile wins** | `validateProjectLock` re-fetches into cache, verifies `content_hash` |
+| Lockfile entry `S` install_command_hash | Re-fetched manifest commands | Hash mismatch → re-approval | Existing approval prompt reused |
 | `~/.scribe/state.json` says skill `S` Origin=Project | No `.ai/skills/S/` in repo | Author hasn't run `project sync` yet | Surface in `--check` |
 | `~/.scribe/state.json` missing entry for vendored skill | Vendored `.ai/skills/S/` exists | Migration / fresh clone | `scribe sync` populates state from project artifacts |
+| `~/.scribe/state.json` entry for vendored skill missing `ExcludedTools` in Boost project | Boost project detected | `scribe sync` writes `ExcludedTools=["claude"]` and continues | Idempotent on subsequent runs |
 
-## Components
+## Components-of-existing-code summary
 
-### New
+A reviewer-friendly table of what's reused vs. introduced:
 
-| Path | Purpose |
-|---|---|
-| `internal/projectstore/projectstore.go` | Reads `.ai/skills/`, `.ai/kits/`, `.ai/scribe.lock` from a project root; verifies `.scribe-content-hash` markers |
-| `internal/projectstore/resolver.go` | `Resolver` composes [project, global] stores with project precedence |
-| `cmd/project.go` | Parent `scribe project` command group |
-| `cmd/project_sync.go` | `scribe project sync` (with `--check`, `--force`, `--vendor <name>`, `--json`) |
-| `cmd/project_skill.go` | `scribe project skill create`, `scribe project skill claim` (sets `Origin = OriginProject`) |
-
-### Extended
-
-| Path | Change |
-|---|---|
-| `internal/lockfile/lockfile.go` | Add `ProjectLockfile` type + `kind: ProjectLock` discriminator. Parser dispatches on `kind:`. Reuse `Entry`, `HashFiles`, `CommandHash`. |
-| `internal/state/state.go` | Add `OriginProject` constant. Migration: existing `OriginLocal` skills stay `OriginLocal`; users opt them into `OriginProject` via `scribe project skill claim` (one-time). |
-| `internal/sync/` | Sync executor consults `projectstore.Resolver`; respects lockfile precedence; handles team-share-mode snippet skip; in Boost projects, skips Claude projection for vendored skills. |
-| `cmd/sync.go` | Detects team-share mode (presence of `.ai/scribe.lock`); removes `--update-lock` flag (the operation must use `scribe project sync` instead). |
-
-### Untouched
-
-- `.scribe.yaml` schema. v1 is a storage layer change, not an intent change.
-- `internal/snippet/` API surface; v1 only changes the *call site* in sync to handle team-share-mode missing-source as a warning.
-
-## Resolution algorithm
-
-### `scribe project sync`
-
-1. Walk project root upward to find `.scribe.yaml`.
-2. Parse intent: `kits:`, `add:`, `mcp:`.
-3. For each kit name in `kits:`:
-   - If `~/.scribe/kits/<name>.yaml` doesn't exist → exit 3.
-   - Compare project-side `.ai/kits/<name>.yaml` if present.
-     - Identical → no-op.
-     - Project newer (mtime + diff) → exit 5 unless `--force`.
-     - Otherwise copy and update vendoring state.
-4. For each entry in `add:` (and each transitive skill from kits):
-   - Read `Origin` from machine state (`internal/state`).
-   - `OriginProject` → vendor as folder copy. Compute `.scribe-content-hash` and write into folder. Update vendoring state.
-   - `OriginRegistry` → resolve through registry (`internal/manifest`, `internal/sync` plumbing) for `commit_sha` + fetch content for `content_hash`. Carry over `install_command_hash` from registry's lockfile entry if present. Write into `.ai/scribe.lock`.
-   - `OriginLocal` / `OriginAdopted` → exit 5 with "skill `<name>` has Origin=Local; pass `--vendor <name>` to elect it into the project, or recreate via `scribe project skill claim <name>`."
-   - `OriginBootstrap` → skip with informational note ("bootstrap skill `<name>` is shipped by the scribe binary; not vendored").
-5. Compare lockfile entries against `add:` ∪ kits' transitive skills. Drop stale entries.
-6. Sort lockfile deterministically and write atomically (`tmp + rename`).
-7. If `--check`, compute the diff against on-disk content; non-empty diff → exit 8.
-8. Print summary; emit JSON envelope when `--json`.
-
-### `scribe sync` (extended)
-
-1. Existing project root detection.
-2. If `.ai/scribe.lock` present → enter team-share mode.
-3. Load merged kits via `projectstore.Resolver`. Project entries win on conflict.
-4. Load lockfile:
-   - For each pinned skill, ensure `~/.scribe/skills/<name>/` cache reflects `commit_sha`.
-   - Missing or stale → fetch `source_registry@commit_sha`, populate cache, verify `content_hash`. Fail fast on mismatch (exit 6).
-5. For vendored skills under `.ai/skills/<name>/`:
-   - Verify `.scribe-content-hash` matches recomputed hash. Mismatch → exit 8 (Frankenstein protection).
-   - Symlink into agent skill dirs per active tools, **except** for Claude in Boost projects (where Boost owns the projection).
-   - If a target `.claude/skills/<name>/` already exists as a real directory (e.g. Boost just ran), and we're not in a Boost project (so we expected to symlink), surface exit 5 (conflict) with a hint.
-6. Snippet projection: if a `snippets:` name has no `~/.scribe/snippets/<name>.md` source AND we're in team-share mode → log a warning and skip. Otherwise behave as today.
-7. MCP projection unchanged. Warn (don't error) on missing local MCP server definitions for names referenced in `.scribe.yaml`.
-8. Existing per-tool projection logic continues unchanged for non-vendored, non-team-share targets.
+| Existing | Reused as-is in v1 | Extended | Replaced |
+|---|---|---|---|
+| `internal/lockfile.Entry` | yes (registry-side) | embedded into `ProjectEntry` | — |
+| `internal/lockfile.HashFiles`, `HashDir` | `HashFiles` reused | `HashSet` wraps with allow-list + LF | — |
+| `internal/lockfile.CommandHash` | yes | becomes single canonical source | replaces `internal/sync.CommandHash` |
+| `internal/state.Origin` constants | `OriginRegistry`, `OriginLocal`, `OriginBootstrap` reused | + new `OriginProject` | — |
+| `state.InstalledSkill` | yes | + `ExcludedTools`, + new `state.VendorState` map | — |
+| `state.tools_resolve.EffectiveTools` | yes | reads `ExcludedTools` | — |
+| `internal/sync.Syncer` registry-side path | yes | snippet/MCP teamshare-mode flags, `validateProjectLock` sibling | — |
+| `internal/snippet` | yes | call-site change in sync | — |
 
 ## Edge cases
 
@@ -328,44 +445,58 @@ Each row pairs two sources of truth and names the owner that resolves disagreeme
 | First-time author bootstrap (no `.ai/`, no lockfile, fresh `.scribe.yaml`) | `scribe sync` runs in legacy/author mode (no team-share). Warns "this project is not yet team-shared; run `scribe project sync` to enable." Skills resolve from machine state as today. |
 | Lockfile present but `add:` entries exist with no lockfile entry | Exit 8. Hint: `scribe project sync` (author) or report drift to author (teammate). |
 | Lockfile entry pin no longer fetchable | Exit 6. Surface registry + skill name. |
-| Vendored skill name collides with lockfile pin name | Vendored wins (project precedence); warn. This is a config error; `scribe project sync` should refuse to write both. |
+| Lockfile entry references a registry the teammate hasn't connected | Exit 4 (permission) with hint `scribe registry connect <repo>`. |
+| Vendored skill name collides with lockfile pin name | Vendored wins (project precedence); warn. `scribe project sync` should refuse to write both. |
 | `~/.scribe/kits/foo.yaml` differs from `.ai/kits/foo.yaml` | Project wins silently. |
 | `scribe project sync` would overwrite a hand-edited project copy | Exit 5 unless `--force`. With `--force`, write a backup file (`.ai/kits/foo.yaml.bak.<timestamp>`) before overwrite. |
 | `.scribe-content-hash` missing inside vendored skill folder | Treated as "user-owned" content (e.g. pre-existing `.ai/skills/<name>/` from before scribe team-share). `scribe sync` warns and projects but doesn't validate; `scribe project sync --force` adopts and writes the marker. |
 | Concurrent `scribe project sync` runs in same project | Existing per-state lock at `~/.scribe/state.json` is *not sufficient*. Add a project-scoped lock at `~/.scribe/state/project-locks/<project-root-hash>.lock` covering project sync writes to `.ai/`. |
-| `boost:update` runs after `scribe sync` | In Boost projects: scribe never owns Claude projection for vendored skills, so no clash. Registry-pinned skills aren't in `.ai/skills/` so Boost can't see them. |
-| `scribe sync` after `boost:update` rebuilt `.claude/skills/foo/` as a real dir | In Boost projects: scribe skips Claude projection for `foo` (vendored case). In non-Boost projects: scribe surfaces exit 5 with a remediation. |
+| Two projects pin different commits of the same skill name | `validateProjectLock` refetches on stale cache; user sees no error, only some refetch latency. Symptom documented. Content-addressed cache is parking-lot. |
+| `boost:update` runs after `scribe sync` | In Boost projects: `ExcludedTools=["claude"]` for vendored skills means scribe never owned Claude projection. Boost rebuild is harmless. Reconcile sees the exclusion and doesn't try to repair. |
+| `scribe sync` after `boost:update` rebuilt `.claude/skills/foo/` as a real dir | In Boost projects: Claude excluded from `EffectiveTools` for vendored skills, so scribe never targets it. In non-Boost projects: scribe surfaces exit 5 with a remediation. |
 | Two authors push divergent `scribe project sync` results, git per-file merges | `.scribe-content-hash` mismatch → next `scribe sync` exits 8. Reconciliation: rerun `scribe project sync` from a clean state. |
 
 ## Testing
 
-- **Unit**: `ProjectLockfile` parse/write round-trip + discriminator dispatch; `Resolver` precedence; vendor classification by `Origin`; `.scribe-content-hash` round-trip; Boost detection.
-- **Integration**: golden-file end-to-end via `testdata/`. Synthetic project with `.scribe.yaml` + `.ai/`, run sync against fake registry, snapshot resulting agent skill dirs. Cover Boost-mode (composer.json present) vs non-Boost.
-- **E2E**: anvil worktree pair. Author worktree runs `scribe project skill create custom-skill`, `scribe project sync`, commits. Teammate worktree runs `scribe sync`, asserts identical skill dirs in `~/.claude/skills/`. Edit `.ai/skills/custom-skill/SKILL.md` on disk (simulating Frankenstein) and assert exit 8.
-- **Concurrency**: two parallel `scribe project sync` invocations; one wins, the other waits or errors clearly.
+- **Unit**: `ProjectLockfile`/`ProjectEntry` parse/write round-trip + discriminator dispatch; `Resolver` precedence; vendor classification by `Origin` including zero-value-Registry refusal; `.scribe-content-hash` round-trip via `HashSet`; LF normalization; git-ls-files vs denylist file selection; Boost detection; `EffectiveTools` minus `ExcludedTools`; `CommandHash` consistency between sync and lockfile.
+- **Integration**: golden-file end-to-end via `testdata/`. Synthetic project with `.scribe.yaml` + `.ai/`, run sync against fake registry, snapshot resulting agent skill dirs. Cover Boost-mode (composer.json present, `ReconcilePre`/`ReconcilePost` exercised) vs non-Boost. Cross-project skill-name collision: project A pins `tdd@old`, project B pins `tdd@new`; switch dirs and confirm refetch. Hash-set determinism: author commits with `.DS_Store`, teammate clones on Linux, `scribe sync` succeeds.
+- **E2E**: anvil worktree pair. Author runs `scribe project skill create custom-skill`, `scribe project sync`, commits. Teammate runs `scribe sync`, asserts identical skill dirs in `~/.claude/skills/`. Edit `.ai/skills/custom-skill/SKILL.md` on disk and assert exit 8 (Frankenstein). For Boost case: pre-create `.claude/skills/custom-skill/` as a real dir (simulating `boost:update`) and confirm scribe sync converges.
+- **Concurrency**: two parallel `scribe project sync` invocations; project-scoped lock serializes them.
 
 ## Migration
 
 No automatic migration. Existing scribe projects continue working with author-machine-only resolution. Upgrade path: author runs `scribe project sync` once; on next push, repo becomes team-shareable.
 
-For projects with hand-rolled `.ai/skills/<name>/` content predating scribe vendoring (e.g. Laravel Boost authoring), `scribe project sync --force --adopt` adopts those folders into vendoring state by writing `.scribe-content-hash` against the existing content (without changing it). Without `--adopt`, the command refuses (exit 5) to avoid silent overwrites.
+For projects with hand-rolled `.ai/skills/<name>/` content predating scribe vendoring (e.g. Laravel Boost authoring), `scribe project sync --force` adopts those folders into vendoring state by writing `.scribe-content-hash` against the existing content (without changing it). Without `--force`, the command refuses (exit 5) to avoid silent overwrites. (No separate `--adopt` flag; v2's mention was inconsistent.)
 
 `OriginProject` does not auto-migrate from `OriginLocal`. Authors run `scribe project skill claim <name>` once per personal-but-now-team-shared skill to opt in. This is intentional — see D1's safety rationale.
 
+State file format bumps to v3 to accommodate `ExcludedTools`, `VendorState`, and full-SHA-256 package approval hashes. Existing v2 state loads, populates new fields with empty defaults, and is rewritten on next save. Package approvals stored with the old 16-hex-char hash require one re-approval per package on next sync (existing approval prompt path).
+
 ## Parking lot
 
-- **Snippets in team-share (v2)** — vendor `.ai/snippets/<name>.md` and adapt projection to read from project store.
+- **Snippets in team-share (v2)** — vendor `.ai/snippets/<name>.md` and adapt projection to read from project store. Coordinate with Laravel Boost's `<laravel-boost-guidelines>` block; scribe's `<!-- scribe-snippet:... -->` markers don't collide.
 - **MCP server definitions** — share `.mcp.json` content per tool. Out of scope.
 - **Per-skill install_command pinning for vendored skills** — needed if/when project-authored skills can carry runtime install commands. Today they cannot.
 - **Registry allow-listing / signing** — richer trust model beyond the connected-registries gate.
-- **Content-addressed cache (`~/.scribe/skills/<sha>/`)** — would let two projects pin different revs of the same name. Not needed for v1; today's name-keyed cache is sufficient given lockfile validation.
+- **Content-addressed cache (`~/.scribe/skills/<sha>/`)** — would let two projects pin different revs of the same name without refetch. Not needed for v1 given `validateProjectLock`'s refetch-on-stale behavior; document as ergonomic improvement.
 - **Final naming** — `scribe project sync` vs `scribe vendor` vs `scribe project publish`. Decide before implementation.
 
-## Resolved (was open in v1)
+## Resolved (was open in v1 / v2)
 
-- `blob_sha` semantics → resolved: reuse `lockfile.HashFiles`; field renamed `content_hash` for consistency with existing schema.
-- Lockfile package collision → resolved: extend `internal/lockfile` with discriminated `ProjectLockfile`; share `Entry`, `HashFiles`, `CommandHash`.
-- Vendor-vs-pin classification → resolved: explicit `OriginProject`; `OriginLocal` requires `--vendor` opt-in; bootstrap origins skipped.
-- Boost interop → resolved: detect Boost project, partition projection ownership (Boost = Claude, scribe = others); registry pins unaffected.
-- Two pin sources of truth → resolved: lockfile is canonical inside project; sync reconciles state to lockfile; `scribe sync --update-lock` removed.
-- Frankenstein vendored folders → resolved: `.scribe-content-hash` marker per skill; sync verifies.
+- `blob_sha` semantics → resolved (v2): reuse `lockfile.HashFiles`; field renamed `content_hash`.
+- Lockfile package collision → resolved (v2): extend `internal/lockfile` with discriminated `ProjectLockfile`.
+- Vendor-vs-pin classification → resolved (v2): explicit `OriginProject`; `OriginLocal` requires `--vendor` opt-in; bootstrap origins skipped.
+- Boost interop → hardened (v3): `state.InstalledSkill.ExcludedTools` so reconcile and installer agree.
+- Two pin sources of truth → resolved (v2): lockfile is canonical inside project.
+- Frankenstein vendored folders → resolved (v2): `.scribe-content-hash` marker per skill.
+- `ProjectEntry` insufficient for fetching → resolved (v3): frozen fetch descriptor (path, source repo, type, install commands).
+- Hash-set undefined → resolved (v3): git-tracked-or-denylist + LF normalization.
+- `OriginRegistry` zero-value safety → resolved (v3): require valid sources.
+- `CommandHash` two-implementations → resolved (v3): unified on lockfile's full SHA-256.
+- Stale name-keyed cache failing project-lock validation → resolved (v3): distinct `validateProjectLock`.
+- Qualified `add:` parsing → resolved (v3): bare-name disambiguation rule + qualified ref direct resolution.
+- Connected-registry prerequisite → acknowledged in Goal #1 (v3): explicit prerequisite, not zero-setup.
+- First-seen warning state field → resolved (v3): `state.VendorState` map.
+- Project skill commands semantics → resolved (v3): D4 specifies `create` and `claim`.
+- `--adopt` flag inconsistency → resolved (v3): `--force` covers adoption; no separate flag.
