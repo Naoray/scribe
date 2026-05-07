@@ -1,4 +1,4 @@
-## v1.1.0 — Unreleased
+## v1.1.0 — 2026-05-07
 
 ### Added
 - **Snippets now project during `scribe sync`** — `.scribe.yaml` `snippets:` entries load `~/.scribe/snippets/<name>.md`, strip frontmatter, and write managed rules into `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and Cursor `.cursor/rules/*.mdc` targets.
