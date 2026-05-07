@@ -24,9 +24,9 @@ type Snippet struct {
 }
 
 type frontmatter struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description"`
-	Targets     []string `yaml:"targets"`
+	Name        string   `yaml:"name,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+	Targets     []string `yaml:"targets,omitempty"`
 }
 
 type cursorFrontmatter struct {
@@ -304,6 +304,34 @@ func writeCursorRules(projectRoot string, snippets []Snippet) ([]string, error) 
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+func RemoveLegacyCursorRule(projectRoot string, sn Snippet) (string, bool, error) {
+	path := TargetPath(projectRoot, sn.Name, "cursor")
+	if path == "" {
+		return "", false, nil
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read legacy cursor snippet %s: %w", path, err)
+	}
+	if bytes.Contains(data, []byte("<!-- scribe-snippet:cursor -->")) {
+		return "", false, nil
+	}
+	_, body, err := split(data)
+	if err != nil {
+		return "", false, nil
+	}
+	if !bytes.Equal(bytes.TrimSpace(body), bytes.TrimSpace(sn.Body)) {
+		return "", false, nil
+	}
+	if err := os.Remove(path); err != nil {
+		return "", false, fmt.Errorf("remove legacy cursor snippet %s: %w", path, err)
+	}
+	return path, true, nil
 }
 
 func cursorRule(sn Snippet) ([]byte, error) {

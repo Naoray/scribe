@@ -346,6 +346,58 @@ func TestStepProjectSnippets_RemovesStaleBlocksWhenProjectFileClearsSnippets(t *
 	}
 }
 
+func TestStepProjectSnippets_RemovesLegacyCursorRuleForStaleSnippet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	projectPath := filepath.Join(projectDir, projectfile.Filename)
+	if err := os.WriteFile(projectPath, []byte("snippets: []\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	snippetDir := filepath.Join(home, ".scribe", "snippets")
+	if err := os.MkdirAll(snippetDir, 0o755); err != nil {
+		t.Fatalf("mkdir snippets: %v", err)
+	}
+	snippetPath := filepath.Join(snippetDir, "commit-discipline.md")
+	snippetContent := "---\nname: commit-discipline\ndescription: Commit rules\ntargets: [cursor]\n---\n# Agent Commit Discipline\n"
+	if err := os.WriteFile(snippetPath, []byte(snippetContent), 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+	cursorRulesDir := filepath.Join(projectDir, ".cursor", "rules")
+	if err := os.MkdirAll(cursorRulesDir, 0o755); err != nil {
+		t.Fatalf("mkdir cursor rules: %v", err)
+	}
+	legacyRule := filepath.Join(cursorRulesDir, "commit-discipline.mdc")
+	if err := os.WriteFile(legacyRule, []byte("---\ndescription: Commit rules\nalwaysApply: false\n---\n# Agent Commit Discipline\n"), 0o644); err != nil {
+		t.Fatalf("write legacy cursor rule: %v", err)
+	}
+	userRule := filepath.Join(cursorRulesDir, "user-rule.mdc")
+	if err := os.WriteFile(userRule, []byte("---\ndescription: user rule\nalwaysApply: false\n---\n# User Rule\n"), 0o644); err != nil {
+		t.Fatalf("write user cursor rule: %v", err)
+	}
+	b := &Bag{
+		ProjectRoot: projectDir,
+		State: &state.State{Snippets: map[string]state.InstalledSnippet{
+			"commit-discipline": {Source: snippetPath, Targets: []string{"cursor"}},
+		}},
+		Tools: []tools.Tool{tools.CursorTool{}},
+	}
+
+	if err := StepProjectSnippets(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectSnippets: %v", err)
+	}
+	if _, err := os.Stat(legacyRule); !os.IsNotExist(err) {
+		t.Fatalf("legacy cursor rule still exists or stat failed: %v", err)
+	}
+	if _, err := os.Stat(userRule); err != nil {
+		t.Fatalf("user cursor rule removed: %v", err)
+	}
+	if !b.StateDirty {
+		t.Fatal("StateDirty = false, want true")
+	}
+}
+
 func TestStepResolveMCPServers_NoProjectFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

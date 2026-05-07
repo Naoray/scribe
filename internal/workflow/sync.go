@@ -240,6 +240,10 @@ func StepProjectSnippets(_ context.Context, b *Bag) error {
 			return err
 		}
 	}
+	legacyPaths, err := removeLegacyCursorSnippets(b.ProjectRoot, snippets, b.State)
+	if err != nil {
+		return err
+	}
 	toolNames := make([]string, 0, len(b.Tools))
 	for _, tool := range b.Tools {
 		toolNames = append(toolNames, tool.Name())
@@ -258,12 +262,48 @@ func StepProjectSnippets(_ context.Context, b *Bag) error {
 				Targets: append([]string(nil), sn.Targets...),
 			}
 		}
-		if len(paths) > 0 {
+		if len(paths) > 0 || len(legacyPaths) > 0 {
 			b.MarkStateDirty()
 		}
 	}
 	b.ProjectSnippets = append(b.ProjectSnippets[:0], pf.Snippets...)
 	return nil
+}
+
+func removeLegacyCursorSnippets(projectRoot string, snippets []snippet.Snippet, st *state.State) ([]string, error) {
+	if st == nil || len(st.Snippets) == 0 {
+		return nil, nil
+	}
+	current := map[string]bool{}
+	for _, sn := range snippets {
+		current[sn.Name] = true
+	}
+	var paths []string
+	for name, installed := range st.Snippets {
+		if current[name] || !snippet.TargetsAgent(installed.Targets, "cursor") || installed.Source == "" {
+			continue
+		}
+		data, err := os.ReadFile(installed.Source)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return paths, fmt.Errorf("read stale snippet source %s: %w", installed.Source, err)
+		}
+		sn, err := snippet.Parse(installed.Source, data)
+		if err != nil {
+			continue
+		}
+		path, removed, err := snippet.RemoveLegacyCursorRule(projectRoot, sn)
+		if err != nil {
+			return paths, err
+		}
+		if removed {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 func projectClaudeMCPServers(projectRoot string, servers []string) error {

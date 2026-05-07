@@ -108,6 +108,9 @@ func TestContentForBudgetAndCursorRuleQuoteYAMLDescriptions(t *testing.T) {
 	if !strings.Contains(string(ContentForBudget(sn)), "description:") {
 		t.Fatalf("budget content missing description:\n%s", ContentForBudget(sn))
 	}
+	if strings.Contains(string(ContentForBudget(sn)), "name:") || strings.Contains(string(ContentForBudget(sn)), "targets:") {
+		t.Fatalf("budget content includes empty metadata:\n%s", ContentForBudget(sn))
+	}
 	project := t.TempDir()
 	if _, err := Project(project, []Snippet{sn}, []string{"cursor"}); err != nil {
 		t.Fatalf("Project: %v", err)
