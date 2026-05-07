@@ -1,6 +1,6 @@
 # Troubleshooting
 
-When something looks off, start with `scribe doctor`. It compares the canonical store under `~/.scribe/skills/` against the tool-facing projections (e.g. `<project>/.claude/skills/`, `~/.codex/skills/`) and reports anything inconsistent.
+When something looks off, start with `scribe doctor`. It compares the canonical store under `~/.scribe/skills/` against the tool-facing projections (e.g. `<project>/.claude/skills/`, `<project>/.agents/skills/`) and snippet blocks in agent rules files, then reports anything inconsistent.
 
 ## `scribe doctor`
 
@@ -37,11 +37,12 @@ Live `scribe doctor --json` excerpt:
 
 `kind` values you'll see today:
 
-- `projection_drift` — a tool-facing copy is missing, in the wrong place, or no longer matches the canonical store
-- `metadata_normalization` — frontmatter in the canonical `SKILL.md` deviates from the canonical shape (whitespace, ordering, frontmatter casing)
-- `opaque_tool` — a registered tool reports as opaque, so projection comparison is intentionally skipped (informational, not a real problem)
+- `projection_drift` — a tool-facing skill copy is missing, in the wrong place, or no longer matches the canonical store
+- `snippet_projection_drift` — a snippet declared in `.scribe.yaml` has no block in its target agent rules file (`CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`), or the projected block content drifted from `~/.scribe/snippets/<name>.md`. Remediation: run `scribe sync` to rewrite the block.
+- `canonical_metadata` — frontmatter in the canonical `SKILL.md` deviates from the canonical shape (whitespace, ordering, frontmatter casing). `scribe doctor --fix` normalizes it.
+- `migration_budget_overflow` — a project on global-projection compat is over Codex's 5440-byte description budget; switch to project-local projection via `.scribe.yaml`.
 
-`scribe doctor` v1 does not attempt to rewrite mixed package layouts for Codex. It focuses on canonical-metadata health plus projection repair.
+`scribe doctor` v1 does not attempt to rewrite mixed package layouts for Codex. It focuses on canonical-metadata health plus skill and snippet projection repair.
 
 ## Common situations
 

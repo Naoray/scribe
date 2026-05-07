@@ -4,7 +4,7 @@ Scribe scopes skill availability to the project you're working in, instead of du
 
 - `.scribe.yaml` — a per-repo declaration of which kits, snippets, or extra skills the project wants
 - **Kits** — named, reusable bundles of skills, stackable per project
-- **Snippets** — rules / behavior directives injected into agent rules files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`)
+- **Snippets** — rules / behavior directives injected into agent rules files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) and Cursor rules (`.cursor/rules/<name>.mdc`)
 
 Full design rationale lives in [`docs/superpowers/specs/2026-04-29-kits-and-snippets-design.md`](superpowers/specs/2026-04-29-kits-and-snippets-design.md). This page documents the shipped surface.
 
@@ -12,7 +12,7 @@ Full design rationale lives in [`docs/superpowers/specs/2026-04-29-kits-and-snip
 
 Earlier scribe symlinked `~/.scribe/skills/<name>` → `~/.claude/skills/<name>`, machine-globally. Every session saw every skill — bad for Codex's 5440-byte description budget (issue #114) and bad for routing quality once you accumulate hundreds of skills.
 
-Now scribe symlinks into `<project>/.claude/skills/<name>` and `<project>/.codex/skills/<name>`. Both Claude Code and Codex already read project-local skill directories without any flag. The canonical store at `~/.scribe/skills/` is unchanged.
+Now scribe symlinks into `<project>/.claude/skills/<name>` and `<project>/.agents/skills/<name>`. Both Claude Code and Codex already read project-local skill directories without any flag (Codex reads `.agents/skills/`). The canonical store at `~/.scribe/skills/` is unchanged.
 
 Effect: a session's skill set is determined by `cwd`. Two repos see two different skill sets, even if you only ran `scribe sync` once. Parallel sessions in the same repo with different kits are handled by anvil worktrees.
 
@@ -63,7 +63,7 @@ Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits 
 
 ### Authoring kits and snippets (today)
 
-`scribe kit create` scaffolds local kit files. A user-facing snippet CLI is still on the v1.1 roadmap; until it ships, the embedded scribe skill (installed automatically the first time you run scribe in any supported agent session — Claude Code, Codex, Cursor, Gemini, or a custom tool registered via `scribe tools add`) knows how to scaffold snippets directly. **Ask your AI agent.**
+Snippet **projection** ships in v1.1.0 — `scribe sync` writes snippet bodies into project agent rules files and Cursor rules. A user-facing snippet authoring CLI is still absent; agents (or you, by hand) write snippet markdown into `~/.scribe/snippets/<name>.md` and reference it from `.scribe.yaml`. The embedded scribe skill (installed automatically the first time you run scribe in any supported agent session — Claude Code, Codex, Cursor, Gemini, or a custom tool registered via `scribe tools add`) knows the snippet schema and will scaffold one for you. **Ask your AI agent.**
 
 Examples:
 
@@ -115,7 +115,7 @@ Snippets are deliberately plain text in v1: no variables, no conditionals, no li
 
 ## Migration from global projection
 
-Existing global-projection installs are not auto-migrated on upgrade. Scribe ships a compatibility mode that keeps `~/.claude/skills/` symlinks working with a deprecation banner. A dedicated migration command walks projects you select interactively. Compat mode is removed at v1.0.
+Existing global-projection installs are not auto-migrated on upgrade. Scribe ships a compatibility mode that keeps `~/.claude/skills/` symlinks working with a deprecation banner; `scribe migrate global-to-projects` walks projects you select interactively to flip them onto project-local projection.
 
 ## Where to look next
 

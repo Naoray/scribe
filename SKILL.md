@@ -102,31 +102,35 @@ Use it for installs, updates, removal, adoption of unmanaged local skills, and s
 
 | User says | Run |
 | --- | --- |
-| install the X skill | `scribe add X --json` |
+| search available skills | `scribe browse --json` |
+| search available skills matching X | `scribe browse --query X --json` |
+| install the X skill | `scribe browse --install X --yes --json` |
 | install X from owner/repo | `scribe add owner/repo:X --yes --json` |
 | what skills are installed | `scribe list --json` |
-| what skills are available remotely | `scribe list --remote --json` |
+| what skills are available remotely | `scribe browse --json` |
 | sync my skills | `scribe sync --json` |
+| show resolved project loadout | `scribe show --json` |
 | remove X | `scribe remove X --yes --json` |
 | import existing local skills | `scribe adopt --dry-run --json` |
 | actually adopt them | `scribe adopt --yes --json` |
-| explain what X does | `scribe explain X --json` |
+| explain what X does (skill or snippet) | `scribe explain X --json` |
 | show scribe status | `scribe status --json` |
 | audit managed skill health | `scribe doctor --json` |
 | repair managed skill metadata/projections | `scribe doctor --skill <name> --fix` |
-| connect a registry | `scribe registry add owner/repo` |
+| connect a registry | `scribe registry connect owner/repo` |
 
 ## Non-negotiable rules
 
 1. Always use `--json` for anything you plan to parse.
-2. Never run bare `scribe add` in automation.
-3. Prefer `owner/repo:skill` for deterministic installs.
+2. Prefer `scribe browse --query ... --json` for discovery and `scribe browse --install ... --yes --json` for exact-name installs.
+3. Prefer `owner/repo:skill` for deterministic installs via `scribe add`.
 4. Use `--yes` for direct installs and removals.
 5. Use `scribe adopt --dry-run --json` before `scribe adopt --yes --json`.
 6. Do not hand-edit `~/.scribe/state.json`.
 7. Do not copy skill files directly into tool directories; use `scribe adopt`.
-8. `scribe sync` reconciles registries; it does not install an arbitrary new skill by query.
-9. Some failures still return plain stderr plus non-zero exit, not a JSON error envelope.
+8. `scribe sync` reconciles the project loadout; it does not install an arbitrary new skill by query.
+9. `scribe list` is local-first. Use `scribe browse` for registry discovery.
+10. Some failures still return plain stderr plus non-zero exit, not a JSON error envelope.
 
 ## JSON envelope (format_version=1)
 
@@ -218,7 +222,7 @@ All keys are optional. Empty / missing file = no project intent. `mcp` and `mcp_
 scribe sync --json
 ```
 
-Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.codex/skills/` dirs, projects kit-declared and project-declared MCP server names into project-local Claude settings at `.claude/settings.json`, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus Cursor rules in `.cursor/rules/*.mdc` (markers preserved; content outside markers untouched). Scribe does not start MCP server processes.
+Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.agents/skills/` dirs (Codex reads `.agents/skills/`), projects kit-declared and project-declared MCP server names into project-local Claude settings at `.claude/settings.json`, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus Cursor rules in `.cursor/rules/<name>.mdc` (markers preserved; content outside markers untouched). Scribe does not start MCP server processes.
 
 If `.scribe.yaml` changes, or generated agent files no longer match it, run `scribe sync --json` before assuming the active agent loadout is current.
 
@@ -240,11 +244,11 @@ Top level: array.
 Each item may include `name`, `description`, `package`, `revision`, `content_hash`, `targets`, `managed`, `origin`, and `path`.
 Fresh-home output is `[]`.
 
-### `scribe list --remote --json`
+### `scribe browse --json`
 
 Top level: object with `registries`.
 Each registry has `registry` and `skills`.
-Each remote skill may include `name`, `status`, `version`, `loadout_ref`, `maintainer`, and `agents`.
+Each remote skill may include `name`, `status`, `version`, `loadout_ref`, `maintainer`, and `agents`. Add `--query <q>` to filter, or `--install <name> --yes` to install an exact match.
 
 ### `scribe add query --json`
 
@@ -311,8 +315,8 @@ scribe add owner/repo:skill --yes --json
 Search, then install deterministically:
 
 ```bash
-scribe add query --json
-scribe add owner/repo:skill --yes --json
+scribe browse --query query --json
+scribe browse --install owner/repo:skill --yes --json
 ```
 
 Inspect local state:

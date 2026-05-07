@@ -13,12 +13,13 @@
 
 ## What it does
 
-AI coding agents work better when you teach them how your team works — code review style, deployment checklists, framework patterns. These [SKILL.md](https://agentskills.io) files live in `~/.claude/skills/`, `~/.codex/skills/`, and similar directories. Sharing them used to mean Slack links and manual copying. Skills got stale; new teammates had no idea what existed.
+AI coding agents work better when you teach them how your team works — code review style, deployment checklists, framework patterns. These [SKILL.md](https://agentskills.io) files live in `~/.claude/skills/`, `~/.agents/skills/` (Codex), and similar directories. Sharing them used to mean Slack links and manual copying. Skills got stale; new teammates had no idea what existed.
 
 Scribe makes the skill set declarative.
 
 - **One source of truth.** Put your team's skills in a GitHub repo with a `scribe.yaml` manifest. Teammates run `scribe registry connect` once.
 - **Cross-tool projection.** One canonical store under `~/.scribe/skills/` projects to whatever agent you use — Claude Code, Codex, Cursor, and Gemini ship as built-ins; register others (Aider, Cline, Roo, your own tool) with `scribe tools add`.
+- **Project-scoped loadouts.** A `.scribe.yaml` per repo declares the **kits** (named skill bundles), **snippets** (rules injected into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`), and **MCP server names** that project wants. Skills land in `<project>/.claude/skills/` and `<project>/.agents/skills/` — not machine-globally — so each repo sees only what it asked for.
 - **Agent-first, scriptable.** Every migrated command emits a versioned JSON envelope (`{status, format_version, data, meta}`) with exit codes, partial-success semantics, and JSON Schema introspection.
 
 ## Install
@@ -72,10 +73,13 @@ Please set it up for me:
 ```bash
 scribe list           # see skills already available across tools
 scribe adopt          # claim hand-rolled skills from Claude/Codex/Cursor
-scribe sync           # project managed skills into each detected tool
+scribe sync           # project managed skills, kits, snippets, and MCP names into the current project
+scribe show           # show the resolved project skill set and per-agent budgets
 ```
 
 That is enough to start managing existing local skills between tools. Use `scribe tools` to see detected agents, and `scribe skill tools <name>` to enable, disable, or reset projection for one skill.
+
+Drop a `.scribe.yaml` at the repo root to declare which kits, snippets, extra skills, or MCP server names this project wants — `scribe sync` then projects exactly that set into `<project>/.claude/skills/` + `<project>/.agents/skills/`, writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus `.cursor/rules/<name>.mdc`, and records MCP server names in `.claude/settings.json` (definitions must already exist in `.mcp.json`; scribe does not start MCP processes). See [`docs/projects-and-kits.md`](docs/projects-and-kits.md).
 
 Registries are for adding shared/upstream skills. Connect one when you want more than your local set:
 

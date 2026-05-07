@@ -15,14 +15,19 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe install --all` | Install every catalog entry from a registry in one shot |
 | `scribe adopt [name]` | Import hand-rolled skills from `~/.claude/skills` etc. into the canonical store |
 | `scribe remove <skill>` | Remove a skill from this machine (records a deny-list entry so it does not come back on the next sync) |
-| `scribe sync` | Reconcile local skill state, tool installs, and connected registries |
-| `scribe doctor` | Inspect managed skills and projections for repairable issues |
+| `scribe sync` | Reconcile the current project: resolve `.scribe.yaml` (kits, snippets, MCP, add/remove), project skills into `<project>/.claude/skills/` and `<project>/.agents/skills/`, write snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`, and record MCP server names in `.claude/settings.json` |
+| `scribe show` | Show the resolved project skill set and per-agent budgets |
+| `scribe check` | Check connected registries for lockfile updates without modifying anything |
+| `scribe update --apply` | Refresh registry lockfiles after review (omit `--apply` for a dry-run report) |
+| `scribe push <skill>` | Push local skill edits back to their source registry |
+| `scribe init` | Scaffold a `scribe.yaml` package manifest from `SKILL.md` files in the current directory |
+| `scribe doctor` | Inspect managed skills and projections (skills + snippets) for repairable issues |
 | `scribe doctor --fix` | Normalize canonical skill metadata and repair affected projections |
 | `scribe doctor --skill <name> --fix` | Repair a single managed skill and its projections |
 | `scribe skill repair <skill> --tool <tool>` | Resolve drift when a tool-local copy diverges from the canonical store |
 | `scribe status` | Show connected registries, installed count, and last sync |
 | `scribe tools` | List detected AI tools on this machine; enable, disable, or register custom ones |
-| `scribe explain <skill>` | AI-powered skill explanation (or `--raw` for the rendered SKILL.md body) |
+| `scribe explain <skill-or-snippet>` | AI-powered explanation for an installed skill or snippet (or `--raw` for the rendered body) |
 | `scribe upgrade-agent` | Refresh the embedded scribe bootstrap skill |
 
 ## Registry management
