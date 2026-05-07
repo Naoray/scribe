@@ -147,7 +147,7 @@ Run `scribe schema <command> --json` before composing an unfamiliar call — ret
 
 ## Project file (`.scribe.yaml`)
 
-If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. Kits are first-class local skill bundles, and `scribe kit create` can scaffold them.
+If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `mcp`, `mcp_servers`, `add`, `remove`. Kits are first-class local skill bundles, and `scribe kit create` can scaffold them.
 
 ### Kits
 
@@ -179,7 +179,9 @@ kits:
   - laravel-stack
 ```
 
-`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`. It also projects kit-declared `mcp_servers` into project-local Claude settings at `.claude/settings.json` while preserving user-managed settings. Scribe records server names for Claude approval/configuration; it does not start MCP server processes.
+`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`. It also projects kit-declared and project-declared `mcp` / `mcp_servers` into project-local Claude settings at `.claude/settings.json` while preserving user-managed settings. Scribe records server names for Claude approval/configuration; it does not start MCP server processes.
+
+Snippets listed in `.scribe.yaml` are loaded from `~/.scribe/snippets/<name>.md` and projected into `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, or `.cursor/rules/*.mdc` based on their frontmatter targets. If `.scribe.yaml` changes, or generated agent files no longer match it, run `scribe sync --json` before assuming the active agent loadout is current.
 
 To author a Kit, run:
 

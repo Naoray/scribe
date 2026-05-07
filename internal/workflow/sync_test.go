@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -214,6 +215,79 @@ func TestStepResolveMCPServers_WithProjectFile(t *testing.T) {
 	}
 	if !b.ProjectMCPServersEnabled {
 		t.Fatal("ProjectMCPServersEnabled should be true after MCP server resolution")
+	}
+}
+
+func TestStepResolveMCPServers_WithDirectProjectMCP(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	pfContent := "mcp:\n  - mempalace\nmcp_servers:\n  - playwright\n"
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte(pfContent), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	t.Chdir(projectDir)
+
+	b := &Bag{ProjectRoot: projectDir}
+	if err := StepResolveMCPServers(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveMCPServers: %v", err)
+	}
+
+	want := []string{"mempalace", "playwright"}
+	if len(b.ProjectMCPServers) != len(want) {
+		t.Fatalf("ProjectMCPServers = %v, want %v", b.ProjectMCPServers, want)
+	}
+	for i := range want {
+		if b.ProjectMCPServers[i] != want[i] {
+			t.Fatalf("ProjectMCPServers = %v, want %v", b.ProjectMCPServers, want)
+		}
+	}
+}
+
+func TestStepProjectSnippets_WritesTargetsAndState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	pfContent := "snippets:\n  - commit-discipline\n"
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte(pfContent), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	snippetDir := filepath.Join(home, ".scribe", "snippets")
+	if err := os.MkdirAll(snippetDir, 0o755); err != nil {
+		t.Fatalf("mkdir snippets: %v", err)
+	}
+	snippetContent := "---\nname: commit-discipline\ndescription: Commit rules\ntargets: [claude, codex, cursor]\n---\n# Agent Commit Discipline\n"
+	if err := os.WriteFile(filepath.Join(snippetDir, "commit-discipline.md"), []byte(snippetContent), 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+
+	b := &Bag{
+		ProjectRoot: projectDir,
+		State: &state.State{
+			Snippets: map[string]state.InstalledSnippet{},
+		},
+		Tools: []tools.Tool{tools.ClaudeTool{}, tools.CodexTool{}, tools.CursorTool{}},
+	}
+	if err := StepProjectSnippets(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectSnippets: %v", err)
+	}
+
+	for _, rel := range []string{"CLAUDE.md", "AGENTS.md", filepath.Join(".cursor", "rules", "commit-discipline.mdc")} {
+		data, err := os.ReadFile(filepath.Join(projectDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if !strings.Contains(string(data), "Agent Commit Discipline") {
+			t.Fatalf("%s missing snippet body:\n%s", rel, data)
+		}
+	}
+	if _, ok := b.State.Snippets["commit-discipline"]; !ok {
+		t.Fatalf("state snippet missing: %#v", b.State.Snippets)
+	}
+	if !b.StateDirty {
+		t.Fatal("StateDirty = false, want true")
 	}
 }
 

@@ -1,3 +1,10 @@
+## v1.1.0 — Unreleased
+
+### Added
+- **Snippets now project during `scribe sync`** — `.scribe.yaml` `snippets:` entries load `~/.scribe/snippets/<name>.md`, strip frontmatter, and write managed rules into `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and Cursor `.cursor/rules/*.mdc` targets.
+- **Project files can declare MCP servers directly** — `.scribe.yaml` now supports `mcp:` and `mcp_servers:` alongside kit-declared MCP server names.
+- **`scribe show` and `scribe explain` understand snippets** — project snippets show with byte size/targets, and `scribe explain <snippet>` can render snippet source.
+
 ## v1.0.13 — 2026-05-04
 
 ### Fixed

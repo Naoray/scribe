@@ -23,6 +23,7 @@ import (
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/reconcile"
+	"github.com/Naoray/scribe/internal/snippet"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -43,6 +44,7 @@ func SyncSteps() []Step {
 		{"ResolveKitFilter", StepResolveKitFilter},
 		{"ResolveMCPServers", StepResolveMCPServers},
 		{"ProjectClaudeMCPServers", StepProjectClaudeMCPServers},
+		{"ProjectSnippets", StepProjectSnippets},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
@@ -60,6 +62,7 @@ func SyncTail() []Step {
 		{"ResolveKitFilter", StepResolveKitFilter},
 		{"ResolveMCPServers", StepResolveMCPServers},
 		{"ProjectClaudeMCPServers", StepProjectClaudeMCPServers},
+		{"ProjectSnippets", StepProjectSnippets},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
@@ -214,6 +217,52 @@ func StepProjectClaudeMCPServers(_ context.Context, b *Bag) error {
 	if err := projectClaudeMCPServers(b.ProjectRoot, b.ProjectMCPServers); err != nil {
 		return fmt.Errorf("project claude MCP servers: %w", err)
 	}
+	return nil
+}
+
+func StepProjectSnippets(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" {
+		return nil
+	}
+	projectPath := filepath.Join(b.ProjectRoot, projectfile.Filename)
+	pf, err := projectfile.Load(projectPath)
+	if err != nil {
+		return fmt.Errorf("load project snippets: %w", err)
+	}
+	if len(pf.Snippets) == 0 {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	snippets, err := snippet.LoadProject(snippet.Dir(home), pf.Snippets)
+	if err != nil {
+		return err
+	}
+	toolNames := make([]string, 0, len(b.Tools))
+	for _, tool := range b.Tools {
+		toolNames = append(toolNames, tool.Name())
+	}
+	paths, err := snippet.Project(b.ProjectRoot, snippets, toolNames)
+	if err != nil {
+		return err
+	}
+	if b.State != nil {
+		if b.State.Snippets == nil {
+			b.State.Snippets = map[string]state.InstalledSnippet{}
+		}
+		for _, sn := range snippets {
+			b.State.Snippets[sn.Name] = state.InstalledSnippet{
+				Source:  sn.Path,
+				Targets: append([]string(nil), sn.Targets...),
+			}
+		}
+		if len(paths) > 0 {
+			b.MarkStateDirty()
+		}
+	}
+	b.ProjectSnippets = append(b.ProjectSnippets[:0], pf.Snippets...)
 	return nil
 }
 

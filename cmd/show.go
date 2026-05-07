@@ -44,6 +44,12 @@ func runShow(cmd *cobra.Command, args []string) error {
 	for _, skill := range set.Skills {
 		fmt.Fprintf(os.Stdout, "  %s\n", skill.Name)
 	}
+	if len(set.Snippets) > 0 {
+		fmt.Fprintf(os.Stdout, "Snippets: %d resolved\n", len(set.Snippets))
+		for _, sn := range set.Snippets {
+			fmt.Fprintf(os.Stdout, "  %s (%d bytes; %s)\n", sn.Name, len(sn.Body), strings.Join(sn.Targets, ", "))
+		}
+	}
 	if len(set.Missing) > 0 {
 		fmt.Fprintf(os.Stderr, "warning: missing SKILL.md for %s\n", strings.Join(set.Missing, ", "))
 	}

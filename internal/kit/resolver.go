@@ -62,6 +62,9 @@ func ResolveMCPServers(pf *projectfile.ProjectFile, availableKits map[string]*Ki
 	}
 
 	result := make(map[string]struct{})
+	for _, server := range pf.MCPServerNames() {
+		result[server] = struct{}{}
+	}
 	for _, kitName := range pf.Kits {
 		kit, ok := availableKits[kitName]
 		if !ok {

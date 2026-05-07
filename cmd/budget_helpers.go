@@ -12,6 +12,7 @@ import (
 	"github.com/Naoray/scribe/internal/kit"
 	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/snippet"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -19,6 +20,7 @@ import (
 type resolvedBudgetSet struct {
 	ProjectRoot string
 	Skills      []budget.Skill
+	Snippets    []snippet.Snippet
 	Missing     []string
 }
 
@@ -42,6 +44,20 @@ func resolveBudgetSet(st *state.State) (resolvedBudgetSet, error) {
 			continue
 		}
 		out.Skills = append(out.Skills, budget.Skill{Name: name, Content: content})
+	}
+	if projectRoot != "" {
+		projectPath := filepath.Join(projectRoot, projectfile.Filename)
+		pf, err := projectfile.Load(projectPath)
+		if err == nil && len(pf.Snippets) > 0 {
+			home, herr := os.UserHomeDir()
+			if herr == nil {
+				snippets, serr := snippet.LoadProject(snippet.Dir(home), pf.Snippets)
+				if serr != nil {
+					return out, serr
+				}
+				out.Snippets = snippets
+			}
+		}
 	}
 	return out, nil
 }
@@ -115,6 +131,12 @@ func budgetSkillsForAgent(set resolvedBudgetSet, st *state.State, agent string) 
 			continue
 		}
 		skills = append(skills, skill)
+	}
+	for _, sn := range set.Snippets {
+		if !snippet.TargetsAgent(sn.Targets, agent) {
+			continue
+		}
+		skills = append(skills, budget.Skill{Name: "snippet:" + sn.Name, Content: snippet.ContentForBudget(sn)})
 	}
 	return skills
 }

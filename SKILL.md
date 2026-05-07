@@ -147,7 +147,7 @@ Run `scribe schema <command> --json` before composing an unfamiliar call — ret
 
 ## Project file (`.scribe.yaml`)
 
-If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. Kits are first-class local skill bundles, and `scribe kit create` can scaffold them. Don't synthesize a project file without being asked.
+If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `mcp`, `mcp_servers`, `add`, `remove`. Kits are first-class local skill bundles, and `scribe kit create` can scaffold them. Don't synthesize a project file without being asked.
 
 ## Authoring kits and snippets
 
@@ -202,13 +202,15 @@ kits:
   - laravel-baseline
 snippets:
   - commit-discipline
+mcp:
+  - mempalace
 add:
   - owner/repo:extra-skill
 remove:
   - skill-this-project-doesnt-want
 ```
 
-All four keys are optional. Empty / missing file = no project intent.
+All keys are optional. Empty / missing file = no project intent. `mcp` and `mcp_servers` both declare project-local MCP server names; server definitions must already exist in `.mcp.json`.
 
 ### After authoring, apply
 
@@ -216,7 +218,9 @@ All four keys are optional. Empty / missing file = no project intent.
 scribe sync --json
 ```
 
-Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.codex/skills/` dirs, projects kit-declared MCP server names into project-local Claude settings at `.claude/settings.json`, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `.cursorrules` (markers preserved; content outside markers untouched). Scribe does not start MCP server processes.
+Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.codex/skills/` dirs, projects kit-declared and project-declared MCP server names into project-local Claude settings at `.claude/settings.json`, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus Cursor rules in `.cursor/rules/*.mdc` (markers preserved; content outside markers untouched). Scribe does not start MCP server processes.
+
+If `.scribe.yaml` changes, or generated agent files no longer match it, run `scribe sync --json` before assuming the active agent loadout is current.
 
 ### Codex budget
 

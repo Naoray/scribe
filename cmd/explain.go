@@ -22,6 +22,7 @@ import (
 	clienv "github.com/Naoray/scribe/internal/cli/env"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/discovery"
+	isnippet "github.com/Naoray/scribe/internal/snippet"
 )
 
 var (
@@ -76,11 +77,20 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 	skill, ok := findSkill(skills, args[0])
 	if !ok {
-		err := fmt.Errorf("skill %q not found", args[0])
-		return clierrors.Wrap(err, "SKILL_NOT_FOUND", clierrors.ExitNotFound,
-			clierrors.WithResource(args[0]),
-			clierrors.WithRemediation("Run `scribe list` to see installed skills."),
-		)
+		snippetSkill, snippetContent, found, err := findSnippet(args[0])
+		if err != nil {
+			return err
+		}
+		if !found {
+			err := fmt.Errorf("skill or snippet %q not found", args[0])
+			return clierrors.Wrap(err, "SKILL_NOT_FOUND", clierrors.ExitNotFound,
+				clierrors.WithResource(args[0]),
+				clierrors.WithRemediation("Run `scribe list` or check ~/.scribe/snippets."),
+			)
+		}
+		skill = snippetSkill
+		content := snippetContent
+		return renderExplain(cmd, jsonFlag, rawFlag, skill, content)
 	}
 
 	if skill.LocalPath == "" {
@@ -95,7 +105,10 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return wrapSkillReadError(err, args[0])
 	}
+	return renderExplain(cmd, jsonFlag, rawFlag, skill, content)
+}
 
+func renderExplain(cmd *cobra.Command, jsonFlag, rawFlag bool, skill discovery.Skill, content string) error {
 	mode := clienv.Detect(os.Stdout, os.Stdin, jsonFlag)
 	w := cmd.OutOrStdout()
 
@@ -147,6 +160,32 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func findSnippet(query string) (discovery.Skill, string, bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return discovery.Skill{}, "", false, fmt.Errorf("home dir: %w", err)
+	}
+	sn, err := isnippet.Load(isnippet.Dir(home), query)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return discovery.Skill{}, "", false, nil
+		}
+		return discovery.Skill{}, "", false, err
+	}
+	contentBytes, err := os.ReadFile(sn.Path)
+	if err != nil {
+		return discovery.Skill{}, "", false, fmt.Errorf("read snippet %q: %w", query, err)
+	}
+	return discovery.Skill{
+		Name:           sn.Name,
+		Description:    sn.Description,
+		RawDescription: sn.Description,
+		LocalPath:      sn.Path,
+		Targets:        sn.Targets,
+		Managed:        true,
+	}, string(contentBytes), true, nil
 }
 
 // findSkill looks up a skill by exact name or suffix match.

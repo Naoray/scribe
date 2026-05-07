@@ -26,6 +26,8 @@ kits:
   - laravel-baseline
 snippets:
   - commit-discipline
+mcp:
+  - mempalace
 add:
   - owner/repo:extra-skill
 remove:
@@ -57,7 +59,7 @@ mcp_servers:
   - laravel-boost
 ```
 
-Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits union; the project may add or remove individual skills on top with `add:` / `remove:`. MCP servers can also be declared through kits; `scribe sync` projects those names into project-local Claude settings at `.claude/settings.json` while preserving user-managed settings. Scribe records server names for Claude approval/configuration; it does not start MCP server processes.
+Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits union; the project may add or remove individual skills on top with `add:` / `remove:`. MCP servers can also be declared through kits or directly in `.scribe.yaml` with `mcp:` / `mcp_servers:`; `scribe sync` projects those names into project-local Claude settings at `.claude/settings.json` while preserving user-managed settings. Scribe records server names for Claude approval/configuration; it does not start MCP server processes, and server definitions must already exist in `.mcp.json`.
 
 ### Authoring kits and snippets (today)
 
@@ -76,7 +78,7 @@ You: Wire web-baseline into this project.
 Agent: <edits .scribe.yaml in the repo root, runs `scribe sync`>
 ```
 
-The agent uses `scribe kit create` for kits, the snippet schema below (markdown frontmatter) for snippets, then runs `scribe sync` to apply changes. The storage format and resolver are stable contracts as of v1.0.
+The agent uses `scribe kit create` for kits, the snippet schema below (markdown frontmatter) for snippets, then runs `scribe sync` to apply changes. If `.scribe.yaml` changes or generated agent files drift from it, run `scribe sync` again before assuming the active loadout is current.
 
 If you want to author by hand, the YAML files at `~/.scribe/kits/<name>.yaml` and `~/.scribe/snippets/<name>.md` are the source of truth — `scribe sync` picks them up on every run.
 
@@ -94,7 +96,7 @@ You retry with `--force` or trim the kit. The structural guardrail makes the ori
 
 ## Snippets
 
-A snippet is a Markdown body with frontmatter declaring which agents it targets. Scribe injects snippet bodies into the project's agent rules files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`) inside scribe-managed marker blocks.
+A snippet is a Markdown body with frontmatter declaring which agents it targets. Scribe injects snippet bodies into the project's agent rules files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) inside scribe-managed marker blocks and writes Cursor snippets to `.cursor/rules/<name>.mdc`.
 
 ```markdown
 ---

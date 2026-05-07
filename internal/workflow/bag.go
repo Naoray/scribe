@@ -46,6 +46,8 @@ type Bag struct {
 	ProjectMCPServers        []string
 	ProjectMCPServersEnabled bool
 
+	ProjectSnippets []string
+
 	// Populated by steps
 	Config      *config.Config
 	State       *state.State
