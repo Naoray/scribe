@@ -291,6 +291,46 @@ func TestStepProjectSnippets_WritesTargetsAndState(t *testing.T) {
 	}
 }
 
+func TestStepProjectSnippets_RemovesStaleBlocksWhenProjectFileClearsSnippets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	projectPath := filepath.Join(projectDir, projectfile.Filename)
+	if err := os.WriteFile(projectPath, []byte("snippets:\n  - commit-discipline\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	snippetDir := filepath.Join(home, ".scribe", "snippets")
+	if err := os.MkdirAll(snippetDir, 0o755); err != nil {
+		t.Fatalf("mkdir snippets: %v", err)
+	}
+	snippetContent := "---\nname: commit-discipline\ndescription: Commit rules\ntargets: [claude]\n---\n# Agent Commit Discipline\n"
+	if err := os.WriteFile(filepath.Join(snippetDir, "commit-discipline.md"), []byte(snippetContent), 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+	b := &Bag{
+		ProjectRoot: projectDir,
+		State:       &state.State{Snippets: map[string]state.InstalledSnippet{}},
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+	}
+	if err := StepProjectSnippets(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectSnippets initial: %v", err)
+	}
+	if err := os.WriteFile(projectPath, []byte("snippets: []\n"), 0o644); err != nil {
+		t.Fatalf("clear project snippets: %v", err)
+	}
+	if err := StepProjectSnippets(context.Background(), b); err != nil {
+		t.Fatalf("StepProjectSnippets clear: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(projectDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if strings.Contains(string(data), "Agent Commit Discipline") {
+		t.Fatalf("stale snippet remains projected:\n%s", data)
+	}
+}
+
 func TestStepResolveMCPServers_NoProjectFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

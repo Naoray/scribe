@@ -229,16 +229,16 @@ func StepProjectSnippets(_ context.Context, b *Bag) error {
 	if err != nil {
 		return fmt.Errorf("load project snippets: %w", err)
 	}
-	if len(pf.Snippets) == 0 {
-		return nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("home dir: %w", err)
-	}
-	snippets, err := snippet.LoadProject(snippet.Dir(home), pf.Snippets)
-	if err != nil {
-		return err
+	var snippets []snippet.Snippet
+	if len(pf.Snippets) > 0 {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("home dir: %w", err)
+		}
+		snippets, err = snippet.LoadProject(snippet.Dir(home), pf.Snippets)
+		if err != nil {
+			return err
+		}
 	}
 	toolNames := make([]string, 0, len(b.Tools))
 	for _, tool := range b.Tools {

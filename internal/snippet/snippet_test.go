@@ -46,6 +46,81 @@ func TestProjectWritesManagedBlocksIdempotently(t *testing.T) {
 	}
 }
 
+func TestProjectRemovesStaleBlocksAndAppliesOrder(t *testing.T) {
+	project := t.TempDir()
+	first := Snippet{Name: "first", Targets: []string{"claude"}, Body: []byte("first body\n")}
+	second := Snippet{Name: "second", Targets: []string{"claude"}, Body: []byte("second body\n")}
+
+	if _, err := Project(project, []Snippet{first, second}, []string{"claude"}); err != nil {
+		t.Fatalf("Project initial: %v", err)
+	}
+	if _, err := Project(project, []Snippet{second}, []string{"claude"}); err != nil {
+		t.Fatalf("Project updated: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(project, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if strings.Contains(string(data), "first body") {
+		t.Fatalf("removed snippet still projected:\n%s", data)
+	}
+	if !strings.Contains(string(data), "second body") {
+		t.Fatalf("kept snippet missing:\n%s", data)
+	}
+
+	if _, err := Project(project, []Snippet{first, second}, []string{"claude"}); err != nil {
+		t.Fatalf("Project reordered: %v", err)
+	}
+	data, err = os.ReadFile(filepath.Join(project, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read reordered CLAUDE.md: %v", err)
+	}
+	if strings.Index(string(data), "first body") > strings.Index(string(data), "second body") {
+		t.Fatalf("snippet order not applied:\n%s", data)
+	}
+}
+
+func TestProjectRemovesCursorRuleWhenSnippetRemoved(t *testing.T) {
+	project := t.TempDir()
+	sn := Snippet{Name: "commit-discipline", Targets: []string{"cursor"}, Body: []byte("# Body\n")}
+	if _, err := Project(project, []Snippet{sn}, []string{"cursor"}); err != nil {
+		t.Fatalf("Project initial: %v", err)
+	}
+	path := filepath.Join(project, ".cursor", "rules", "commit-discipline.mdc")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat cursor rule: %v", err)
+	}
+	if _, err := Project(project, nil, []string{"cursor"}); err != nil {
+		t.Fatalf("Project removed: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("cursor rule still exists or stat failed: %v", err)
+	}
+}
+
+func TestContentForBudgetAndCursorRuleQuoteYAMLDescriptions(t *testing.T) {
+	sn := Snippet{
+		Name:        "quotes",
+		Description: "Commit: \"carefully\"\nwith newline",
+		Targets:     []string{"cursor"},
+		Body:        []byte("# Body\n"),
+	}
+	if !strings.Contains(string(ContentForBudget(sn)), "description:") {
+		t.Fatalf("budget content missing description:\n%s", ContentForBudget(sn))
+	}
+	project := t.TempDir()
+	if _, err := Project(project, []Snippet{sn}, []string{"cursor"}); err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(project, ".cursor", "rules", "quotes.mdc"))
+	if err != nil {
+		t.Fatalf("read cursor rule: %v", err)
+	}
+	if !strings.Contains(string(data), "Commit:") || !strings.Contains(string(data), "with newline") {
+		t.Fatalf("cursor YAML lost description:\n%s", data)
+	}
+}
+
 func TestProjectWritesCursorRule(t *testing.T) {
 	project := t.TempDir()
 	sn := Snippet{

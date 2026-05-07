@@ -29,6 +29,11 @@ type frontmatter struct {
 	Targets     []string `yaml:"targets"`
 }
 
+type cursorFrontmatter struct {
+	Description string `yaml:"description,omitempty"`
+	AlwaysApply bool   `yaml:"alwaysApply"`
+}
+
 func Dir(home string) string {
 	return filepath.Join(home, ".scribe", "snippets")
 }
@@ -89,30 +94,28 @@ func Parse(path string, data []byte) (Snippet, error) {
 }
 
 func ContentForBudget(sn Snippet) []byte {
-	var b strings.Builder
-	b.WriteString("---\n")
-	if sn.Description != "" {
-		b.WriteString("description: ")
-		b.WriteString(sn.Description)
-		b.WriteString("\n")
+	data, err := yaml.Marshal(frontmatter{Description: sn.Description})
+	if err != nil {
+		return sn.Body
 	}
-	b.WriteString("---\n")
-	b.Write(sn.Body)
-	return []byte(b.String())
+	return bytes.Join([][]byte{[]byte("---\n"), data, []byte("---\n"), sn.Body}, nil)
 }
 
 func Project(projectRoot string, snippets []Snippet, activeTools []string) ([]string, error) {
-	var paths []string
+	byTarget := map[string][]Snippet{}
 	for _, sn := range snippets {
 		for _, target := range expandTargets(sn.Targets, activeTools) {
-			written, err := projectOne(projectRoot, sn, target)
-			if err != nil {
-				return paths, err
-			}
-			if written != "" {
-				paths = append(paths, written)
-			}
+			byTarget[target] = append(byTarget[target], sn)
 		}
+	}
+
+	var paths []string
+	for _, target := range concreteTargets(activeTools) {
+		written, err := projectTarget(projectRoot, target, byTarget[target])
+		if err != nil {
+			return paths, err
+		}
+		paths = append(paths, written...)
 	}
 	sort.Strings(paths)
 	return paths, nil
@@ -149,11 +152,33 @@ func HasProjection(path string, sn Snippet, target string) bool {
 		return false
 	}
 	if strings.EqualFold(target, "cursor") {
-		return bytes.Contains(data, sn.Body)
+		return bytes.Contains(data, []byte("<!-- scribe-snippet:cursor -->")) && bytes.Contains(data, sn.Body)
 	}
 	start := "<!-- scribe-snippet:" + sn.Name + ":start "
 	end := "<!-- scribe-snippet:" + sn.Name + ":end -->"
 	return strings.Contains(string(data), start) && strings.Contains(string(data), end)
+}
+
+func concreteTargets(activeTools []string) []string {
+	seen := map[string]bool{
+		"claude": true,
+		"codex":  true,
+		"cursor": true,
+		"gemini": true,
+	}
+	for _, tool := range activeTools {
+		tool = strings.ToLower(strings.TrimSpace(tool))
+		switch tool {
+		case "claude", "codex", "cursor", "gemini":
+			seen[tool] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for target := range seen {
+		out = append(out, target)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func split(data []byte) (frontmatter, []byte, error) {
@@ -217,46 +242,97 @@ func expandTargets(targets, activeTools []string) []string {
 	return out
 }
 
-func projectOne(projectRoot string, sn Snippet, target string) (string, error) {
+func projectTarget(projectRoot string, target string, snippets []Snippet) ([]string, error) {
 	switch target {
-	case "claude":
-		return writeManagedBlock(TargetPath(projectRoot, sn.Name, target), sn)
-	case "codex":
-		return writeManagedBlock(TargetPath(projectRoot, sn.Name, target), sn)
-	case "gemini":
-		return writeManagedBlock(TargetPath(projectRoot, sn.Name, target), sn)
+	case "claude", "codex", "gemini":
+		written, err := writeManagedBlocks(TargetPath(projectRoot, "", target), snippets)
+		if err != nil || written == "" {
+			return nil, err
+		}
+		return []string{written}, nil
 	case "cursor":
-		return writeCursorRule(projectRoot, sn)
+		return writeCursorRules(projectRoot, snippets)
 	default:
-		return "", nil
+		return nil, nil
 	}
 }
 
-func writeCursorRule(projectRoot string, sn Snippet) (string, error) {
-	path := TargetPath(projectRoot, sn.Name, "cursor")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("create cursor snippets dir: %w", err)
+func writeCursorRules(projectRoot string, snippets []Snippet) ([]string, error) {
+	rulesDir := filepath.Join(projectRoot, ".cursor", "rules")
+	current := map[string]bool{}
+	var paths []string
+	for _, sn := range snippets {
+		path := TargetPath(projectRoot, sn.Name, "cursor")
+		current[path] = true
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return paths, fmt.Errorf("create cursor snippets dir: %w", err)
+		}
+		content, err := cursorRule(sn)
+		if err != nil {
+			return paths, err
+		}
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			return paths, fmt.Errorf("write cursor snippet %q: %w", sn.Name, err)
+		}
+		paths = append(paths, path)
 	}
-	var b strings.Builder
+	entries, err := os.ReadDir(rulesDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return paths, nil
+	}
+	if err != nil {
+		return paths, fmt.Errorf("read cursor snippets dir: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".mdc" {
+			continue
+		}
+		path := filepath.Join(rulesDir, entry.Name())
+		if current[path] {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return paths, fmt.Errorf("read cursor snippet %s: %w", path, err)
+		}
+		if bytes.Contains(data, []byte("<!-- scribe-snippet:cursor -->")) {
+			if err := os.Remove(path); err != nil {
+				return paths, fmt.Errorf("remove stale cursor snippet %s: %w", path, err)
+			}
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func cursorRule(sn Snippet) ([]byte, error) {
+	fm, err := yaml.Marshal(cursorFrontmatter{
+		Description: sn.Description,
+		AlwaysApply: false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode cursor snippet %q: %w", sn.Name, err)
+	}
+	var b bytes.Buffer
 	b.WriteString("---\n")
-	if sn.Description != "" {
-		b.WriteString("description: ")
-		b.WriteString(sn.Description)
-		b.WriteString("\n")
-	}
-	b.WriteString("alwaysApply: false\n")
-	b.WriteString("---\n\n")
+	b.Write(fm)
+	b.WriteString("---\n")
+	b.WriteString("<!-- scribe-snippet:cursor -->\n\n")
 	b.Write(sn.Body)
 	if !bytes.HasSuffix(sn.Body, []byte("\n")) {
 		b.WriteString("\n")
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return "", fmt.Errorf("write cursor snippet %q: %w", sn.Name, err)
-	}
-	return path, nil
+	return b.Bytes(), nil
 }
 
-func writeManagedBlock(path string, sn Snippet) (string, error) {
+func writeManagedBlocks(path string, snippets []Snippet) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	if len(snippets) == 0 && !fileExists(path) {
+		return "", nil
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("create snippet target dir: %w", err)
 	}
@@ -264,26 +340,42 @@ func writeManagedBlock(path string, sn Snippet) (string, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("read snippet target %s: %w", path, err)
 	}
-	next := replaceBlock(string(existing), sn)
+	next := renderManagedBlocks(string(existing), snippets)
+	if next == "" && len(existing) == 0 {
+		return "", nil
+	}
 	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return "", fmt.Errorf("write snippet target %s: %w", path, err)
 	}
 	return path, nil
 }
 
-func replaceBlock(existing string, sn Snippet) string {
-	block := managedBlock(sn)
-	re := regexp.MustCompile(`(?s)<!-- scribe-snippet:` + regexp.QuoteMeta(sn.Name) + `:start [^>]*-->.*?<!-- scribe-snippet:` + regexp.QuoteMeta(sn.Name) + `:end -->\n?`)
-	if re.MatchString(existing) {
-		return re.ReplaceAllString(existing, block)
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func renderManagedBlocks(existing string, snippets []Snippet) string {
+	cleaned := stripManagedBlocks(existing)
+	var blocks strings.Builder
+	for _, sn := range snippets {
+		blocks.WriteString(managedBlock(sn))
 	}
-	if strings.TrimSpace(existing) == "" {
-		return block
+	if blocks.Len() == 0 {
+		return cleaned
 	}
-	if !strings.HasSuffix(existing, "\n") {
-		existing += "\n"
+	if strings.TrimSpace(cleaned) == "" {
+		return blocks.String()
 	}
-	return existing + "\n" + block
+	if !strings.HasSuffix(cleaned, "\n") {
+		cleaned += "\n"
+	}
+	return cleaned + "\n" + blocks.String()
+}
+
+func stripManagedBlocks(existing string) string {
+	re := regexp.MustCompile(`(?s)<!-- scribe-snippet:[^:]+:start [^>]*-->.*?<!-- scribe-snippet:[^:]+:end -->\n?`)
+	return strings.TrimRight(re.ReplaceAllString(existing, ""), "\n")
 }
 
 func managedBlock(sn Snippet) string {
