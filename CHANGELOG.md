@@ -1,3 +1,9 @@
+## v1.1.1 — 2026-05-07
+
+### Added
+- **`scribe project init` scaffolds project loadouts** — create a committed `.scribe.yaml`, optionally seeded with local kits via `--kits`, with JSON envelope output for agents.
+- **`scribe kit list` and `scribe kit show` inspect local kits** — list and inspect `~/.scribe/kits/*.yaml` definitions from the CLI, including machine-readable output.
+
 ## v1.1.0 — 2026-05-07
 
 ### Added

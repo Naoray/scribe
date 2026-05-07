@@ -110,6 +110,10 @@ Use it for installs, updates, removal, adoption of unmanaged local skills, and s
 | what skills are available remotely | `scribe browse --json` |
 | sync my skills | `scribe sync --json` |
 | show resolved project loadout | `scribe show --json` |
+| initialize project loadout | `scribe project init --json` |
+| initialize project with kits | `scribe project init --kits <kit1,kit2> --json` |
+| list local kits | `scribe kit list --json` |
+| show a local kit | `scribe kit show <name> --json` |
 | remove X | `scribe remove X --no-interaction --json` |
 | import existing local skills | `scribe adopt --dry-run --json` |
 | actually adopt them | `scribe adopt --no-interaction --json` |
