@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
@@ -87,6 +89,14 @@ type Syncer struct {
 	// NameConflictResolver is called when a real directory already exists at
 	// the incoming skill name. Nil means non-interactive conflict.
 	NameConflictResolver func(NameConflict) (NameConflictResolution, error)
+}
+
+type ProjectLockError struct {
+	Refused []LockRefusal `json:"refused"`
+}
+
+func (e *ProjectLockError) Error() string {
+	return "project lockfile validation failed"
 }
 
 type LockRefusal struct {
@@ -325,6 +335,219 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 		applyLockPins(statuses, lf)
 	}
 	return s.apply(ctx, teamRepo, statuses, st)
+}
+
+func (s *Syncer) RunProject(ctx context.Context, st *state.State, lf *lockfile.ProjectLockfile) error {
+	if err := s.ensureProjectRoot(); err != nil {
+		return err
+	}
+	if err := s.applyVendoredProjectSkills(st); err != nil {
+		return err
+	}
+	if lf == nil || len(lf.Entries) == 0 {
+		return nil
+	}
+	statuses, err := s.projectLockStatuses(lf, st)
+	if err != nil {
+		return err
+	}
+	byRegistry := map[string][]SkillStatus{}
+	for _, status := range statuses {
+		registry := ""
+		if status.LockEntry != nil {
+			registry = status.LockEntry.SourceRegistry
+		}
+		byRegistry[registry] = append(byRegistry[registry], status)
+	}
+	for registry, group := range byRegistry {
+		if err := s.apply(ctx, registry, group, st); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Syncer) projectLockStatuses(lf *lockfile.ProjectLockfile, st *state.State) ([]SkillStatus, error) {
+	storeDir, err := tools.StoreDir()
+	if err != nil {
+		return nil, err
+	}
+	statuses := make([]SkillStatus, 0, len(lf.Entries))
+	var refused []LockRefusal
+	for _, pin := range lf.Entries {
+		if pin.Type == "package" {
+			want := CommandHash(pin.Install, pin.Update, pin.Installs, pin.Updates)
+			if pin.InstallCommandHash != "" && want != pin.InstallCommandHash {
+				refused = append(refused, LockRefusal{
+					Name:         pin.Name,
+					ExpectedHash: pin.InstallCommandHash,
+					ActualHash:   want,
+					Reason:       "lockfile self-inconsistency: install_command_hash does not match embedded command fields",
+				})
+				continue
+			}
+		}
+		entry, err := manifestEntryFromProjectEntry(pin)
+		if err != nil {
+			return nil, err
+		}
+		installed := lookupInstalled(st, pin.Name)
+		status := StatusMissing
+		latestSHA := pin.CommitSHA
+		if installed != nil {
+			status = StatusCurrent
+			sourceCurrent := false
+			for _, src := range installed.Sources {
+				if src.Registry == pin.SourceRegistry && src.LastSHA == pin.CommitSHA {
+					sourceCurrent = true
+					break
+				}
+			}
+			if !sourceCurrent {
+				status = StatusOutdated
+			} else if pin.Type != "package" {
+				hash, err := lockfile.HashSet(filepath.Join(storeDir, pin.Name))
+				if err != nil || hash != pin.ContentHash {
+					status = StatusOutdated
+				}
+			}
+		}
+		lockEntry := pin.Entry
+		statuses = append(statuses, SkillStatus{
+			Name:       pin.Name,
+			Status:     status,
+			Installed:  installed,
+			Entry:      &entry,
+			LoadoutRef: loadoutRef(entry),
+			Maintainer: entry.Maintainer(),
+			IsPackage:  entry.IsPackage(),
+			LatestSHA:  latestSHA,
+			LockEntry:  &lockEntry,
+		})
+	}
+	if len(refused) > 0 {
+		return nil, &ProjectLockError{Refused: refused}
+	}
+	return statuses, nil
+}
+
+func manifestEntryFromProjectEntry(pin lockfile.ProjectEntry) (manifest.Entry, error) {
+	repo := pin.SourceRepo
+	if repo == "" {
+		repo = pin.SourceRegistry
+	}
+	owner, name, err := manifest.ParseOwnerRepo(repo)
+	if err != nil {
+		return manifest.Entry{}, err
+	}
+	source := manifest.Source{Host: "github", Owner: owner, Repo: name, Ref: pin.CommitSHA}
+	return manifest.Entry{
+		Name:     pin.Name,
+		Source:   source.String(),
+		Path:     pin.Path,
+		Type:     pin.Type,
+		Install:  pin.Install,
+		Update:   pin.Update,
+		Installs: pin.Installs,
+		Updates:  pin.Updates,
+	}, nil
+}
+
+func (s *Syncer) applyVendoredProjectSkills(st *state.State) error {
+	store := projectstore.Project(s.ProjectRoot)
+	names, err := store.VendoredSkills()
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+	boost := isBoostProject(s.ProjectRoot)
+	for _, name := range names {
+		skillDir := store.SkillDir(name)
+		if _, _, err := projectstore.VerifyMarker(skillDir); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				s.emit(SkillSkippedMsg{Name: name})
+				continue
+			}
+			return clierrors.Wrap(err, "PROJECT_VENDOR_HASH_MISMATCH", clierrors.ExitValid,
+				clierrors.WithMessage("Frankenstein folder detected; the vendored content was modified outside `scribe project sync`."),
+				clierrors.WithResource(skillDir),
+				clierrors.WithRemediation("Reconcile by running `scribe project sync --force` or restoring the edited file."),
+			)
+		}
+		installed := st.Installed[name]
+		installed.Origin = state.OriginProject
+		if st.VendorState == nil {
+			st.VendorState = map[string]state.VendorState{}
+		}
+		if st.VendorState[name].FirstSeenAt.IsZero() {
+			st.VendorState[name] = state.VendorState{FirstSeenAt: time.Now().UTC()}
+			s.emit(SkillSkippedMsg{Name: name})
+		}
+		effective := selectEffectiveTools(s.Tools, &installed, s.ProjectRoot)
+		var excluded []string
+		if boost {
+			excluded = []string{"claude"}
+			effective = filterToolsByName(effective, excluded)
+		}
+		var paths []string
+		var toolNames []string
+		for _, t := range effective {
+			links, err := t.Install(name, skillDir, s.ProjectRoot)
+			if err != nil {
+				return err
+			}
+			paths = append(paths, links...)
+			toolNames = append(toolNames, t.Name())
+		}
+		installed.Projections = mergeProjectionWithExcluded(&installed, s.ProjectRoot, toolNames, excluded)
+		installed.ManagedPaths = mergeManagedPaths(&installed, paths)
+		installed.Paths = append([]string(nil), installed.ManagedPaths...)
+		st.Installed[name] = installed
+		s.emit(SkillInstalledMsg{Name: name, Updated: true})
+	}
+	return st.Save()
+}
+
+func mergeProjectionWithExcluded(installed *state.InstalledSkill, projectRoot string, toolNames, excluded []string) []state.ProjectionEntry {
+	projections := mergeProjection(installed, projectRoot, toolNames)
+	for i := range projections {
+		if projections[i].Project == projectRoot {
+			projections[i].ExcludedTools = append([]string(nil), excluded...)
+			break
+		}
+	}
+	return projections
+}
+
+func filterToolsByName(in []tools.Tool, excluded []string) []tools.Tool {
+	if len(excluded) == 0 {
+		return in
+	}
+	drop := map[string]bool{}
+	for _, name := range excluded {
+		drop[name] = true
+	}
+	out := in[:0]
+	for _, tool := range in {
+		if !drop[tool.Name()] {
+			out = append(out, tool)
+		}
+	}
+	return out
+}
+
+func isBoostProject(projectRoot string) bool {
+	if _, err := os.Stat(filepath.Join(projectRoot, ".ai", "skills")); err != nil {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(projectRoot, "composer.json"))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "laravel/boost")
 }
 
 func (s *Syncer) FetchLockfile(ctx context.Context, teamRepo string) (*lockfile.Lockfile, error) {

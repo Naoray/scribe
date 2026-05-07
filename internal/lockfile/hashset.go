@@ -157,7 +157,7 @@ func hashSetDenied(root, path string, dir bool) bool {
 		return false
 	}
 	switch name {
-	case ".DS_Store", "Thumbs.db", ContentHashFilename:
+	case ".DS_Store", "Thumbs.db", ContentHashFilename, ".scribe-base.md":
 		return true
 	}
 	for _, pattern := range []string{"*.swp", "*.swo", "*.bak.*"} {

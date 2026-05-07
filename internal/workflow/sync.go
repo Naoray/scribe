@@ -18,11 +18,14 @@ import (
 	"github.com/Naoray/scribe/internal/adopt"
 	"github.com/Naoray/scribe/internal/agent"
 	"github.com/Naoray/scribe/internal/app"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/kit"
+	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/snippet"
@@ -38,11 +41,12 @@ func SyncSteps() []Step {
 	return []Step{
 		{"LoadConfig", StepLoadConfig},
 		{"LoadState", StepLoadState},
+		{"ResolveProjectRoot", StepResolveProjectRoot},
+		{"ResolveTeamShareMode", StepResolveTeamShareMode},
 		{"CheckConnected", StepCheckConnected},
 		{"FilterRegistries", StepFilterRegistries},
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
-		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
 		{"ResolveMCPServers", StepResolveMCPServers},
 		{"ProjectMCPServers", StepProjectMCPServers},
@@ -61,6 +65,7 @@ func SyncTail() []Step {
 		{"ResolveFormatter", StepResolveFormatter},
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
+		{"ResolveTeamShareMode", StepResolveTeamShareMode},
 		{"ResolveKitFilter", StepResolveKitFilter},
 		{"ResolveMCPServers", StepResolveMCPServers},
 		{"ProjectMCPServers", StepProjectMCPServers},
@@ -113,6 +118,23 @@ func StepResolveProjectRoot(_ context.Context, b *Bag) error {
 	}
 	b.ProjectRoot = filepath.Dir(projectFile)
 	return nil
+}
+
+func StepResolveTeamShareMode(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" {
+		b.TeamShareMode = false
+		return nil
+	}
+	_, err := os.Stat(filepath.Join(b.ProjectRoot, ".ai", "scribe.lock"))
+	if err == nil {
+		b.TeamShareMode = true
+		return nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		b.TeamShareMode = false
+		return nil
+	}
+	return err
 }
 
 // ResolveKitFilter resolves the kit-scoped skill set for the current working
@@ -222,6 +244,10 @@ func StepProjectMCPServers(_ context.Context, b *Bag) error {
 		var err error
 		definitions, err = loadProjectMCPDefinitions(b.ProjectRoot, b.ProjectMCPServers)
 		if err != nil {
+			if b.TeamShareMode {
+				fmt.Fprintf(os.Stderr, "scribe: team-share warning: skipping MCP projection: %v\n", err)
+				return nil
+			}
 			return err
 		}
 	}
@@ -274,7 +300,12 @@ func StepProjectSnippets(_ context.Context, b *Bag) error {
 		}
 		snippets, err = snippet.LoadProject(snippet.Dir(home), pf.Snippets)
 		if err != nil {
-			return err
+			if b.TeamShareMode {
+				fmt.Fprintf(os.Stderr, "scribe: team-share warning: skipping missing snippets: %v\n", err)
+				snippets = nil
+			} else {
+				return err
+			}
 		}
 	}
 	legacyPaths, err := removeLegacyCursorSnippets(b.ProjectRoot, snippets, b.State)
@@ -719,6 +750,9 @@ func loadState(factory *app.Factory) (*state.State, error) {
 }
 
 func StepCheckConnected(_ context.Context, b *Bag) error {
+	if b.TeamShareMode {
+		return nil
+	}
 	if len(b.Config.TeamRepos()) == 0 {
 		return fmt.Errorf("not connected — run `scribe connect <owner/repo>` first")
 	}
@@ -911,6 +945,22 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		syncer.NameConflictResolver = PromptNameConflictResolution
 	}
 
+	if b.TeamShareMode {
+		projectLock, err := projectstore.Project(b.ProjectRoot).LoadProjectLockfile()
+		if err != nil {
+			return err
+		}
+		if err := validateProjectRegistriesConnected(projectLock, b.Config.TeamRepos()); err != nil {
+			return err
+		}
+		clear(resolved)
+		b.Formatter.OnRegistryStart("project")
+		if err := syncer.RunProject(ctx, b.State, projectLock); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	for _, teamRepo := range b.Repos {
 		if b.State.RegistryFailure(teamRepo).Muted {
 			continue
@@ -933,6 +983,24 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		}
 	}
 
+	return nil
+}
+
+func validateProjectRegistriesConnected(lf *lockfile.ProjectLockfile, connected []string) error {
+	if lf == nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, repo := range connected {
+		set[repo] = true
+	}
+	for _, entry := range lf.Entries {
+		if !set[entry.SourceRegistry] {
+			return clierrors.Wrap(fmt.Errorf("registry %q is not connected", entry.SourceRegistry), "PROJECT_REGISTRY_NOT_CONNECTED", clierrors.ExitPerm,
+				clierrors.WithRemediation("Run `scribe registry connect "+entry.SourceRegistry+"` before `scribe sync`."),
+			)
+		}
+	}
 	return nil
 }
 
