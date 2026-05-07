@@ -307,6 +307,49 @@ func TestStepProjectSnippets_WritesTargetsAndState(t *testing.T) {
 	}
 }
 
+func TestStepProjectSnippets_MarksStateDirtyWhenProjectionUnchangedButStateMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectDir := t.TempDir()
+	pfContent := "snippets:\n  - commit-discipline\n"
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte(pfContent), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	snippetDir := filepath.Join(home, ".scribe", "snippets")
+	if err := os.MkdirAll(snippetDir, 0o755); err != nil {
+		t.Fatalf("mkdir snippets: %v", err)
+	}
+	snippetContent := "---\nname: commit-discipline\ndescription: Commit rules\ntargets: [claude]\n---\n# Agent Commit Discipline\n"
+	if err := os.WriteFile(filepath.Join(snippetDir, "commit-discipline.md"), []byte(snippetContent), 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+
+	first := &Bag{
+		ProjectRoot: projectDir,
+		State:       &state.State{Snippets: map[string]state.InstalledSnippet{}},
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+	}
+	if err := StepProjectSnippets(context.Background(), first); err != nil {
+		t.Fatalf("StepProjectSnippets initial: %v", err)
+	}
+
+	second := &Bag{
+		ProjectRoot: projectDir,
+		State:       &state.State{Snippets: map[string]state.InstalledSnippet{}},
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+	}
+	if err := StepProjectSnippets(context.Background(), second); err != nil {
+		t.Fatalf("StepProjectSnippets second: %v", err)
+	}
+	if !second.StateDirty {
+		t.Fatal("StateDirty = false, want true for missing snippet state")
+	}
+	if _, ok := second.State.Snippets["commit-discipline"]; !ok {
+		t.Fatalf("state snippet missing: %#v", second.State.Snippets)
+	}
+}
+
 func TestStepProjectSnippets_RemovesStaleBlocksWhenProjectFileClearsSnippets(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -729,5 +772,26 @@ func TestStepProjectMCPServers_RequiresDefinitionsForCodexCursor(t *testing.T) {
 	err := StepProjectMCPServers(context.Background(), b)
 	if err == nil || !strings.Contains(err.Error(), "missing from .mcp.json") {
 		t.Fatalf("StepProjectMCPServers error = %v, want missing definition error", err)
+	}
+}
+
+func TestStepProjectMCPServers_ValidatesDefinitionsBeforeClaudeWrite(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, ".mcp.json"), []byte(`{"mcpServers":{}}`), 0o644); err != nil {
+		t.Fatalf("write .mcp.json: %v", err)
+	}
+	b := &Bag{
+		ProjectRoot:              projectDir,
+		ProjectMCPServers:        []string{"mempalace"},
+		ProjectMCPServersEnabled: true,
+		Tools:                    []tools.Tool{tools.ClaudeTool{}, tools.CodexTool{}},
+	}
+	err := StepProjectMCPServers(context.Background(), b)
+	if err == nil || !strings.Contains(err.Error(), "missing from .mcp.json") {
+		t.Fatalf("StepProjectMCPServers error = %v, want missing definition error", err)
+	}
+	settingsPath := filepath.Join(projectDir, ".claude", "settings.json")
+	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
+		t.Fatalf("claude settings written before validation failed: %v", err)
 	}
 }

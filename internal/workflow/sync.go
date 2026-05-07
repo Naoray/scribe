@@ -217,16 +217,20 @@ func StepProjectMCPServers(_ context.Context, b *Bag) error {
 	if b.ProjectRoot == "" || !b.ProjectMCPServersEnabled {
 		return nil
 	}
+	var definitions map[string]map[string]any
+	if hasTool(b.Tools, "codex") || hasTool(b.Tools, "cursor") {
+		var err error
+		definitions, err = loadProjectMCPDefinitions(b.ProjectRoot, b.ProjectMCPServers)
+		if err != nil {
+			return err
+		}
+	}
 	if hasTool(b.Tools, "claude") {
 		if err := projectClaudeMCPServers(b.ProjectRoot, b.ProjectMCPServers); err != nil {
 			return fmt.Errorf("project claude MCP servers: %w", err)
 		}
 	}
 	if hasTool(b.Tools, "codex") || hasTool(b.Tools, "cursor") {
-		definitions, err := loadProjectMCPDefinitions(b.ProjectRoot, b.ProjectMCPServers)
-		if err != nil {
-			return err
-		}
 		if hasTool(b.Tools, "codex") {
 			if err := projectCodexMCPServers(b.ProjectRoot, b.ProjectMCPServers, definitions); err != nil {
 				return fmt.Errorf("project codex MCP servers: %w", err)
@@ -290,9 +294,13 @@ func StepProjectSnippets(_ context.Context, b *Bag) error {
 			b.State.Snippets = map[string]state.InstalledSnippet{}
 		}
 		for _, sn := range snippets {
-			b.State.Snippets[sn.Name] = state.InstalledSnippet{
+			next := state.InstalledSnippet{
 				Source:  sn.Path,
 				Targets: append([]string(nil), sn.Targets...),
+			}
+			if !installedSnippetEqual(b.State.Snippets[sn.Name], next) {
+				b.State.Snippets[sn.Name] = next
+				b.MarkStateDirty()
 			}
 		}
 		if len(paths) > 0 || len(legacyPaths) > 0 {
@@ -301,6 +309,18 @@ func StepProjectSnippets(_ context.Context, b *Bag) error {
 	}
 	b.ProjectSnippets = append(b.ProjectSnippets[:0], pf.Snippets...)
 	return nil
+}
+
+func installedSnippetEqual(a, b state.InstalledSnippet) bool {
+	if a.Source != b.Source || a.Version != b.Version || len(a.Targets) != len(b.Targets) {
+		return false
+	}
+	for i := range a.Targets {
+		if a.Targets[i] != b.Targets[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func removeLegacyCursorSnippets(projectRoot string, snippets []snippet.Snippet, st *state.State) ([]string, error) {
