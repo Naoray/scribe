@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"github.com/Naoray/scribe/internal/kit"
 	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/state"
+	isync "github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 func TestProjectSkillCreateMarksOriginProject(t *testing.T) {
@@ -135,6 +138,55 @@ func TestProjectSyncCheckDetectsDrift(t *testing.T) {
 	}
 }
 
+func TestTeamShareAuthorPublishTeammateBoostSync(t *testing.T) {
+	authorHome := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", authorHome)
+	mustChdir(t, project)
+	mustWriteProjectFile(t, filepath.Join(project, "composer.json"), `{"require":{"laravel/boost":"^1.0"}}`)
+	mustWriteProjectFile(t, filepath.Join(project, ".scribe.yaml"), "add: [review]\n")
+	mustWriteProjectFile(t, filepath.Join(authorHome, ".scribe", "skills", "review", "SKILL.md"), "# review\n")
+	st := stateFixture(t, authorHome)
+	st.Installed["review"] = state.InstalledSkill{Origin: state.OriginProject}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save author state: %v", err)
+	}
+	publish := newProjectSyncCommand()
+	if err := publish.Execute(); err != nil {
+		t.Fatalf("author project sync: %v", err)
+	}
+
+	teammateHome := t.TempDir()
+	t.Setenv("HOME", teammateHome)
+	claudeRealDir := filepath.Join(project, ".claude", "skills", "review")
+	mustWriteProjectFile(t, filepath.Join(claudeRealDir, "SKILL.md"), "# boost copy\n")
+	teammateState := &state.State{
+		SchemaVersion: state.CurrentSchemaVersion,
+		Installed:     map[string]state.InstalledSkill{},
+		VendorState:   map[string]state.VendorState{},
+	}
+	projectLock, err := projectstore.Project(project).LoadProjectLockfile()
+	if err != nil {
+		t.Fatalf("load project lock: %v", err)
+	}
+	syncer := &isync.Syncer{
+		Tools:       []tools.Tool{tools.ClaudeTool{}, projectTestTool{name: "codex"}},
+		ProjectRoot: project,
+	}
+	if err := syncer.RunProject(context.Background(), teammateState, projectLock); err != nil {
+		t.Fatalf("teammate RunProject: %v", err)
+	}
+	if _, err := os.Stat(claudeRealDir); err != nil {
+		t.Fatalf("Boost Claude dir should remain: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".codex", "skills", "review")); err != nil {
+		t.Fatalf("Codex projection missing: %v", err)
+	}
+	if teammateState.VendorState["review"].FirstSeenAt.IsZero() {
+		t.Fatal("VendorState first seen not recorded")
+	}
+}
+
 func stateFixture(t *testing.T, home string) *state.State {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(home, ".scribe"), 0o755); err != nil {
@@ -177,4 +229,32 @@ func mustChdir(t *testing.T, dir string) {
 		t.Fatalf("chdir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
+}
+
+type projectTestTool struct {
+	name string
+}
+
+func (t projectTestTool) Name() string           { return t.name }
+func (t projectTestTool) Detect() bool           { return true }
+func (t projectTestTool) Uninstall(string) error { return nil }
+func (t projectTestTool) CanonicalTarget(canonicalDir string) (string, bool) {
+	return canonicalDir, true
+}
+func (t projectTestTool) SkillPath(skillName, projectRoot string) (string, error) {
+	return filepath.Join(projectRoot, "."+t.name, "skills", skillName), nil
+}
+func (t projectTestTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
+	path, err := t.SkillPath(skillName, projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	_ = os.Remove(path)
+	if err := os.Symlink(canonicalDir, path); err != nil {
+		return nil, err
+	}
+	return []string{path}, nil
 }
