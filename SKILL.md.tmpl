@@ -107,10 +107,11 @@ Use it for installs, updates, removal, adoption of unmanaged local skills, and s
 | what skills are installed | `scribe list --json` |
 | what skills are available remotely | `scribe browse --json` |
 | sync my skills | `scribe sync --json` |
+| show resolved project loadout | `scribe show --json` |
 | remove X | `scribe remove X --yes --json` |
 | import existing local skills | `scribe adopt --dry-run --json` |
 | actually adopt them | `scribe adopt --yes --json` |
-| explain what X does | `scribe explain X --json` |
+| explain what X does (skill or snippet) | `scribe explain X --json` |
 | show scribe status | `scribe status --json` |
 | connect a registry | `scribe registry connect owner/repo` |
 | refresh bootstrap skill | `scribe upgrade-agent --json` |
@@ -124,7 +125,7 @@ Use it for installs, updates, removal, adoption of unmanaged local skills, and s
 5. Use `scribe adopt --dry-run --json` before `scribe adopt --yes --json`.
 6. Do not hand-edit `~/.scribe/state.json`.
 7. Do not copy skill files directly into tool directories; use `scribe adopt`.
-8. `scribe sync` reconciles registries; it does not install an arbitrary new skill by query.
+8. `scribe sync` reconciles the project loadout; it does not install an arbitrary new skill by query.
 9. `scribe list` is local-first. Use `scribe browse` for registry discovery.
 10. Some failures still return plain stderr plus non-zero exit, not a JSON error envelope.
 
@@ -179,9 +180,9 @@ kits:
   - laravel-stack
 ```
 
-`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`. It also projects kit-declared and project-declared `mcp` / `mcp_servers` into project-local Claude settings at `.claude/settings.json` while preserving user-managed settings. Scribe records server names for Claude approval/configuration; it does not start MCP server processes.
+`scribe sync` resolves the final skill set as the union of `kit.Skills` plus `projectFile.Add`, then subtracts `projectFile.Remove`. It projects skills into the project's `.claude/skills/` and `.agents/skills/` dirs (Codex reads `.agents/skills/`), projects kit-declared and project-declared `mcp` / `mcp_servers` into project-local Claude settings at `.claude/settings.json` while preserving user-managed settings, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus Cursor rules in `.cursor/rules/<name>.mdc`. Scribe records server names for Claude approval/configuration; it does not start MCP server processes.
 
-Snippets listed in `.scribe.yaml` are loaded from `~/.scribe/snippets/<name>.md` and projected into `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, or `.cursor/rules/*.mdc` based on their frontmatter targets. If `.scribe.yaml` changes, or generated agent files no longer match it, run `scribe sync --json` before assuming the active agent loadout is current.
+Snippets listed in `.scribe.yaml` are loaded from `~/.scribe/snippets/<name>.md` and projected into `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, or `.cursor/rules/<name>.mdc` based on their frontmatter targets. If `.scribe.yaml` changes, or generated agent files no longer match it, run `scribe sync --json` before assuming the active agent loadout is current.
 
 To author a Kit, run:
 
