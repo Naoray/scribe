@@ -127,7 +127,7 @@ func TestRemoveLeavesConflictResidue(t *testing.T) {
 	}
 
 	cmd := newRemoveCommand()
-	cmd.SetArgs([]string{"recap", "--yes", "--json"})
+	cmd.SetArgs([]string{"recap", "--no-interaction", "--json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestRemoveRecordsRemovalIntentForAllSources(t *testing.T) {
 	}
 
 	cmd := newRemoveCommand()
-	cmd.SetArgs([]string{"recap", "--yes", "--json"})
+	cmd.SetArgs([]string{"recap", "--no-interaction", "--json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

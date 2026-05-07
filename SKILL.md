@@ -84,7 +84,7 @@ If it does not, install this skill now. First trigger first-run so the `Naoray/s
 
 ```bash
 scribe status --json
-scribe add Naoray/scribe:scribe --yes --json
+scribe add Naoray/scribe:scribe --no-interaction --json
 scribe list --json
 ```
 
@@ -102,31 +102,35 @@ Use it for installs, updates, removal, adoption of unmanaged local skills, and s
 
 | User says | Run |
 | --- | --- |
-| install the X skill | `scribe add X --json` |
-| install X from owner/repo | `scribe add owner/repo:X --yes --json` |
+| search available skills | `scribe browse --json` |
+| search available skills matching X | `scribe browse --query X --json` |
+| install the X skill | `scribe browse --install X --no-interaction --json` |
+| install X from owner/repo | `scribe add owner/repo:X --no-interaction --json` |
 | what skills are installed | `scribe list --json` |
-| what skills are available remotely | `scribe list --remote --json` |
+| what skills are available remotely | `scribe browse --json` |
 | sync my skills | `scribe sync --json` |
-| remove X | `scribe remove X --yes --json` |
+| show resolved project loadout | `scribe show --json` |
+| remove X | `scribe remove X --no-interaction --json` |
 | import existing local skills | `scribe adopt --dry-run --json` |
-| actually adopt them | `scribe adopt --yes --json` |
-| explain what X does | `scribe explain X --json` |
+| actually adopt them | `scribe adopt --no-interaction --json` |
+| explain what X does (skill or snippet) | `scribe explain X --json` |
 | show scribe status | `scribe status --json` |
 | audit managed skill health | `scribe doctor --json` |
 | repair managed skill metadata/projections | `scribe doctor --skill <name> --fix` |
-| connect a registry | `scribe registry add owner/repo` |
+| connect a registry | `scribe registry connect owner/repo` |
 
 ## Non-negotiable rules
 
 1. Always use `--json` for anything you plan to parse.
-2. Never run bare `scribe add` in automation.
-3. Prefer `owner/repo:skill` for deterministic installs.
-4. Use `--yes` for direct installs and removals.
-5. Use `scribe adopt --dry-run --json` before `scribe adopt --yes --json`.
+2. Prefer `scribe browse --query ... --json` for discovery and `scribe browse --install ... --no-interaction --json` for exact-name installs.
+3. Prefer `owner/repo:skill` for deterministic installs via `scribe add`.
+4. Use `--no-interaction` for direct installs and removals.
+5. Use `scribe adopt --dry-run --json` before `scribe adopt --no-interaction --json`.
 6. Do not hand-edit `~/.scribe/state.json`.
 7. Do not copy skill files directly into tool directories; use `scribe adopt`.
-8. `scribe sync` reconciles registries; it does not install an arbitrary new skill by query.
-9. Some failures still return plain stderr plus non-zero exit, not a JSON error envelope.
+8. `scribe sync` reconciles the project loadout; it does not install an arbitrary new skill by query.
+9. `scribe list` is local-first. Use `scribe browse` for registry discovery.
+10. Some failures still return plain stderr plus non-zero exit, not a JSON error envelope.
 
 ## JSON envelope (format_version=1)
 
@@ -147,11 +151,11 @@ Run `scribe schema <command> --json` before composing an unfamiliar call — ret
 
 ## Project file (`.scribe.yaml`)
 
-If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `add`, `remove`. The schema and parser ship; CLI surfaces that act on it land per release. Don't synthesize one without being asked.
+If a project root has `.scribe.yaml`, it declares per-project intent — `kits`, `snippets`, `mcp`, `mcp_servers`, `add`, `remove`. Kits are first-class local skill bundles, and `scribe kit create` can scaffold them. Don't synthesize a project file without being asked.
 
-## Authoring kits and snippets (until `scribe kit` / `scribe snippet` ship)
+## Authoring kits and snippets
 
-Kit and snippet creation has no CLI yet. When the user asks to create, edit, or remove a kit or snippet, edit the YAML/Markdown files directly. Run `scribe sync` afterwards to apply.
+Use `scribe kit create` for new kits. Snippet creation has no CLI yet; when the user asks to create, edit, or remove a snippet, edit the Markdown file directly. Run `scribe sync` afterwards to apply.
 
 ### Kit — bundle of skills, declared in `~/.scribe/kits/<name>.yaml`
 
@@ -164,11 +168,19 @@ skills:
   - init-laravel
   - tdd
   - code-review
+mcp_servers:
+  - mempalace
 ```
 
-Required: `apiVersion`, `kind`, `name`, `skills`. `description` is optional but recommended.
+Required: `name`, `skills`. `description`, `mcp_servers`, `apiVersion`, `kind`, and `source` are optional.
 
 Each entry under `skills:` is a skill `name` from `scribe list --json`. Verify the skills exist before writing the kit; a kit referencing an unknown skill will fail at sync time.
+
+Prefer the CLI when creating a kit:
+
+```bash
+scribe kit create laravel-baseline --skills init-laravel,tdd,code-review --mcp-servers mempalace --description "Default skill set for Laravel app work"
+```
 
 ### Snippet — agent rules block, declared in `~/.scribe/snippets/<name>.md`
 
@@ -194,13 +206,15 @@ kits:
   - laravel-baseline
 snippets:
   - commit-discipline
+mcp:
+  - mempalace
 add:
   - owner/repo:extra-skill
 remove:
   - skill-this-project-doesnt-want
 ```
 
-All four keys are optional. Empty / missing file = no project intent.
+All keys are optional. Empty / missing file = no project intent. `mcp` and `mcp_servers` both declare project-local MCP server names; server definitions must already exist in `.mcp.json`.
 
 ### After authoring, apply
 
@@ -208,7 +222,9 @@ All four keys are optional. Empty / missing file = no project intent.
 scribe sync --json
 ```
 
-Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.codex/skills/` dirs, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `.cursorrules` (markers preserved; content outside markers untouched).
+Sync resolves declared kits, merges `add` / `remove`, projects skills into the project's `.claude/skills/` and `.agents/skills/` dirs (Codex reads `.agents/skills/`), scopes selected `.mcp.json` definitions into Claude, Codex, and Cursor project config, and writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus Cursor rules in `.cursor/rules/<name>.mdc` (markers preserved; content outside markers untouched). Scribe does not start MCP server processes.
+
+If `.scribe.yaml` changes, or generated agent files no longer match it, run `scribe sync --json` before assuming the active agent loadout is current.
 
 ### Codex budget
 
@@ -228,11 +244,11 @@ Top level: array.
 Each item may include `name`, `description`, `package`, `revision`, `content_hash`, `targets`, `managed`, `origin`, and `path`.
 Fresh-home output is `[]`.
 
-### `scribe list --remote --json`
+### `scribe browse --json`
 
 Top level: object with `registries`.
 Each registry has `registry` and `skills`.
-Each remote skill may include `name`, `status`, `version`, `loadout_ref`, `maintainer`, and `agents`.
+Each remote skill may include `name`, `status`, `version`, `loadout_ref`, `maintainer`, and `agents`. Add `--query <q>` to filter, or `--install <name> --no-interaction` to install an exact match.
 
 ### `scribe add query --json`
 
@@ -240,7 +256,7 @@ Top level: object with `results`.
 Each result may include `name`, `registry`, `status`, `version`, `description`, and `author`.
 This is search output, not install output.
 
-### `scribe add owner/repo:skill --yes --json`
+### `scribe add owner/repo:skill --no-interaction --json`
 
 Top level: object with `installed`.
 Each installed item may include `name`, `registry`, `status`, and `error`.
@@ -261,12 +277,12 @@ Top level: object with `dry_run`, `adopt`, and `conflicts`.
 `adopt` entries may include `name`, `local_path`, `targets`, and `hash`.
 `conflicts` entries may include `name`, `managed_hash`, `unmanaged_path`, and `unmanaged_hash`.
 
-### `scribe adopt --yes --json`
+### `scribe adopt --no-interaction --json`
 
 Top level: formatter envelope with `registries`, `summary`, and `adoption`.
 `adoption` may include `skills`, `conflicts_deferred`, `adopted`, `failed`, and `skipped`.
 
-### `scribe remove skill --yes --json`
+### `scribe remove skill --no-interaction --json`
 
 Top level: object with `removed`.
 Optional fields: `managed_by`, `errors`.
@@ -293,14 +309,14 @@ Each issue may include `skill`, `tool`, `kind`, `status`, and `message`.
 Install a known skill:
 
 ```bash
-scribe add owner/repo:skill --yes --json
+scribe add owner/repo:skill --no-interaction --json
 ```
 
 Search, then install deterministically:
 
 ```bash
-scribe add query --json
-scribe add owner/repo:skill --yes --json
+scribe browse --query query --json
+scribe browse --install owner/repo:skill --no-interaction --json
 ```
 
 Inspect local state:
@@ -332,7 +348,7 @@ Adopt unmanaged local skills:
 
 ```bash
 scribe adopt --dry-run --json
-scribe adopt --yes --json
+scribe adopt --no-interaction --json
 ```
 
 ## Anti-patterns

@@ -51,6 +51,46 @@ Keep daily notes and summaries.
 	}
 }
 
+func TestInspectManagedSkillsReportsMissingSnippetProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, ".scribe.yaml"), []byte("snippets:\n  - commit-discipline\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	snippetDir := filepath.Join(home, ".scribe", "snippets")
+	if err := os.MkdirAll(snippetDir, 0o755); err != nil {
+		t.Fatalf("mkdir snippets: %v", err)
+	}
+	snippetContent := "---\nname: commit-discipline\ndescription: Commit rules\ntargets: [claude]\n---\n# Agent Commit Discipline\n"
+	if err := os.WriteFile(filepath.Join(snippetDir, "commit-discipline.md"), []byte(snippetContent), 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+	t.Chdir(project)
+
+	cfg := &config.Config{Tools: []config.ToolConfig{{Name: "claude", Enabled: true}}}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+	report, err := InspectManagedSkills(cfg, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+
+	if len(report.Issues) != 1 {
+		t.Fatalf("Issues = %d, want 1: %+v", len(report.Issues), report.Issues)
+	}
+	issue := report.Issues[0]
+	if issue.Kind != IssueSnippetProjectionDrift {
+		t.Fatalf("Kind = %q, want %q", issue.Kind, IssueSnippetProjectionDrift)
+	}
+	if issue.Skill != "snippet:commit-discipline" || issue.Tool != "claude" {
+		t.Fatalf("Issue = %+v, want commit-discipline claude drift", issue)
+	}
+	if !strings.Contains(issue.Message, "scribe sync") {
+		t.Fatalf("Message = %q, want sync remediation", issue.Message)
+	}
+}
+
 func TestInspectSkillReportsInvalidFrontmatter(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

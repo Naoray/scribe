@@ -53,6 +53,36 @@ func Resolve(pf *projectfile.ProjectFile, availableKits map[string]*Kit, install
 	return skills, nil
 }
 
+// ResolveMCPServers returns the final MCP server set for a project.
+// MCP servers are kit-scoped so projects only activate runtime tools declared
+// by their selected kits.
+func ResolveMCPServers(pf *projectfile.ProjectFile, availableKits map[string]*Kit) ([]string, error) {
+	if pf == nil {
+		pf = &projectfile.ProjectFile{}
+	}
+
+	result := make(map[string]struct{})
+	for _, server := range pf.MCPServerNames() {
+		result[server] = struct{}{}
+	}
+	for _, kitName := range pf.Kits {
+		kit, ok := availableKits[kitName]
+		if !ok {
+			return nil, fmt.Errorf("kit %q not found", kitName)
+		}
+		for _, server := range kit.MCPServers {
+			result[server] = struct{}{}
+		}
+	}
+
+	servers := make([]string, 0, len(result))
+	for server := range result {
+		servers = append(servers, server)
+	}
+	sort.Strings(servers)
+	return servers, nil
+}
+
 func expandSkillPattern(pattern string, installedSkills []string) ([]string, error) {
 	if !hasGlobMeta(pattern) {
 		return []string{pattern}, nil

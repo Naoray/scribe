@@ -1,3 +1,21 @@
+## v1.1.0 — 2026-05-07
+
+### Added
+- **Snippets now project during `scribe sync`** — `.scribe.yaml` `snippets:` entries load `~/.scribe/snippets/<name>.md`, strip frontmatter, and write managed rules into `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and Cursor `.cursor/rules/*.mdc` targets.
+- **Project files can declare MCP servers directly** — `.scribe.yaml` now supports `mcp:` and `mcp_servers:` alongside kit-declared MCP server names.
+- **Kit-scoped MCP projection now covers Claude, Codex, and Cursor** — selected `.mcp.json` definitions project into Claude approvals, Codex `.codex/config.toml`, and Cursor `.cursor/mcp.json` while preserving unmanaged entries.
+- **`scribe show` and `scribe explain` understand snippets** — project snippets show with byte size/targets, and `scribe explain <snippet>` can render snippet source.
+- **Plain `scribe sync` converges project kits** — when `.scribe.yaml` declares kits, sync installs missing kit-resolved skills without requiring an extra flag.
+
+## v1.0.13 — 2026-05-04
+
+### Fixed
+- **Release archives no longer publish `checksums.txt`** — GoReleaser now omits the checksum asset, and `scribe upgrade` verifies downloaded archives against GitHub's per-asset SHA256 digest instead.
+- **`scribe resolve --ours` strips conflict markers** — resolving a merge conflict by keeping the local version now removes leftover conflict marker text before saving the skill.
+- **Reconcile removes missing projections cleanly** — stale projection entries are dropped when their target links no longer exist.
+- **Codex project projections and budget checks stay aligned** — project-local Codex projections are preserved correctly, description budget checks model shortened descriptions, and orphaned legacy global Codex links are pruned during project sync.
+- **Project kits can declare Claude MCP servers** — `scribe sync` now projects kit-defined MCP server commands into project-local Claude settings while preserving existing user-managed settings.
+
 ## v1.0.12 — 2026-05-04
 
 ### Fixed

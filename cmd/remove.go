@@ -34,7 +34,7 @@ intent so future syncs keep it removed until you install it again.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runRemove,
 	}
-	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	addNoInteractionFlag(cmd, "Disable interactive prompts", true)
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	return cmd
 }
@@ -48,7 +48,7 @@ type removeResult struct {
 
 func runRemove(cmd *cobra.Command, args []string) error {
 	input := args[0]
-	yes, _ := cmd.Flags().GetBool("yes")
+	yes := noInteractionFlagPassed(cmd)
 	jsonFlag, _ := cmd.Flags().GetBool("json")
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
@@ -110,7 +110,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 				return nil
 			}
 		} else {
-			return fmt.Errorf("use --yes to confirm removal in non-interactive mode")
+			return fmt.Errorf("use --no-interaction to confirm removal in non-interactive mode")
 		}
 	}
 

@@ -96,6 +96,39 @@ func TestProjectLocalBudgetUsesShortCodexDescriptions(t *testing.T) {
 	}
 }
 
+func TestProjectBudgetIncludesTargetedSnippets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	wd := t.TempDir()
+	t.Chdir(wd)
+
+	writeBudgetSkill(t, home, "shared", "shared")
+	writeBudgetKit(t, home, "base", []string{"shared"})
+	writeBudgetSnippet(t, home, "commit-discipline", []string{"claude"}, strings.Repeat("x", 100))
+	if err := os.WriteFile(filepath.Join(wd, ".scribe.yaml"), []byte("kits:\n - base\nsnippets:\n - commit-discipline\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"shared": {Tools: []string{"claude", "codex"}},
+	}}
+
+	set, err := resolveBudgetSet(st)
+	if err != nil {
+		t.Fatalf("resolveBudgetSet: %v", err)
+	}
+	if len(set.Snippets) != 1 {
+		t.Fatalf("Snippets = %v, want one snippet", set.Snippets)
+	}
+	claude := skillNames(budgetSkillsForAgent(set, st, "claude"))
+	codex := skillNames(budgetSkillsForAgent(set, st, "codex"))
+	if !claude.has("snippet:commit-discipline") {
+		t.Fatalf("claude budget missing targeted snippet: %#v", claude)
+	}
+	if codex.has("snippet:commit-discipline") {
+		t.Fatalf("codex budget included claude-only snippet: %#v", codex)
+	}
+}
+
 func writeBudgetSkill(t *testing.T, home, name, content string) {
 	t.Helper()
 
@@ -123,6 +156,23 @@ func writeBudgetKit(t *testing.T, home, name string, skills []string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(content.String()), 0o644); err != nil {
 		t.Fatalf("write kit: %v", err)
+	}
+}
+
+func writeBudgetSnippet(t *testing.T, home, name string, targets []string, body string) {
+	t.Helper()
+
+	dir := filepath.Join(home, ".scribe", "snippets")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir snippets dir: %v", err)
+	}
+	content := "---\nname: " + name + "\ndescription: snippet desc\ntargets:\n"
+	for _, target := range targets {
+		content += " - " + target + "\n"
+	}
+	content += "---\n" + body + "\n"
+	if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
 	}
 }
 

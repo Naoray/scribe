@@ -85,10 +85,10 @@ func TestAdopt_DryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// TestAdopt_YesForcesAuto verifies --yes adopts candidates without prompting.
+// TestAdopt_NoInteractionForcesAuto verifies --no-interaction adopts candidates without prompting.
 // Source is in a custom path (not ~/.claude/skills/) so tool.Install creates
 // fresh symlinks without needing to remove a directory first.
-func TestAdopt_YesForcesAuto(t *testing.T) {
+func TestAdopt_NoInteractionForcesAuto(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -114,7 +114,7 @@ func TestAdopt_YesForcesAuto(t *testing.T) {
 	os.Stdout = w
 
 	cmd := newAdoptCommand()
-	cmd.SetArgs([]string{"--yes", "--json"})
+	cmd.SetArgs([]string{"--no-interaction", "--json"})
 	err := cmd.Execute()
 
 	w.Close()
@@ -191,33 +191,33 @@ func TestAdopt_JSONStructure(t *testing.T) {
 	}
 }
 
-// TestAdopt_UnknownNameExitCode verifies that --yes with an unknown name returns an error.
+// TestAdopt_UnknownNameExitCode verifies that --no-interaction with an unknown name returns an error.
 func TestAdopt_UnknownNameExitCode(t *testing.T) {
 	setupAdoptHome(t, "real-skill", "# real-skill\ncontent")
 
 	cmd := newAdoptCommand()
-	cmd.SetArgs([]string{"--yes", "nonexistent"})
+	cmd.SetArgs([]string{"--no-interaction", "nonexistent"})
 	err := cmd.RunE(cmd, []string{"nonexistent"})
 	if err == nil {
 		t.Fatal("expected non-nil error for unknown candidate name")
 	}
 }
 
-// TestAdopt_NonTTYNoYesErrors verifies non-interactive mode without --yes returns an error.
+// TestAdopt_NonTTYNoInteractionErrors verifies non-interactive mode without --no-interaction returns an error.
 // Go test binaries have non-TTY stdin/stdout by default, so the non-TTY guard fires
-// when no --yes, --json, or --dry-run flags are passed.
-func TestAdopt_NonTTYNoYesErrors(t *testing.T) {
+// when no --no-interaction, --json, or --dry-run flags are passed.
+func TestAdopt_NonTTYNoInteractionErrors(t *testing.T) {
 	setupAdoptHome(t, "some-skill", "# some-skill\ncontent")
 
 	cmd := newAdoptCommand()
-	cmd.SetArgs([]string{}) // no --yes, no --json, no --dry-run
+	cmd.SetArgs([]string{}) // no --no-interaction, no --json, no --dry-run
 
 	err := cmd.RunE(cmd, []string{})
 	if err == nil {
-		t.Fatal("expected error for non-TTY without --yes, got nil")
+		t.Fatal("expected error for non-TTY without --no-interaction, got nil")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "non-interactive") && !strings.Contains(msg, "--yes") {
-		t.Errorf("expected error mentioning non-interactive or --yes, got: %q", msg)
+	if !strings.Contains(msg, "non-interactive") && !strings.Contains(msg, "--no-interaction") {
+		t.Errorf("expected error mentioning non-interactive or --no-interaction, got: %q", msg)
 	}
 }

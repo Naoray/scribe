@@ -121,7 +121,7 @@ Skills grouped by registry in list output. `--registry` filter flag available.
 
 **Why:** Today, removing an entry requires hand-editing the manifest on GitHub (or via `gh api`). The CLI has an `add` half but no `remove` half.
 
-**Fix:** New subcommand in `cmd/registry_remove.go`. Fetch manifest, drop the entry from `catalog`, push back. Same auth/TTY plumbing as `registry add`. Add a `--yes` flag for non-interactive use.
+**Fix:** New subcommand in `cmd/registry_remove.go`. Fetch manifest, drop the entry from `catalog`, push back. Same auth/TTY plumbing as `registry add`. Add a `--no-interaction` flag for non-interactive use.
 
 **Context:** Identified while removing `obra/superpowers` from `artistfy/hq` manually (2026-04-07).
 

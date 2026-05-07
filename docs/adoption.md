@@ -6,7 +6,7 @@ If you've been hand-rolling skills in `~/.claude/skills/`, `~/.codex/skills/`, o
 
 ```bash
 scribe adopt                 # interactive: review conflicts, adopt clean candidates
-scribe adopt --yes           # auto-adopt all clean candidates
+scribe adopt --no-interaction  # auto-adopt all clean candidates
 scribe adopt --dry-run       # preview the plan, no writes
 scribe adopt <name>          # adopt a single named skill
 scribe adopt --json          # machine-readable plan + result

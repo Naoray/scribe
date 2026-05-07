@@ -16,10 +16,21 @@ const Filename = ".scribe.yaml"
 
 // ProjectFile declares which Scribe assets a project wants projected locally.
 type ProjectFile struct {
-	Kits     []string `yaml:"kits,omitempty"`
-	Snippets []string `yaml:"snippets,omitempty"`
-	Add      []string `yaml:"add,omitempty"`
-	Remove   []string `yaml:"remove,omitempty"`
+	Kits       []string `yaml:"kits,omitempty"`
+	Snippets   []string `yaml:"snippets,omitempty"`
+	MCP        []string `yaml:"mcp,omitempty"`
+	MCPServers []string `yaml:"mcp_servers,omitempty"`
+	Add        []string `yaml:"add,omitempty"`
+	Remove     []string `yaml:"remove,omitempty"`
+}
+
+func (pf *ProjectFile) MCPServerNames() []string {
+	if pf == nil {
+		return nil
+	}
+	out := append([]string(nil), pf.MCP...)
+	out = append(out, pf.MCPServers...)
+	return out
 }
 
 // Load reads a .scribe.yaml file from path.

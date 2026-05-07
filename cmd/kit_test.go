@@ -21,6 +21,8 @@ func TestKitCreateWritesKitYAML(t *testing.T) {
 		"--description", "Laravel project defaults",
 		"--skills", "eloquent,queues",
 		"--skills", "livewire",
+		"--mcp-servers", "mempalace",
+		"--mcp-servers", "playwright,github",
 		"--registry", "my-org/scribe-registry",
 	})
 
@@ -55,8 +57,17 @@ func TestKitCreateWritesKitYAML(t *testing.T) {
 			t.Fatalf("skills = %#v, want %#v", got.Skills, wantSkills)
 		}
 	}
+	wantMCPServers := []string{"mempalace", "playwright", "github"}
+	if len(got.MCPServers) != len(wantMCPServers) {
+		t.Fatalf("mcp_servers = %#v, want %#v", got.MCPServers, wantMCPServers)
+	}
+	for i := range wantMCPServers {
+		if got.MCPServers[i] != wantMCPServers[i] {
+			t.Fatalf("mcp_servers = %#v, want %#v", got.MCPServers, wantMCPServers)
+		}
+	}
 
-	wantOutput := "Created kit laravel-stack at " + kitPath + " with 3 skills\n"
+	wantOutput := "Created kit laravel-stack at " + kitPath + " with 3 skills and 3 MCP servers\n"
 	if out.String() != wantOutput {
 		t.Fatalf("output = %q, want %q", out.String(), wantOutput)
 	}
@@ -77,9 +88,10 @@ func TestKitCreateJSONOutput(t *testing.T) {
 	}
 
 	var payload struct {
-		Name        string `json:"name"`
-		Path        string `json:"path"`
-		SkillsCount int    `json:"skills_count"`
+		Name            string `json:"name"`
+		Path            string `json:"path"`
+		SkillsCount     int    `json:"skills_count"`
+		MCPServersCount int    `json:"mcp_servers_count"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
 		t.Fatalf("parse json output: %v\n%s", err, out.String())
@@ -93,6 +105,9 @@ func TestKitCreateJSONOutput(t *testing.T) {
 	}
 	if payload.SkillsCount != 2 {
 		t.Fatalf("skills_count = %d, want 2", payload.SkillsCount)
+	}
+	if payload.MCPServersCount != 0 {
+		t.Fatalf("mcp_servers_count = %d, want 0", payload.MCPServersCount)
 	}
 }
 

@@ -10,7 +10,10 @@ import (
 
 	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/paths"
+	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/skillmd"
+	"github.com/Naoray/scribe/internal/snippet"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 	"gopkg.in/yaml.v3"
@@ -22,6 +25,7 @@ const (
 	IssueCanonicalMetadata       IssueKind = "canonical_metadata"
 	IssueMigrationBudgetOverflow IssueKind = "migration_budget_overflow"
 	IssueProjectionDrift         IssueKind = "projection_drift"
+	IssueSnippetProjectionDrift  IssueKind = "snippet_projection_drift"
 )
 
 type Issue struct {
@@ -43,6 +47,9 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 
 	names := managedSkillNames(st, name)
 	if len(names) == 0 {
+		if name == "" {
+			return Report{Issues: inspectProjectSnippetDrift(cfg)}, nil
+		}
 		return Report{}, nil
 	}
 
@@ -67,6 +74,9 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 		}
 	}
 	issues = append(issues, inspectMigrationBudgetOverflow(st, name)...)
+	if name == "" {
+		issues = append(issues, inspectProjectSnippetDrift(cfg)...)
+	}
 
 	sort.SliceStable(issues, func(i, j int) bool {
 		if issues[i].Skill != issues[j].Skill {
@@ -82,6 +92,84 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 	})
 
 	return Report{Issues: issues}, nil
+}
+
+func inspectProjectSnippetDrift(cfg *config.Config) []Issue {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	projectPath, err := projectfile.Find(wd)
+	if err != nil || projectPath == "" {
+		return nil
+	}
+	pf, err := projectfile.Load(projectPath)
+	if err != nil || len(pf.Snippets) == 0 {
+		return nil
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return nil
+	}
+	snippets, err := snippet.LoadProject(filepath.Join(scribeDir, "snippets"), pf.Snippets)
+	if err != nil {
+		return []Issue{{
+			Skill:   filepath.Dir(projectPath),
+			Kind:    IssueSnippetProjectionDrift,
+			Status:  "error",
+			Message: err.Error(),
+		}}
+	}
+	projectRoot := filepath.Dir(projectPath)
+	active := availableToolNames(cfg)
+	var issues []Issue
+	for _, sn := range snippets {
+		for _, target := range expectedSnippetTargets(sn.Targets, active) {
+			path := snippet.TargetPath(projectRoot, sn.Name, target)
+			if path == "" || snippet.HasProjection(path, sn, target) {
+				continue
+			}
+			issues = append(issues, Issue{
+				Skill:   "snippet:" + sn.Name,
+				Tool:    target,
+				Kind:    IssueSnippetProjectionDrift,
+				Status:  "warn",
+				Message: fmt.Sprintf("missing snippet projection at %s; run `scribe sync`", path),
+			})
+		}
+	}
+	return issues
+}
+
+func expectedSnippetTargets(targets, activeTools []string) []string {
+	active := map[string]bool{}
+	for _, tool := range activeTools {
+		active[strings.ToLower(tool)] = true
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(target string) {
+		target = strings.ToLower(strings.TrimSpace(target))
+		if target == "" || seen[target] {
+			return
+		}
+		switch target {
+		case "claude", "codex", "cursor", "gemini":
+			seen[target] = true
+			out = append(out, target)
+		}
+	}
+	for _, target := range targets {
+		if strings.EqualFold(target, "all") {
+			for tool := range active {
+				add(tool)
+			}
+			continue
+		}
+		add(target)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func inspectMigrationBudgetOverflow(st *state.State, name string) []Issue {

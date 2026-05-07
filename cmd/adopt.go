@@ -32,13 +32,13 @@ With a name argument, adopts only the matching skill.
 Examples:
   scribe adopt                  # adopt all unmanaged skills (respects config mode)
   scribe adopt commit           # adopt one skill by name
-  scribe adopt --yes            # force auto-adopt (skip prompts)
+  scribe adopt --no-interaction # force auto-adopt (skip prompts)
   scribe adopt --dry-run        # preview what would be adopted
   scribe adopt --json           # machine output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runAdopt,
 	}
-	cmd.Flags().BoolP("yes", "y", false, "Force auto-adopt: adopt clean candidates, skip conflicts")
+	addNoInteractionFlag(cmd, "Force auto-adopt: adopt clean candidates, skip conflicts", true)
 	cmd.Flags().Bool("dry-run", false, "Print plan without writing anything")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().Bool("verbose", false, "Include paths and hashes in plan output")
@@ -46,7 +46,7 @@ Examples:
 }
 
 func runAdopt(cmd *cobra.Command, args []string) error {
-	yes, _ := cmd.Flags().GetBool("yes")
+	yes := noInteractionFlagPassed(cmd)
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	jsonFlag := jsonFlagPassed(cmd)
 
@@ -65,9 +65,9 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load state: %w", err)
 	}
 
-	// Non-TTY without --yes: cannot prompt. Exit with guidance.
+	// Non-TTY without --no-interaction: cannot prompt. Exit with guidance.
 	if !isTTY && !yes && !dryRun && !jsonFlag {
-		return fmt.Errorf("adopt: non-interactive terminal detected — pass --yes to force auto-adopt, or run 'scribe config adoption --mode off' to disable")
+		return fmt.Errorf("adopt: non-interactive terminal detected — pass --no-interaction to force auto-adopt, or run 'scribe config adoption --mode off' to disable")
 	}
 
 	candidates, conflicts, err := adopt.FindCandidates(st, cfg.Adoption)
@@ -95,7 +95,7 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 		return printDryRun(cmd, plan, useJSON, verbose)
 	}
 
-	// Non-TTY + --json without --yes: also print dry-run style plan.
+	// Non-TTY + --json without --no-interaction: also print dry-run style plan.
 	if useJSON && !yes {
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		return printDryRun(cmd, plan, true, verbose)

@@ -1,13 +1,18 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 
 	"charm.land/huh/v2"
+	"github.com/BurntSushi/toml"
 	"github.com/mattn/go-isatty"
 
 	"github.com/Naoray/scribe/internal/adopt"
@@ -20,6 +25,7 @@ import (
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/reconcile"
+	"github.com/Naoray/scribe/internal/snippet"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -38,6 +44,9 @@ func SyncSteps() []Step {
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
+		{"ResolveMCPServers", StepResolveMCPServers},
+		{"ProjectMCPServers", StepProjectMCPServers},
+		{"ProjectSnippets", StepProjectSnippets},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"Adopt", StepAdopt},
 		{"ReconcilePre", StepReconcileSystem},
@@ -53,6 +62,9 @@ func SyncTail() []Step {
 		{"ResolveTools", StepResolveTools},
 		{"ResolveProjectRoot", StepResolveProjectRoot},
 		{"ResolveKitFilter", StepResolveKitFilter},
+		{"ResolveMCPServers", StepResolveMCPServers},
+		{"ProjectMCPServers", StepProjectMCPServers},
+		{"ProjectSnippets", StepProjectSnippets},
 		{"EnsureScribeAgent", StepEnsureScribeAgent},
 		{"SyncSkills", StepSyncSkills},
 		{"ReconcilePost", StepReconcileSystem},
@@ -154,6 +166,470 @@ func StepResolveKitFilter(_ context.Context, b *Bag) error {
 	}
 	b.KitFilter, b.KitFilterEnabled = ResolveKitFilter(b.State)
 	return nil
+}
+
+// ResolveProjectMCPServers resolves project- and kit-declared MCP server names for the
+// current project. All errors are non-fatal; a missing or malformed project
+// file returns (nil, false) so callers do not write runtime settings yet.
+func ResolveProjectMCPServers() (servers []string, enabled bool) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, false
+	}
+	projectPath, err := projectfile.Find(wd)
+	if err != nil || projectPath == "" {
+		return nil, false
+	}
+	pf, err := projectfile.Load(projectPath)
+	if err != nil {
+		return nil, false
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return nil, false
+	}
+	kits, err := kit.LoadAll(filepath.Join(scribeDir, "kits"))
+	if err != nil {
+		return nil, false
+	}
+	resolved, err := kit.ResolveMCPServers(pf, kits)
+	if err != nil {
+		return nil, false
+	}
+	return resolved, true
+}
+
+// StepResolveMCPServers loads the project's .scribe.yaml and resolves
+// project MCP server names into read-only workflow state. It does not write
+// any agent runtime settings.
+func StepResolveMCPServers(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" {
+		return nil
+	}
+	b.ProjectMCPServers, b.ProjectMCPServersEnabled = ResolveProjectMCPServers()
+	return nil
+}
+
+// StepProjectMCPServers writes project-resolved MCP server selections into each
+// active tool's project config. Server definitions remain in .mcp.json for
+// Claude, and are copied from .mcp.json for Codex and Cursor project configs.
+func StepProjectMCPServers(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" || !b.ProjectMCPServersEnabled {
+		return nil
+	}
+	var definitions map[string]map[string]any
+	if hasTool(b.Tools, "codex") || hasTool(b.Tools, "cursor") {
+		var err error
+		definitions, err = loadProjectMCPDefinitions(b.ProjectRoot, b.ProjectMCPServers)
+		if err != nil {
+			return err
+		}
+	}
+	if hasTool(b.Tools, "claude") {
+		if err := projectClaudeMCPServers(b.ProjectRoot, b.ProjectMCPServers); err != nil {
+			return fmt.Errorf("project claude MCP servers: %w", err)
+		}
+	}
+	if hasTool(b.Tools, "codex") || hasTool(b.Tools, "cursor") {
+		if hasTool(b.Tools, "codex") {
+			if err := projectCodexMCPServers(b.ProjectRoot, b.ProjectMCPServers, definitions); err != nil {
+				return fmt.Errorf("project codex MCP servers: %w", err)
+			}
+		}
+		if hasTool(b.Tools, "cursor") {
+			if err := projectCursorMCPServers(b.ProjectRoot, b.ProjectMCPServers, definitions); err != nil {
+				return fmt.Errorf("project cursor MCP servers: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// StepProjectClaudeMCPServers writes project-resolved MCP server approvals into
+// shared project Claude settings. Server definitions remain in .mcp.json.
+func StepProjectClaudeMCPServers(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" || !b.ProjectMCPServersEnabled || !hasTool(b.Tools, "claude") {
+		return nil
+	}
+	if err := projectClaudeMCPServers(b.ProjectRoot, b.ProjectMCPServers); err != nil {
+		return fmt.Errorf("project claude MCP servers: %w", err)
+	}
+	return nil
+}
+
+func StepProjectSnippets(_ context.Context, b *Bag) error {
+	if b.ProjectRoot == "" {
+		return nil
+	}
+	projectPath := filepath.Join(b.ProjectRoot, projectfile.Filename)
+	pf, err := projectfile.Load(projectPath)
+	if err != nil {
+		return fmt.Errorf("load project snippets: %w", err)
+	}
+	var snippets []snippet.Snippet
+	if len(pf.Snippets) > 0 {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("home dir: %w", err)
+		}
+		snippets, err = snippet.LoadProject(snippet.Dir(home), pf.Snippets)
+		if err != nil {
+			return err
+		}
+	}
+	legacyPaths, err := removeLegacyCursorSnippets(b.ProjectRoot, snippets, b.State)
+	if err != nil {
+		return err
+	}
+	toolNames := make([]string, 0, len(b.Tools))
+	for _, tool := range b.Tools {
+		toolNames = append(toolNames, tool.Name())
+	}
+	paths, err := snippet.Project(b.ProjectRoot, snippets, toolNames)
+	if err != nil {
+		return err
+	}
+	if b.State != nil {
+		if b.State.Snippets == nil {
+			b.State.Snippets = map[string]state.InstalledSnippet{}
+		}
+		for _, sn := range snippets {
+			next := state.InstalledSnippet{
+				Source:  sn.Path,
+				Targets: append([]string(nil), sn.Targets...),
+			}
+			if !installedSnippetEqual(b.State.Snippets[sn.Name], next) {
+				b.State.Snippets[sn.Name] = next
+				b.MarkStateDirty()
+			}
+		}
+		if len(paths) > 0 || len(legacyPaths) > 0 {
+			b.MarkStateDirty()
+		}
+	}
+	b.ProjectSnippets = append(b.ProjectSnippets[:0], pf.Snippets...)
+	return nil
+}
+
+func installedSnippetEqual(a, b state.InstalledSnippet) bool {
+	if a.Source != b.Source || a.Version != b.Version || len(a.Targets) != len(b.Targets) {
+		return false
+	}
+	for i := range a.Targets {
+		if a.Targets[i] != b.Targets[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func removeLegacyCursorSnippets(projectRoot string, snippets []snippet.Snippet, st *state.State) ([]string, error) {
+	if st == nil || len(st.Snippets) == 0 {
+		return nil, nil
+	}
+	current := map[string]bool{}
+	for _, sn := range snippets {
+		current[sn.Name] = true
+	}
+	var paths []string
+	for name, installed := range st.Snippets {
+		if current[name] || !snippet.TargetsAgent(installed.Targets, "cursor") || installed.Source == "" {
+			continue
+		}
+		data, err := os.ReadFile(installed.Source)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return paths, fmt.Errorf("read stale snippet source %s: %w", installed.Source, err)
+		}
+		sn, err := snippet.Parse(installed.Source, data)
+		if err != nil {
+			continue
+		}
+		path, removed, err := snippet.RemoveLegacyCursorRule(projectRoot, sn)
+		if err != nil {
+			return paths, err
+		}
+		if removed {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+type projectMCPFile struct {
+	MCPServers map[string]map[string]any `json:"mcpServers"`
+}
+
+func loadProjectMCPDefinitions(projectRoot string, servers []string) (map[string]map[string]any, error) {
+	if len(servers) == 0 {
+		return map[string]map[string]any{}, nil
+	}
+	path := filepath.Join(projectRoot, ".mcp.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var file projectMCPFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	selected := make(map[string]map[string]any, len(servers))
+	for _, server := range sortedStrings(servers) {
+		def, ok := file.MCPServers[server]
+		if !ok {
+			return nil, fmt.Errorf("MCP server %q declared by .scribe.yaml/kits but missing from .mcp.json", server)
+		}
+		selected[server] = cloneMap(def)
+	}
+	return selected, nil
+}
+
+func projectClaudeMCPServers(projectRoot string, servers []string) error {
+	settingsDir := filepath.Join(projectRoot, ".claude")
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+
+	settings := map[string]any{}
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parse %s: %w", settingsPath, err)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", settingsPath, err)
+	}
+
+	resolved := append([]string{}, servers...)
+	sort.Strings(resolved)
+	settings["enableAllProjectMcpServers"] = false
+	settings["enabledMcpjsonServers"] = resolved
+
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		return fmt.Errorf("create claude settings dir: %w", err)
+	}
+	data, err = json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode claude settings: %w", err)
+	}
+	data = append(data, '\n')
+	tmp, err := os.CreateTemp(settingsDir, ".settings.json.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp claude settings: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp claude settings: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp claude settings: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp claude settings: %w", err)
+	}
+	if err := os.Rename(tmpPath, settingsPath); err != nil {
+		return fmt.Errorf("save claude settings: %w", err)
+	}
+	return nil
+}
+
+func projectCodexMCPServers(projectRoot string, servers []string, definitions map[string]map[string]any) error {
+	configDir := filepath.Join(projectRoot, ".codex")
+	configPath := filepath.Join(configDir, "config.toml")
+	sidecarPath := filepath.Join(configDir, "scribe-mcp.json")
+
+	config := map[string]any{}
+	data, err := os.ReadFile(configPath)
+	if err == nil && len(bytes.TrimSpace(data)) > 0 {
+		if err := toml.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("parse %s: %w", configPath, err)
+		}
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+
+	mcpServers := map[string]any{}
+	if existing, ok := config["mcp_servers"].(map[string]any); ok {
+		for name, def := range existing {
+			mcpServers[name] = def
+		}
+	}
+	managed, err := readManagedMCPServers(sidecarPath)
+	if err != nil {
+		return err
+	}
+	for _, name := range managed {
+		delete(mcpServers, name)
+	}
+	for _, name := range sortedStrings(servers) {
+		mcpServers[name] = codexMCPDefinition(definitions[name])
+	}
+	config["mcp_servers"] = mcpServers
+
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return fmt.Errorf("create codex config dir: %w", err)
+	}
+	data, err = toml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("encode codex config: %w", err)
+	}
+	if err := atomicWriteFile(configPath, data, ".config.toml.*.tmp"); err != nil {
+		return fmt.Errorf("save codex config: %w", err)
+	}
+	if err := writeManagedMCPServers(sidecarPath, servers); err != nil {
+		return err
+	}
+	return nil
+}
+
+func projectCursorMCPServers(projectRoot string, servers []string, definitions map[string]map[string]any) error {
+	configDir := filepath.Join(projectRoot, ".cursor")
+	configPath := filepath.Join(configDir, "mcp.json")
+	sidecarPath := filepath.Join(configDir, "scribe-mcp.json")
+
+	config := map[string]any{}
+	data, err := os.ReadFile(configPath)
+	if err == nil && len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("parse %s: %w", configPath, err)
+		}
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+
+	mcpServers := map[string]any{}
+	if existing, ok := config["mcpServers"].(map[string]any); ok {
+		for name, def := range existing {
+			mcpServers[name] = def
+		}
+	}
+	managed, err := readManagedMCPServers(sidecarPath)
+	if err != nil {
+		return err
+	}
+	for _, name := range managed {
+		delete(mcpServers, name)
+	}
+	for _, name := range sortedStrings(servers) {
+		mcpServers[name] = cloneMap(definitions[name])
+	}
+	config["mcpServers"] = mcpServers
+
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return fmt.Errorf("create cursor config dir: %w", err)
+	}
+	data, err = json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode cursor config: %w", err)
+	}
+	data = append(data, '\n')
+	if err := atomicWriteFile(configPath, data, ".mcp.json.*.tmp"); err != nil {
+		return fmt.Errorf("save cursor config: %w", err)
+	}
+	if err := writeManagedMCPServers(sidecarPath, servers); err != nil {
+		return err
+	}
+	return nil
+}
+
+type managedMCPProjection struct {
+	Servers []string `json:"servers"`
+}
+
+func readManagedMCPServers(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var projection managedMCPProjection
+	if err := json.Unmarshal(data, &projection); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return projection.Servers, nil
+}
+
+func writeManagedMCPServers(path string, servers []string) error {
+	data, err := json.MarshalIndent(managedMCPProjection{Servers: sortedStrings(servers)}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode managed MCP projection: %w", err)
+	}
+	data = append(data, '\n')
+	if err := atomicWriteFile(path, data, ".scribe-mcp.json.*.tmp"); err != nil {
+		return fmt.Errorf("save managed MCP projection: %w", err)
+	}
+	return nil
+}
+
+func codexMCPDefinition(def map[string]any) map[string]any {
+	out := cloneMap(def)
+	if headers, ok := out["headers"]; ok {
+		if _, exists := out["http_headers"]; !exists {
+			out["http_headers"] = headers
+		}
+		delete(out, "headers")
+	}
+	if _, ok := out["enabled"]; !ok {
+		out["enabled"] = true
+	}
+	delete(out, "type")
+	return out
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func sortedStrings(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return out
+}
+
+func atomicWriteFile(path string, data []byte, pattern string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create %s dir: %w", filepath.Dir(path), err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), pattern)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+	return nil
+}
+
+func hasTool(tools []tools.Tool, name string) bool {
+	for _, tool := range tools {
+		if tool.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func StepLoadConfig(ctx context.Context, b *Bag) error {
@@ -298,7 +774,7 @@ func StepAdopt(_ context.Context, b *Bag) error {
 	if mode == "prompt" {
 		if !isTTY || b.JSONFlag {
 			b.Formatter.OnAdoptionSkipped(
-				`adoption mode is "prompt" but stdin is not a terminal — skipping adoption; run "scribe adopt --yes" or set adoption.mode to auto/off`,
+				`adoption mode is "prompt" but stdin is not a terminal — skipping adoption; run "scribe adopt --no-interaction" or set adoption.mode to auto/off`,
 			)
 		} else {
 			b.Formatter.OnAdoptionSkipped(`prompt mode — run 'scribe adopt' to review candidates`)
@@ -346,21 +822,18 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	resolved := map[string]sync.SkillStatus{}
 
 	syncer := &sync.Syncer{
-		Client:      sync.WrapGitHubClient(b.Client),
-		Provider:    b.Provider,
-		Tools:       b.Tools,
-		Executor:    &sync.ShellExecutor{},
-		TrustAll:    b.TrustAllFlag,
-		ForceBudget: b.ForceBudget,
-		AliasName:   b.AliasName,
+		Client:           sync.WrapGitHubClient(b.Client),
+		Provider:         b.Provider,
+		Tools:            b.Tools,
+		Executor:         &sync.ShellExecutor{},
+		TrustAll:         b.TrustAllFlag,
+		ForceBudget:      b.ForceBudget,
+		AliasName:        b.AliasName,
 		SkillFilter:      b.SkillFilter,
 		KitFilter:        b.KitFilter,
 		KitFilterEnabled: b.KitFilterEnabled,
 		ProjectRoot:      b.ProjectRoot,
-		// Skip missing skills when no explicit filter/--all: scribe sync only updates
-		// what's already installed. scribe install sets SkillFilter or InstallAllFlag
-		// to opt-in to installing new skills.
-		SkipMissing: !b.InstallAllFlag && len(b.SkillFilter) == 0,
+		SkipMissing:      workflowSkipMissing(b),
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:
@@ -461,6 +934,21 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	}
 
 	return nil
+}
+
+func workflowSkipMissing(b *Bag) bool {
+	if b == nil {
+		return true
+	}
+	if b.InstallAllFlag || len(b.SkillFilter) > 0 {
+		return false
+	}
+	// A project .scribe.yaml is declarative intent. Plain `scribe sync` should
+	// converge the kit-resolved project loadout, including missing skills.
+	if b.KitFilterEnabled {
+		return false
+	}
+	return true
 }
 
 func PromptNameConflictResolution(conflict sync.NameConflict) (sync.NameConflictResolution, error) {

@@ -21,6 +21,9 @@ func RenderMarkdown(rootCmd *cobra.Command, registry map[string]string) string {
 		}
 		var flags []string
 		visitFlags(cmd, func(flag *pflag.Flag) {
+			if flag.Hidden {
+				return
+			}
 			flags = append(flags, "--"+flag.Name)
 		})
 		sort.Strings(flags)

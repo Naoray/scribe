@@ -76,6 +76,32 @@ func TestExplainJSON(t *testing.T) {
 	}
 }
 
+func TestExplainSnippetJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".scribe", "snippets")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir snippets: %v", err)
+	}
+	content := "---\nname: commit-discipline\ndescription: Commit rules\ntargets: [claude]\n---\n# Agent Commit Discipline\n"
+	if err := os.WriteFile(filepath.Join(dir, "commit-discipline.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+
+	root := newTestRoot()
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetArgs([]string{"explain", "--json", "commit-discipline"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "commit-discipline") || !strings.Contains(output, "Agent Commit Discipline") {
+		t.Fatalf("snippet explain output missing content:\n%s", output)
+	}
+}
+
 func TestExplainJSONWithoutLLM(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // no claude binary available
 

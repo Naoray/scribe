@@ -87,7 +87,7 @@ func NewClient(ctx context.Context, configToken string) *Client {
 func resolveToken(configToken string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
+	if out, err := ghAuthToken(ctx); err == nil {
 		if token := strings.TrimSpace(string(out)); token != "" {
 			return token
 		}
@@ -101,6 +101,16 @@ func resolveToken(configToken string) string {
 	}
 
 	return ""
+}
+
+func ghAuthToken(ctx context.Context) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
+	stateDir, err := os.MkdirTemp("", "scribe-gh-state-*")
+	if err == nil {
+		defer os.RemoveAll(stateDir)
+		cmd.Env = append(os.Environ(), "XDG_STATE_HOME="+stateDir)
+	}
+	return cmd.Output()
 }
 
 func newHTTPClient(ctx context.Context, token string) *http.Client {
@@ -466,6 +476,25 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, owner, repo string, i
 		return resp.Body, nil
 	}
 	return rc, nil
+}
+
+// ReleaseAssetDigest returns GitHub's SHA-256 digest for a release asset.
+func (c *Client) ReleaseAssetDigest(ctx context.Context, owner, repo string, id int64) (string, error) {
+	req, err := c.gh.NewRequest(http.MethodGet, fmt.Sprintf("repos/%s/%s/releases/assets/%d", owner, repo, id), nil)
+	if err != nil {
+		return "", fmt.Errorf("build release asset request %d from %s/%s: %w", id, owner, repo, err)
+	}
+
+	var asset struct {
+		Digest *string `json:"digest"`
+	}
+	if _, err := c.gh.Do(ctx, req, &asset); err != nil {
+		return "", wrapErr(err, fmt.Sprintf("release asset %d from %s/%s", id, owner, repo))
+	}
+	if asset.Digest == nil {
+		return "", nil
+	}
+	return *asset.Digest, nil
 }
 
 // wrapErr produces user-friendly errors for common GitHub API failures.
