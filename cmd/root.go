@@ -288,6 +288,7 @@ func newRootCmd() *cobra.Command {
 		newResolveCommand(),
 		newRestoreCommand(),
 		newSkillCommand(),
+		newProjectCommand(),
 		newKitCommand(),
 		newToolsCommand(),
 		newGuideCommand(),
