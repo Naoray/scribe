@@ -38,6 +38,45 @@ Empty or missing files are treated as "no project-level intent" — sync still r
 
 The dotfile (`.scribe.yaml`) is distinct from `scribe.yaml` used inside skill **registry** repos as a manifest. Same format, different role, different name.
 
+## Team-sharing a project
+
+`.scribe.yaml` shares intent. To share the artifacts behind that intent, run:
+
+```bash
+scribe project sync
+```
+
+That writes project-owned artifacts under `.ai/`:
+
+```text
+.ai/kits/<name>.yaml
+.ai/skills/<project-skill>/SKILL.md
+.ai/skills/<project-skill>/.scribe-content-hash
+.ai/scribe.lock
+```
+
+Commit `.scribe.yaml` and `.ai/` together. Teammates clone the repo, connect any registries named in `.ai/scribe.lock`, then run `scribe sync`. Project-vendored skills win over global skills with the same name. Registry skills are fetched at the pinned commit from `.ai/scribe.lock`.
+
+Use `scribe project sync --check` in CI to fail when committed `.ai/` artifacts drift from the current `.scribe.yaml` and local author state. Use `--force` only after reviewing project-side changes; it overwrites changed `.ai/` artifacts.
+
+Project-authored skills are explicit:
+
+```bash
+scribe project skill create review-guidelines
+scribe project sync
+```
+
+To promote an existing local skill into the project, run `scribe project skill claim <name>` first. Registry and bootstrap skills cannot be claimed; this prevents silently detaching shared registry content or binary-managed skills.
+
+Laravel Boost projects are supported. When `composer.json` contains `laravel/boost` and a skill is vendored in `.ai/skills`, Scribe leaves Claude's `.claude/skills/<name>` real directory to Boost and projects that skill only to other active tools. The usual run order is:
+
+```bash
+php artisan boost:update
+scribe sync
+```
+
+Snippets and MCP server definitions are still machine/project-local in this release. In team-share mode, missing snippet files or `.mcp.json` definitions warn and skip instead of blocking skill projection.
+
 ## Kits
 
 A kit is a curated, stackable list of skills. Kits live under `~/.scribe/kits/<name>.yaml`.

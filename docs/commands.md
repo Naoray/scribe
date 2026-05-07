@@ -16,6 +16,7 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe adopt [name]` | Import hand-rolled skills from `~/.claude/skills` etc. into the canonical store |
 | `scribe remove <skill>` | Remove a skill from this machine (records a deny-list entry so it does not come back on the next sync) |
 | `scribe sync` | Reconcile the current project: resolve `.scribe.yaml` (kits, snippets, MCP, add/remove), project skills into `<project>/.claude/skills/` and `<project>/.agents/skills/`, write snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`, and scope selected `.mcp.json` definitions into Claude, Codex, and Cursor project config |
+| `scribe project sync` | Publish the current repo's shareable kits and skills into `.ai/` (`.ai/kits`, `.ai/skills`, `.ai/scribe.lock`) so teammates can reproduce the loadout |
 | `scribe show` | Show the resolved project skill set and per-agent budgets |
 | `scribe check` | Check connected registries for lockfile updates without modifying anything |
 | `scribe update --apply` | Refresh registry lockfiles after review (omit `--apply` for a dry-run report) |
@@ -50,6 +51,8 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe skill edit <name>` | Edit per-skill metadata (`--add`, `--remove`, `--inherit`, `--pin`, `--tools`) |
 | `scribe skill repair <name>` | Re-write a tool-facing projection from the canonical store |
 | `scribe skill tools <name>` | Per-skill tool projection controls (`--enable`, `--disable`, `--reset`) |
+| `scribe project skill create <name>` | Create a project-authored local skill and mark it for vendoring on the next `scribe project sync` |
+| `scribe project skill claim <name>` | Convert an existing local-origin skill into a project-authored skill |
 | `scribe tools` | List, enable, or disable detected tools machine-wide |
 | `scribe tools add` | Register a custom tool integration (`--detect`, `--install`, `--path`, `--uninstall`) |
 | `scribe kit create <name>` | Create a local kit — a named list of skills and MCP servers scoped to a project (saved to `~/.scribe/kits/<name>.yaml`). Use `--skills`, `--mcp-servers`, and `--registry` to populate it. Reference the kit by name in a project's `.scribe.yaml` under `kits:`. |
