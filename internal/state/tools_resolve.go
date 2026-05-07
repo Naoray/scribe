@@ -32,7 +32,7 @@ func (s InstalledSkill) EffectiveToolsForProject(available []string, projectRoot
 	}
 	for _, projection := range s.Projections {
 		if projection.Project == projectRoot {
-			return intersectTools(projection.Tools, available)
+			return excludeTools(intersectTools(projection.Tools, available), projection.ExcludedTools)
 		}
 	}
 	return s.EffectiveTools(available)
@@ -62,6 +62,23 @@ func intersectTools(selected, available []string) []string {
 	for _, t := range selected {
 		if availSet[t] {
 			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func excludeTools(selected, excluded []string) []string {
+	if len(selected) == 0 || len(excluded) == 0 {
+		return selected
+	}
+	drop := make(map[string]bool, len(excluded))
+	for _, tool := range excluded {
+		drop[tool] = true
+	}
+	out := selected[:0]
+	for _, tool := range selected {
+		if !drop[tool] {
+			out = append(out, tool)
 		}
 	}
 	return out

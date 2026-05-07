@@ -75,6 +75,38 @@ func TestEffectiveToolsForProject_ProjectionOverridesPinnedTools(t *testing.T) {
 	}
 }
 
+func TestEffectiveToolsForProject_ExcludesProjectTools(t *testing.T) {
+	sk := InstalledSkill{
+		Projections: []ProjectionEntry{{
+			Project:       "/repo/project",
+			Tools:         []string{"claude", "codex", "cursor"},
+			ExcludedTools: []string{"claude"},
+		}},
+	}
+	got := sk.EffectiveToolsForProject([]string{"claude", "codex", "cursor"}, "/repo/project")
+	want := []string{"codex", "cursor"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestEffectiveToolsForProject_ExclusionDoesNotAffectOtherProjects(t *testing.T) {
+	sk := InstalledSkill{
+		ToolsMode: ToolsModePinned,
+		Tools:     []string{"claude", "codex"},
+		Projections: []ProjectionEntry{{
+			Project:       "/repo/project",
+			Tools:         []string{"codex"},
+			ExcludedTools: []string{"codex"},
+		}},
+	}
+	got := sk.EffectiveToolsForProject([]string{"claude", "codex"}, "/repo/other")
+	want := []string{"claude", "codex"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestEffectiveToolsForProject_FallsBackToPinnedTools(t *testing.T) {
 	sk := InstalledSkill{
 		ToolsMode: ToolsModePinned,

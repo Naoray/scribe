@@ -16,6 +16,8 @@ import (
 )
 
 // State is the contents of ~/.scribe/state.json.
+const CurrentSchemaVersion = 6
+
 type State struct {
 	SchemaVersion int                         `json:"schema_version"`
 	LastSync      time.Time                   `json:"last_sync,omitempty"`
@@ -28,14 +30,16 @@ type State struct {
 	Migrations         map[string]bool              `json:"migrations,omitempty"`
 	RegistryFailures   map[string]RegistryFailure   `json:"registry_failures,omitempty"`
 	BinaryUpdateChecks map[string]BinaryUpdateCheck `json:"binary_update_checks,omitempty"`
+	VendorState        map[string]VendorState       `json:"vendor_state,omitempty"`
 }
 
 // ProjectionEntry records the set of tool projections currently linked for a
 // project. An empty Project is the legacy global projection.
 type ProjectionEntry struct {
-	Project string   `json:"project"`
-	Tools   []string `json:"tools"`
-	Source  string   `json:"source,omitempty"`
+	Project       string   `json:"project"`
+	Tools         []string `json:"tools"`
+	Source        string   `json:"source,omitempty"`
+	ExcludedTools []string `json:"excluded_tools,omitempty"`
 }
 
 const (
@@ -55,6 +59,10 @@ type InstalledSnippet struct {
 	Source  string   `json:"source,omitempty"`
 	Version string   `json:"version,omitempty"`
 	Targets []string `json:"targets,omitempty"`
+}
+
+type VendorState struct {
+	FirstSeenAt time.Time `json:"first_seen_at,omitempty"`
 }
 
 // RemovedSkill records a user's intent not to reinstall a registry skill.
@@ -86,6 +94,8 @@ const (
 	OriginLocal Origin = "local"
 	// OriginBootstrap means the skill was installed from the embedded scribe bootstrap.
 	OriginBootstrap Origin = "bootstrap"
+	// OriginProject means the skill is authored for project vendoring.
+	OriginProject Origin = "project"
 )
 
 // ToolsMode controls how the Tools field is interpreted at sync time.
@@ -196,6 +206,7 @@ type legacyState struct {
 	Snippets           map[string]InstalledSnippet  `json:"snippets,omitempty"`
 	RemovedByUser      []RemovedSkill               `json:"removed_by_user,omitempty"`
 	BinaryUpdateChecks map[string]BinaryUpdateCheck `json:"binary_update_checks,omitempty"`
+	VendorState        map[string]VendorState       `json:"vendor_state,omitempty"`
 }
 
 type legacyTeamState struct {
@@ -285,7 +296,7 @@ func Load() (*State, error) {
 
 func emptyState() *State {
 	return &State{
-		SchemaVersion:      5,
+		SchemaVersion:      CurrentSchemaVersion,
 		Installed:          make(map[string]InstalledSkill),
 		Kits:               map[string]InstalledKit{},
 		Snippets:           map[string]InstalledSnippet{},
@@ -293,6 +304,7 @@ func emptyState() *State {
 		Migrations:         map[string]bool{},
 		RegistryFailures:   map[string]RegistryFailure{},
 		BinaryUpdateChecks: map[string]BinaryUpdateCheck{},
+		VendorState:        map[string]VendorState{},
 	}
 }
 
@@ -321,6 +333,7 @@ func parseAndMigrate(data []byte) (*State, error) {
 		Migrations:         map[string]bool{},
 		RegistryFailures:   map[string]RegistryFailure{},
 		BinaryUpdateChecks: map[string]BinaryUpdateCheck{},
+		VendorState:        map[string]VendorState{},
 	}
 	if len(legacy.Kits) > 0 {
 		s.Kits = legacy.Kits
@@ -330,6 +343,9 @@ func parseAndMigrate(data []byte) (*State, error) {
 	}
 	if len(legacy.BinaryUpdateChecks) > 0 {
 		s.BinaryUpdateChecks = legacy.BinaryUpdateChecks
+	}
+	if len(legacy.VendorState) > 0 {
+		s.VendorState = legacy.VendorState
 	}
 
 	// Migration 1: Promote team.last_sync to top-level.
@@ -445,6 +461,12 @@ func parseAndMigrate(data []byte) (*State, error) {
 			s.RemovedByUser = []RemovedSkill{}
 		}
 		s.SchemaVersion = 5
+	}
+	if s.SchemaVersion < 6 {
+		if s.VendorState == nil {
+			s.VendorState = map[string]VendorState{}
+		}
+		s.SchemaVersion = 6
 	}
 	seedLegacyProjections(s)
 	seedManagedPaths(s)
