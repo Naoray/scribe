@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	kitpkg "github.com/Naoray/scribe/internal/kit"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -24,9 +25,8 @@ type projectInitOptions struct {
 }
 
 type projectInitResult struct {
-	Kits             []string `json:"kits"`
-	ProjectFile      string   `json:"project_file"`
-	GitignoreUpdated bool     `json:"gitignore_updated"`
+	Kits        []string `json:"kits"`
+	ProjectFile string   `json:"project_file"`
 }
 
 func newProjectInitCommand() *cobra.Command {
@@ -74,15 +74,9 @@ func runProjectInit(cmd *cobra.Command, opts *projectInitOptions) error {
 		return err
 	}
 
-	gitignoreUpdated, err := ensureProjectFileGitignored(cwd)
-	if err != nil {
-		return err
-	}
-
 	result := projectInitResult{
-		Kits:             selectedKits,
-		ProjectFile:      projectfile.Filename,
-		GitignoreUpdated: gitignoreUpdated,
+		Kits:        selectedKits,
+		ProjectFile: projectfile.Filename,
 	}
 	if opts.json && workflow.UseJSONOutputForProcess(opts.json) {
 		r := jsonRendererForCommand(cmd, opts.json)
@@ -93,9 +87,6 @@ func runProjectInit(cmd *cobra.Command, opts *projectInitOptions) error {
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Initialized %s\n", projectfile.Filename)
-	if gitignoreUpdated {
-		fmt.Fprintf(cmd.OutOrStdout(), "Added %s to .gitignore\n", projectfile.Filename)
-	}
 	return nil
 }
 
@@ -119,18 +110,15 @@ func discoverProjectInitKits() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve home directory: %w", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(home, ".scribe", "kits"))
-	if errors.Is(err, os.ErrNotExist) {
-		return []string{}, nil
-	}
+	loaded, err := kitpkg.LoadAll(filepath.Join(home, ".scribe", "kits"))
 	if err != nil {
-		return nil, fmt.Errorf("read kits directory: %w", err)
+		return nil, err
 	}
 
-	kits := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			kits = append(kits, entry.Name())
+	kits := make([]string, 0, len(loaded))
+	for name := range loaded {
+		if strings.TrimSpace(name) != "" {
+			kits = append(kits, name)
 		}
 	}
 	sort.Strings(kits)
@@ -189,51 +177,4 @@ func warnUnknownProjectInitKits(cmd *cobra.Command, selected, available []string
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: unknown kit %s\n", kit)
 		}
 	}
-}
-
-func ensureProjectFileGitignored(cwd string) (bool, error) {
-	if _, err := os.Stat(filepath.Join(cwd, ".git")); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-		return false, fmt.Errorf("check git repository: %w", err)
-	}
-
-	gitignorePath := filepath.Join(cwd, ".gitignore")
-	data, err := os.ReadFile(gitignorePath)
-	if errors.Is(err, os.ErrNotExist) {
-		if err := os.WriteFile(gitignorePath, []byte(projectfile.Filename+"\n"), 0o644); err != nil {
-			return false, fmt.Errorf("write .gitignore: %w", err)
-		}
-		return true, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("read .gitignore: %w", err)
-	}
-	if gitignoreContainsProjectFile(data) {
-		return false, nil
-	}
-
-	appendData := []byte(projectfile.Filename + "\n")
-	if len(data) > 0 && data[len(data)-1] != '\n' {
-		appendData = []byte("\n" + projectfile.Filename + "\n")
-	}
-	file, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return false, fmt.Errorf("open .gitignore: %w", err)
-	}
-	defer file.Close()
-	if _, err := file.Write(appendData); err != nil {
-		return false, fmt.Errorf("append .gitignore: %w", err)
-	}
-	return true, nil
-}
-
-func gitignoreContainsProjectFile(data []byte) bool {
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == projectfile.Filename {
-			return true
-		}
-	}
-	return false
 }

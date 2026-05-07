@@ -79,7 +79,7 @@ scribe show           # show the resolved project skill set and per-agent budget
 
 That is enough to start managing existing local skills between tools. Use `scribe tools` to see detected agents, and `scribe skill tools <name>` to enable, disable, or reset projection for one skill.
 
-Drop a `.scribe.yaml` at the repo root to declare which kits, snippets, extra skills, or MCP server names this project wants — `scribe sync` then projects exactly that set into `<project>/.claude/skills/` + `<project>/.agents/skills/`, writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus `.cursor/rules/<name>.mdc`, approves selected `.mcp.json` server names for Claude, and copies selected `.mcp.json` definitions into Codex and Cursor project config. Scribe does not start MCP processes. See [`docs/projects-and-kits.md`](docs/projects-and-kits.md).
+Run `scribe project init` or drop a `.scribe.yaml` at the repo root to declare which kits, snippets, extra skills, or MCP server names this project wants — `scribe sync` then projects exactly that set into `<project>/.claude/skills/` + `<project>/.agents/skills/`, writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus `.cursor/rules/<name>.mdc`, approves selected `.mcp.json` server names for Claude, and copies selected `.mcp.json` definitions into Codex and Cursor project config. Scribe does not start MCP processes. See [`docs/projects-and-kits.md`](docs/projects-and-kits.md).
 
 Registries are for adding shared/upstream skills. Connect one when you want more than your local set:
 

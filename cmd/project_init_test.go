@@ -88,7 +88,7 @@ func TestProjectInitConflictsWhenProjectFileExistsWithoutForce(t *testing.T) {
 	}
 }
 
-func TestProjectInitUpdatesGitignoreWhenGitRepo(t *testing.T) {
+func TestProjectInitDoesNotGitignoreProjectFile(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -106,19 +106,15 @@ func TestProjectInitUpdatesGitignoreWhenGitRepo(t *testing.T) {
 		t.Fatalf("Execute project init: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
-	if err != nil {
-		t.Fatalf("read .gitignore: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
+		t.Fatalf(".gitignore exists after project init: %v", err)
 	}
-	if got := string(data); !strings.Contains(got, ".scribe.yaml\n") {
-		t.Fatalf(".gitignore = %q, want .scribe.yaml entry", got)
-	}
-	if !strings.Contains(stdout.String(), "Added .scribe.yaml to .gitignore") {
-		t.Fatalf("stdout = %q, want gitignore message", stdout.String())
+	if strings.Contains(stdout.String(), ".gitignore") {
+		t.Fatalf("stdout = %q, want no gitignore message", stdout.String())
 	}
 }
 
-func TestProjectInitDoesNotDuplicateGitignoreEntry(t *testing.T) {
+func TestProjectInitLeavesExistingGitignoreAlone(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -142,8 +138,8 @@ func TestProjectInitDoesNotDuplicateGitignoreEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	if got := strings.Count(string(data), ".scribe.yaml"); got != 1 {
-		t.Fatalf(".scribe.yaml count = %d, want 1\n%s", got, data)
+	if got := string(data); got != "node_modules\n.scribe.yaml\n" {
+		t.Fatalf(".gitignore = %q, want unchanged", got)
 	}
 }
 
@@ -168,9 +164,8 @@ func TestProjectInitJSONEnvelope(t *testing.T) {
 		t.Fatalf("stdout is not JSON envelope: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
 	}
 	var data struct {
-		Kits             []string `json:"kits"`
-		ProjectFile      string   `json:"project_file"`
-		GitignoreUpdated bool     `json:"gitignore_updated"`
+		Kits        []string `json:"kits"`
+		ProjectFile string   `json:"project_file"`
 	}
 	if err := json.Unmarshal(env.Data, &data); err != nil {
 		t.Fatalf("unmarshal data: %v", err)
@@ -186,8 +181,11 @@ func TestProjectInitJSONEnvelope(t *testing.T) {
 func TestProjectInitKitsFlagUsesProvidedValues(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".scribe", "kits", "go"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".scribe", "kits"), 0o755); err != nil {
 		t.Fatalf("mkdir kit: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".scribe", "kits", "go.yaml"), []byte("name: go\nskills: []\n"), 0o644); err != nil {
+		t.Fatalf("write kit: %v", err)
 	}
 	t.Setenv("HOME", home)
 	withProjectInitWorkingDir(t, dir)

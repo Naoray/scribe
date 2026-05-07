@@ -10,10 +10,9 @@ var projectInitOutputSchema = `{
       "type": "array",
       "items": { "type": "string" }
     },
-    "project_file": { "type": "string" },
-    "gitignore_updated": { "type": "boolean" }
+    "project_file": { "type": "string" }
   },
-  "required": ["kits", "project_file", "gitignore_updated"],
+  "required": ["kits", "project_file"],
   "additionalProperties": false
 }`
 
