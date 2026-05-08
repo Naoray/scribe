@@ -2,10 +2,11 @@ package sync
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/Naoray/scribe/internal/lockfile"
 )
 
 // CommandExecutor runs shell commands and captures output.
@@ -21,18 +22,14 @@ type ShellExecutor struct{}
 // must re-approve. Adding per-tool commands to a previously global-only entry
 // will change the hash and trigger re-approval.
 func CommandHash(install, update string, installs, updates map[string]string) string {
-	h := sha256.New()
-	h.Write([]byte(install))
-	h.Write([]byte{0})
-	h.Write([]byte(update))
-	h.Write([]byte{0})
+	parts := []string{install, update}
 	for _, k := range sortedMapKeys(installs) {
-		fmt.Fprintf(h, "%s=%s\x00", k, installs[k])
+		parts = append(parts, fmt.Sprintf("install.%s=%s", k, installs[k]))
 	}
 	for _, k := range sortedMapKeys(updates) {
-		fmt.Fprintf(h, "%s=%s\x00", k, updates[k])
+		parts = append(parts, fmt.Sprintf("update.%s=%s", k, updates[k]))
 	}
-	return fmt.Sprintf("%x", h.Sum(nil))[:16]
+	return lockfile.CommandHash(parts...)
 }
 
 func sortedMapKeys(m map[string]string) []string {

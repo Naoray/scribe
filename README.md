@@ -105,6 +105,8 @@ Full contract in [CLAUDE.md](CLAUDE.md). Envelope spec in [docs/json-envelope.md
 
 ## Project file (`.scribe.yaml`)
 
+Run `scribe project init` to scaffold one, or write it by hand:
+
 ```yaml
 kits:
   - laravel-baseline
@@ -118,7 +120,11 @@ remove:
   - skill-this-project-doesnt-want
 ```
 
-`scribe sync` resolves the kits, applies `add` / `remove`, writes the snippets into the agent rule files (with markers — your unmanaged content is preserved), and projects every selected `.mcp.json` definition into Claude, Codex, and Cursor project config. See [docs/projects-and-kits.md](docs/projects-and-kits.md).
+`scribe sync` resolves the kits, applies `add` / `remove`, writes the snippets into the agent rule files (with markers — your unmanaged content is preserved), and projects every selected `.mcp.json` definition into Claude, Codex, and Cursor project config.
+
+### Team-share
+
+For projects shared with teammates, the author runs `scribe project sync` and commits `.scribe.yaml` plus `.ai/kits/`, `.ai/skills/`, and `.ai/scribe.lock`. Teammates clone the repo, connect any registries named in `.ai/scribe.lock`, then run `scribe sync` — they get the same kits, the same skills, at the same pinned revisions. Use `scribe project sync --check` in CI to fail when committed `.ai/` artifacts drift from `.scribe.yaml`. See [docs/projects-and-kits.md](docs/projects-and-kits.md).
 
 ## Install
 
@@ -172,6 +178,7 @@ Please set it up:
 scribe list                  # local skills (TUI on a terminal, JSON when piped)
 scribe adopt                 # claim hand-rolled skills already in tool dirs
 scribe sync                  # apply project loadout
+scribe project sync          # publish shareable .ai/ artifacts for teammates
 scribe show                  # resolved project skill set + per-agent budgets
 scribe doctor                # audit and repair managed skill health
 scribe tools                 # detected agents (claude, codex, cursor, gemini, custom)

@@ -80,6 +80,7 @@ repo/
     ├── skills/
     │   └── tdd/                          # vendored skill folder
     │       ├── SKILL.md
+    │       ├── .scribe-base.md           # original author content before Scribe metadata
     │       ├── ...
     │       └── .scribe-content-hash      # per-skill content fingerprint
     ├── kits/
@@ -316,23 +317,23 @@ This baseline is intentionally conservative for v1; richer signing or registry a
 ```
 ~/.scribe/kits/foo.yaml ─┐
 ~/.scribe/skills/bar/    ├──► scribe project sync ──► .ai/kits/foo.yaml
-state.OriginProject only │                            .ai/skills/bar/{SKILL.md,...,.scribe-content-hash}
+state.OriginProject only │                            .ai/skills/bar/{SKILL.md,.scribe-base.md,...,.scribe-content-hash}
 state.OriginRegistry  ───┘                            .ai/scribe.lock  (ProjectEntry per registry skill)
-                                                      (state stays unchanged)
+                                                       (state stays unchanged)
 ```
 
 1. Author edits `.scribe.yaml` (existing flow). Optionally invokes `scribe project skill create` / `scribe project skill claim` to mark project-authored skills.
-2. `scribe project sync` reads intent, classifies each referenced skill by `Origin` + sources validity, vendors `OriginProject`, pins valid `OriginRegistry`, refuses zero-value `OriginRegistry` and `OriginLocal` without `--vendor`, skips `OriginBootstrap`. Writes `.scribe-content-hash` markers using the D6 hash-set. Computes new lockfile, shows diff, asks confirmation (or `--force`). Records `state.InstalledSkill.ExcludedTools` for vendored skills in Boost projects.
+2. `scribe project sync` reads intent, classifies each referenced skill by `Origin` + sources validity, vendors `OriginProject`, pins valid `OriginRegistry`, refuses zero-value `OriginRegistry` and `OriginLocal` without `--vendor`, skips `OriginBootstrap`. It normalizes vendored `SKILL.md` metadata, preserves the base body in `.scribe-base.md`, and writes `.scribe-content-hash` markers using the D6 hash-set. Computes new lockfile, shows diff, asks confirmation (or `--force`). Records `state.InstalledSkill.ExcludedTools` for vendored skills in Boost projects.
 3. Author commits `.ai/` along with `.scribe.yaml`. Pushes.
 
 ### Teammate flow
 
 ```
 .scribe.yaml          ─┐
-.ai/kits/             ├──► scribe sync ──► ~/.claude/skills/<links>  (subject to ExcludedTools)
-.ai/skills/           │                    ~/.codex/skills/<links>
+.ai/kits/             ├──► scribe sync ──► <project>/.claude/skills/<links>  (subject to ExcludedTools)
+.ai/skills/           │                    <project>/.agents/skills/<links>
 .ai/scribe.lock       │                    ~/.scribe/skills/<name>/  (cache, name-keyed; refetch on stale)
-                      └──► fetch + verify pinned skills via validateProjectLock
+                       └──► fetch + verify pinned skills via validateProjectLock
 ```
 
 1. Teammate clones, runs `scribe registry connect <repo>` for each registry referenced in `.ai/scribe.lock` they don't already have, runs `scribe sync` in the repo.
@@ -388,7 +389,7 @@ state.OriginRegistry  ───┘                            .ai/scribe.lock  (
 4. For each entry in `add:` (qualified ref or bare name) and each transitive skill from kits:
    - Resolve to `(SourceRepo, Path, registry)` per D10. Bare names that resolve to multiple registries → exit 8.
    - Read state. Apply D1 classification.
-   - `OriginProject` → vendor as folder copy. Compute `.scribe-content-hash` via D6 hash-set and write into folder. Update vendoring state. In Boost projects, set `state.InstalledSkill.ExcludedTools = ["claude"]` for this name.
+   - `OriginProject` → vendor as folder copy. Normalize `SKILL.md` metadata, preserve the original body in `.scribe-base.md`, compute `.scribe-content-hash` via D6 hash-set, and write into folder. Update vendoring state. In Boost projects, set `state.InstalledSkill.ExcludedTools = ["claude"]` for this name.
    - `OriginRegistry` (with valid sources) → resolve `commit_sha` from registry, fetch content, compute `content_hash` via D6 hash-set, snapshot `manifest.Entry` fields into `ProjectEntry` (Path, Type, Install, Update, Installs, Updates, install_command_hash via `lockfile.CommandHash`). Write into `.ai/scribe.lock`.
    - `OriginRegistry` (zero-value, no usable sources) → exit 5 with remediation.
    - `OriginLocal` / adopted → exit 5 with `--vendor <name>` hint, OR vendor + claim if the flag was passed.
@@ -475,7 +476,7 @@ A reviewer-friendly table of what's reused vs. introduced:
 
 - **Unit**: `ProjectLockfile`/`ProjectEntry` parse/write round-trip + discriminator dispatch; `Resolver` precedence; vendor classification by `Origin` including zero-value-Registry refusal; `.scribe-content-hash` round-trip via `HashSet`; LF normalization; git-ls-files vs denylist file selection; Boost detection; `EffectiveTools` minus `ExcludedTools`; `CommandHash` consistency between sync and lockfile.
 - **Integration**: golden-file end-to-end via `testdata/`. Synthetic project with `.scribe.yaml` + `.ai/`, run sync against fake registry, snapshot resulting agent skill dirs. Cover Boost-mode (composer.json present, `ReconcilePre`/`ReconcilePost` exercised) vs non-Boost. Cross-project skill-name collision: project A pins `tdd@old`, project B pins `tdd@new`; switch dirs and confirm refetch. Hash-set determinism: author commits with `.DS_Store`, teammate clones on Linux, `scribe sync` succeeds.
-- **E2E**: anvil worktree pair. Author runs `scribe project skill create custom-skill`, `scribe project sync`, commits. Teammate runs `scribe sync`, asserts identical skill dirs in `~/.claude/skills/`. Edit `.ai/skills/custom-skill/SKILL.md` on disk and assert exit 8 (Frankenstein). For Boost case: pre-create `.claude/skills/custom-skill/` as a real dir (simulating `boost:update`) and confirm scribe sync converges.
+- **E2E**: anvil worktree pair. Author runs `scribe project skill create custom-skill`, `scribe project sync`, commits. Teammate runs `scribe sync`, asserts project-local skill projections such as `.agents/skills/custom-skill` and `.claude/skills/custom-skill` point at the committed `.ai/skills/custom-skill` source, and asserts `git diff -- .ai .scribe.yaml` stays clean. Edit `.ai/skills/custom-skill/SKILL.md` on disk and assert exit 8 (Frankenstein). For Boost case: pre-create `.claude/skills/custom-skill/` as a real dir (simulating `boost:update`) and confirm scribe sync converges.
 - **Concurrency**: two parallel `scribe project sync` invocations; project-scoped lock serializes them.
 
 ## Migration
