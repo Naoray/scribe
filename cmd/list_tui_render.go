@@ -143,10 +143,12 @@ func (m listModel) viewSplit() string {
 		b.WriteString(ltDimStyle.Render("y confirm · n cancel") + "\n")
 	case m.substate == listSubstateUpdateChoice:
 		if m.updateHasMods {
-			b.WriteString(ltDimStyle.Render("r registry · l local · m merge · esc cancel") + "\n")
+			b.WriteString(ltDimStyle.Render("tab pane · ↑↓/pg scroll · r registry · l local · m merge · esc cancel") + "\n")
 		} else {
-			b.WriteString(ltDimStyle.Render("u update · esc cancel") + "\n")
+			b.WriteString(ltDimStyle.Render("tab pane · ↑↓/pg scroll · u update · esc cancel") + "\n")
 		}
+	case m.substate == listSubstateUpdateConflictExists:
+		b.WriteString(ltDimStyle.Render("r resolve · esc cancel") + "\n")
 	case m.substate == listSubstateTools:
 		b.WriteString(ltDimStyle.Render("↑↓ choose · enter toggle/save · esc cancel") + "\n")
 	case m.focus == focusList:
@@ -479,6 +481,17 @@ func (m listModel) renderDetailPane(row listRow, width int) string {
 
 	if m.substate == listSubstateTools {
 		b.WriteString(m.renderToolsEditor(width))
+		return b.String()
+	}
+
+	if m.substate == listSubstateUpdateChoice {
+		b.WriteString(m.renderUpdateChoiceDetail(width))
+		return b.String()
+	}
+
+	if m.substate == listSubstateUpdateConflictExists {
+		b.WriteString(ltErrorStyle.Render("Unresolved conflict markers in SKILL.md.") + "\n\n")
+		b.WriteString(ltDimStyle.Render("[r] launch scribe resolve · [esc] cancel") + "\n")
 		return b.String()
 	}
 

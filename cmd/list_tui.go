@@ -149,6 +149,16 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m = m.ensureCursorVisible()
+		if m.substate == listSubstateUpdateChoice {
+			_, rightWidth := m.paneWidths()
+			diffWidth := rightWidth - 2
+			if diffWidth < 20 {
+				diffWidth = 20
+			}
+			m.viewYours.SetWidth(diffWidth)
+			m.viewIncoming.SetWidth(diffWidth)
+			redistributeViewportHeights(&m, m.contentHeight())
+		}
 		return m, nil
 	case tea.InterruptMsg:
 		m.quitting = true
