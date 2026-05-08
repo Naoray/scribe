@@ -79,19 +79,33 @@ func ThreeWayMerge(skillDir string, upstreamContent []byte) (MergeResult, error)
 // ComputeFileHash returns SHA-256 hash (first 8 hex chars) of file content.
 // Normalizes CRLF → LF for cross-platform determinism (must match discovery.skillFileHash).
 func ComputeFileHash(content []byte) string {
-	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+	content = normalizeLineEndings(content)
 	h := sha256.Sum256(content)
 	return hex.EncodeToString(h[:])[:8]
 }
 
+func normalizeLineEndings(content []byte) []byte {
+	return bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+}
+
 // IsLocallyModified checks if SKILL.md has been modified since last sync.
+// When .scribe-base.md exists, it is the source of truth and is compared
+// directly with SKILL.md. installedHash is only a legacy fallback for installs
+// that do not have a sidecar yet.
 func IsLocallyModified(skillDir string, installedHash string) bool {
-	if installedHash == "" {
-		return false
-	}
 	content, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 	if err != nil {
 		return false
 	}
+
+	base, err := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
+	if err == nil {
+		return !bytes.Equal(normalizeLineEndings(content), normalizeLineEndings(base))
+	}
+
+	if installedHash == "" {
+		return false
+	}
+
 	return ComputeFileHash(content) != installedHash
 }
