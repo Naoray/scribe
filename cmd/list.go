@@ -6,12 +6,9 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	clienv "github.com/Naoray/scribe/internal/cli/env"
-	"github.com/Naoray/scribe/internal/logo"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
@@ -83,17 +80,6 @@ func runList(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		return saveWorkflowState(bag)
-	}
-
-	// Print the brand mark above the TUI in inline (non-altscreen) mode.
-	// Skip when stdout is not a TTY — the JSON branch above already covered
-	// the non-TTY case, so this is belt-and-suspenders for safety.
-	if isatty.IsTerminal(os.Stdout.Fd()) {
-		width, _, _ := term.GetSize(int(os.Stdout.Fd()))
-		if width <= 0 {
-			width = 80
-		}
-		logo.Render(os.Stdout, Version, width)
 	}
 
 	m := newListModel(cmd.Context(), bag)
