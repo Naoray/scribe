@@ -407,6 +407,29 @@ func TestDoctorTextIncludesGroupedTool(t *testing.T) {
 	if strings.Contains(got, "tool=codex") {
 		t.Fatalf("expected compact tool column instead of old tool label, got:\n%s", got)
 	}
+	if !strings.Contains(got, "[warn]") {
+		t.Fatalf("expected status in text output, got:\n%s", got)
+	}
+}
+
+func TestDoctorTextShowsErrorStatus(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeDoctorText(&buf, "", doctor.Report{
+		Issues: []doctor.Issue{{
+			Skill:   "recap",
+			Kind:    doctor.IssueCanonicalMetadata,
+			Status:  "error",
+			Message: "read canonical SKILL.md: denied",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("writeDoctorText: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "[error]") {
+		t.Fatalf("expected error status in text output, got:\n%s", got)
+	}
 }
 
 func TestDoctorTextFoldsMigrationBudgetRows(t *testing.T) {
@@ -526,6 +549,33 @@ func TestDoctorTextTruncatesOnlyForTTY(t *testing.T) {
 	}
 	if !strings.Contains(pipeOut, "skill-11") {
 		t.Fatalf("expected final row in piped output, got:\n%s", pipeOut)
+	}
+}
+
+func TestDoctorTextBufferOutputIsPlainAndUntruncated(t *testing.T) {
+	var issues []doctor.Issue
+	for i := 0; i < 12; i++ {
+		issues = append(issues, doctor.Issue{
+			Skill:   fmt.Sprintf("skill-%02d", i),
+			Kind:    doctor.IssueCanonicalMetadata,
+			Status:  "warn",
+			Message: "SKILL.md is missing a description",
+		})
+	}
+
+	var buf bytes.Buffer
+	if err := writeDoctorText(&buf, "", doctor.Report{Issues: issues}); err != nil {
+		t.Fatalf("writeDoctorText: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "\x1b[") {
+		t.Fatalf("expected plain buffer output, got:\n%s", got)
+	}
+	if strings.Contains(got, "… 2 more") {
+		t.Fatalf("expected untruncated buffer output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "skill-11") {
+		t.Fatalf("expected final row in buffer output, got:\n%s", got)
 	}
 }
 

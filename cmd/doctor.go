@@ -68,6 +68,7 @@ type doctorFixResult struct {
 var (
 	doctorTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
 	doctorOKStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	doctorErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
 	doctorDimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
 	doctorMutedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	doctorBoldStyle  = lipgloss.NewStyle().Bold(true)
@@ -594,7 +595,7 @@ func buildDoctorReportJSON(skill string, report doctor.Report) doctorReportJSON 
 }
 
 func writeDoctorText(w io.Writer, skill string, report doctor.Report) error {
-	tty := term.IsTerminal(int(os.Stdout.Fd()))
+	tty := writerIsTerminal(w)
 	var buf strings.Builder
 	if err := writeDoctorTextWithOptions(&buf, skill, report, tty); err != nil {
 		return err
@@ -608,7 +609,7 @@ func writeDoctorText(w io.Writer, skill string, report doctor.Report) error {
 }
 
 func writeDoctorFixText(w io.Writer, skill string, results []doctorFixResult) error {
-	tty := term.IsTerminal(int(os.Stdout.Fd()))
+	tty := writerIsTerminal(w)
 	var buf strings.Builder
 	if err := writeDoctorFixTextStyled(&buf, skill, results); err != nil {
 		return err
@@ -715,6 +716,7 @@ type doctorIssueRow struct {
 	Kind    doctor.IssueKind
 	Skill   string
 	Tools   []string
+	Status  string
 	Message string
 }
 
@@ -766,6 +768,7 @@ func foldDoctorIssueRows(kind doctor.IssueKind, issues []doctor.Issue) []doctorI
 			rows = append(rows, doctorIssueRow{
 				Kind:    kind,
 				Skill:   tildePath(skill),
+				Status:  foldedDoctorStatus(skillIssues),
 				Message: strings.Join(migrationBudgetParts(skillIssues), doctorDimStyle.Render(" · ")),
 			})
 		default:
@@ -773,6 +776,7 @@ func foldDoctorIssueRows(kind doctor.IssueKind, issues []doctor.Issue) []doctorI
 				Kind:    kind,
 				Skill:   tildePath(skill),
 				Tools:   issueTools(skillIssues),
+				Status:  foldedDoctorStatus(skillIssues),
 				Message: summarizeDoctorIssueMessage(kind, skillIssues),
 			})
 		}
@@ -781,16 +785,57 @@ func foldDoctorIssueRows(kind doctor.IssueKind, issues []doctor.Issue) []doctorI
 }
 
 func renderDoctorIssueRow(row doctorIssueRow) string {
+	status := renderDoctorStatus(row.Status)
 	switch row.Kind {
 	case doctor.IssueMigrationBudgetOverflow:
-		return fmt.Sprintf("  %-42s %s", doctorDimStyle.Render(row.Skill), row.Message)
+		return "  " + renderDoctorColumn(row.Skill, 42, doctorDimStyle) + " " + status + " " + row.Message
 	default:
 		toolLabel := strings.Join(row.Tools, ", ")
 		if toolLabel == "" {
 			toolLabel = "-"
 		}
-		return fmt.Sprintf("  %-16s %-8s %s", doctorBoldStyle.Render(row.Skill), doctorMutedStyle.Render(toolLabel), row.Message)
+		return "  " + renderDoctorColumn(row.Skill, 16, doctorBoldStyle) + " " + renderDoctorColumn(toolLabel, 8, doctorMutedStyle) + " " + status + " " + row.Message
 	}
+}
+
+func renderDoctorColumn(value string, width int, style lipgloss.Style) string {
+	if len(value) < width {
+		value += strings.Repeat(" ", width-len(value))
+	}
+	return style.Render(value)
+}
+
+func renderDoctorStatus(status string) string {
+	if status == "" {
+		status = "warn"
+	}
+	label := "[" + status + "]"
+	if len(label) < 7 {
+		label += strings.Repeat(" ", 7-len(label))
+	}
+	switch status {
+	case "error":
+		return doctorErrorStyle.Render(label)
+	default:
+		return doctorMutedStyle.Render(label)
+	}
+}
+
+func foldedDoctorStatus(issues []doctor.Issue) string {
+	status := ""
+	for _, issue := range issues {
+		switch issue.Status {
+		case "error":
+			return "error"
+		case "warn":
+			status = "warn"
+		default:
+			if status == "" {
+				status = issue.Status
+			}
+		}
+	}
+	return status
 }
 
 func migrationBudgetParts(issues []doctor.Issue) []string {
@@ -934,6 +979,18 @@ func tildePath(s string) string {
 		return s
 	}
 	return strings.ReplaceAll(s, home, "~")
+}
+
+type fdWriter interface {
+	Fd() uintptr
+}
+
+func writerIsTerminal(w io.Writer) bool {
+	f, ok := w.(fdWriter)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd()))
 }
 
 func stripANSI(s string) string {
