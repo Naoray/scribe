@@ -7,30 +7,134 @@
 |___/\___|_|_\___|___/___|
 ```
 
-> Agent-first skill manager for any AI coding agent. Built-in support for Claude Code, Codex, Cursor, and Gemini; register any other agent with `scribe tools add`. Your team's AI coding skills, always in sync — one manifest, one command.
+A skill manager for AI coding agents. One canonical store of `SKILL.md` files, symlinked into `~/.claude/skills/`, `.cursor/rules/`, `~/.agents/skills/`, and Gemini. Project-scoped, lockfile-pinned, and scriptable through a versioned JSON envelope.
 
-<!-- TODO: hero terminal screenshot or asciinema GIF of `scribe list` TUI -->
+For engineers running Claude Code, Cursor, Codex, or Gemini who got tired of copying skill files between four directories.
 
 ## What it does
 
-AI coding agents work better when you teach them how your team works — code review style, deployment checklists, framework patterns. These [SKILL.md](https://agentskills.io) files live in `~/.claude/skills/`, `~/.agents/skills/` (Codex), and similar directories. Sharing them used to mean Slack links and manual copying. Skills got stale; new teammates had no idea what existed.
+- **Single canonical store at `~/.scribe/skills/<name>`.** Tool directories get symlinks, never duplicates. Edit the source once; every agent sees the change.
+- **Project loadout from `.scribe.yaml`.** Declare which kits (skill bundles), snippets (rules blocks), and MCP server names a repo wants. `scribe sync` projects exactly that set into `<project>/.claude/skills/`, `<project>/.agents/skills/`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and `.cursor/rules/<name>.mdc`. No global pollution.
+- **Lockfile-pinned.** `scribe.lock` records resolved revisions per registry. Two engineers running `scribe sync` against the same manifest get the same skills.
+- **Adopts existing skills via symlink.** `scribe adopt` claims hand-rolled `SKILL.md` files already in `~/.claude/skills/` etc. Files do not move; nothing breaks; scribe just starts managing them.
+- **Codex 5440-byte description budget enforced.** Sync refuses at 100% (exit 5) and warns from 70%. You hear about overflow at sync time, not when Codex silently truncates.
+- **Versioned JSON envelope on every migrated command.** Stable exit codes, JSON Schema introspection via `scribe schema <cmd> --json`, partial-success semantics. Drops cleanly into an agent loop.
 
-Scribe makes the skill set declarative.
+Built-in tool support: Claude Code, Cursor, Codex, Gemini. Register others (Aider, Cline, Roo, your own) with `scribe tools add`.
 
-- **One source of truth.** Put your team's skills in a GitHub repo with a `scribe.yaml` manifest. Teammates run `scribe registry connect` once.
-- **Cross-tool projection.** One canonical store under `~/.scribe/skills/` projects to whatever agent you use — Claude Code, Codex, Cursor, and Gemini ship as built-ins; register others (Aider, Cline, Roo, your own tool) with `scribe tools add`.
-- **Project-scoped loadouts.** A `.scribe.yaml` per repo declares the **kits** (named skill bundles), **snippets** (rules injected into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`), and **MCP server names** that project wants. Skills land in `<project>/.claude/skills/` and `<project>/.agents/skills/` — not machine-globally — so each repo sees only what it asked for.
-- **Agent-first, scriptable.** Every migrated command emits a versioned JSON envelope (`{status, format_version, data, meta}`) with exit codes, partial-success semantics, and JSON Schema introspection.
+## In 60 seconds
+
+```console
+$ brew install Naoray/tap/scribe
+$ scribe init                                        # create ~/.scribe, detect tools
+$ scribe registry connect anthropics/skills          # connect a public registry
+$ scribe sync                                        # resolve, symlink, write rules blocks
+$ scribe list --json --fields name,targets,managed
+{
+  "status": "ok",
+  "format_version": "1",
+  "data": [
+    { "name": "code-review", "targets": ["claude","codex","cursor"], "managed": true },
+    { "name": "tdd",         "targets": ["claude","codex"],          "managed": true }
+  ],
+  "meta": { "duration_ms": 41, "command": "scribe list" }
+}
+```
+
+That set of skills now lives at `~/.scribe/skills/`. Your agents see it through symlinks. Re-run `scribe sync` after edits or registry updates.
+
+## How it fits
+
+Scribe is the projection layer between an agent skill format and the directories your tools actually read. It does **not** replace:
+
+- **The `SKILL.md` format.** Scribe consumes the [agentskills.io](https://agentskills.io) spec; it does not invent a new one. Anything that works with `skills.sh` or Paks works here.
+- **Your agent.** Claude Code, Cursor, Codex, and Gemini still own loading, prompting, and execution. Scribe puts the right files in the right place.
+- **MCP.** Scribe writes server *names* into project files (Claude approvals, `.codex/config.toml`, `.cursor/mcp.json`). It does not start MCP processes — that is the agent's job.
+
+What scribe adds: a canonical store, manifest-driven projection, lockfile, project scoping, and a JSON-envelope CLI so the whole thing stays reproducible and agent-readable.
+
+## Why this exists
+
+Teams started writing internal skills — code review style, deployment checklists, framework patterns — and three problems showed up immediately. Skills drifted across tools: the Claude Code copy got edited, the Cursor copy didn't. Teammates ran different revisions because there was no shared lockfile. `CLAUDE.md` and `AGENTS.md` filled with copy-pasted rules blocks that no one trusted to be current.
+
+Scribe's bet is that the store should be the truth and tool directories should be projections. One file at `~/.scribe/skills/code-review/SKILL.md`. Symlinks into every agent's directory. A manifest in the repo that says which skills, kits, and snippets this project wants. A lockfile so the resolution is reproducible. After that, every agent reads the same thing.
+
+Most coding-agent tooling fights over the agent itself. Scribe manages the skills the agent actually loads.
+
+## Agent contract
+
+Migrated commands emit this on stdout:
+
+```json
+{
+  "status": "ok",
+  "format_version": "1",
+  "data": { },
+  "meta": {
+    "duration_ms": 12,
+    "bootstrap_ms": 3,
+    "command": "scribe list",
+    "scribe_version": "1.1.0"
+  }
+}
+```
+
+Errors use the same shape on stderr. Payload always lives under `data` — `jq '.data.foo'`, never `jq '.foo'`.
+
+| Exit | Meaning |
+|---:|---|
+| 0 | success |
+| 2 | usage / invalid flags |
+| 3 | not found (command, registry, skill, schema) |
+| 4 | permission or auth failure |
+| 5 | conflict requiring user action |
+| 6 | network failure |
+| 7 | local dependency unavailable |
+| 8 | validation failure |
+| 9 | user canceled |
+| 10 | partial success — inspect `data.summary.failed` |
+
+Discover any command's input/output schema:
+
+```bash
+scribe schema sync --json
+scribe schema --all --json   # every migrated command
+```
+
+Full contract in [CLAUDE.md](CLAUDE.md). Envelope spec in [docs/json-envelope.md](docs/json-envelope.md). Trigger-phrase mapping for agent loops in [SKILL.md](SKILL.md).
+
+## Project file (`.scribe.yaml`)
+
+Run `scribe project init` to scaffold one, or write it by hand:
+
+```yaml
+kits:
+  - laravel-baseline
+snippets:
+  - commit-discipline
+mcp:
+  - mempalace
+add:
+  - anthropics/skills:pdf
+remove:
+  - skill-this-project-doesnt-want
+```
+
+`scribe sync` resolves the kits, applies `add` / `remove`, writes the snippets into the agent rule files (with markers — your unmanaged content is preserved), and projects every selected `.mcp.json` definition into Claude, Codex, and Cursor project config.
+
+### Team-share
+
+For projects shared with teammates, the author runs `scribe project sync` and commits `.scribe.yaml` plus `.ai/kits/`, `.ai/skills/`, and `.ai/scribe.lock`. Teammates clone the repo, connect any registries named in `.ai/scribe.lock`, then run `scribe sync` — they get the same kits, the same skills, at the same pinned revisions. Use `scribe project sync --check` in CI to fail when committed `.ai/` artifacts drift from `.scribe.yaml`. See [docs/projects-and-kits.md](docs/projects-and-kits.md).
 
 ## Install
 
-**Homebrew (recommended):**
+**Homebrew:**
 
 ```bash
 brew install Naoray/tap/scribe
 ```
 
-**Binary (macOS / Linux):**
+**Binary:**
 
 ```bash
 # macOS Apple Silicon
@@ -52,112 +156,54 @@ sudo mv scribe /usr/local/bin/
 go install github.com/Naoray/scribe/cmd/scribe@latest
 ```
 
-Verify: `scribe --version`. Update via `brew upgrade scribe`, the same `go install` line, or replacing the binary from the releases page.
+Verify with `scribe --version`. Update via `brew upgrade scribe`, the same `go install` line, or replacing the binary from [releases](https://github.com/Naoray/scribe/releases).
 
 ### Install via your agent
 
-Paste this into your AI coding agent (Claude Code, Codex, Cursor, Gemini, or any agent with shell access) — it installs scribe and registers the agent skill so future sessions pick it up automatically:
+Paste this into Claude Code, Codex, Cursor, or Gemini. It bootstraps scribe and registers scribe's own agent-facing skill so future sessions pick it up automatically:
 
 ```
 I want to use Scribe to manage my AI coding-agent skills on this machine.
 Repo: https://github.com/Naoray/scribe (setup steps: /blob/main/SKILL.md)
 
-Please set it up for me:
+Please set it up:
   1. If `scribe --version` fails, install it (prefer brew, fall back to release binary, last resort `go install`).
-  2. Register Scribe's own agent-facing skill: `scribe add Naoray/scribe:scribe --no-interaction --json`
+  2. Register Scribe's own agent skill: `scribe add Naoray/scribe:scribe --no-interaction --json`
   3. Show me `scribe list --json` to confirm.
 ```
 
-## Quick start
+## Quick reference
 
 ```bash
-scribe list           # see skills already available across tools
-scribe adopt          # claim hand-rolled skills from Claude/Codex/Cursor
-scribe sync           # project managed skills, kits, snippets, and MCP names into the current project
-scribe project sync   # publish shareable .ai/ artifacts for teammates
-scribe show           # show the resolved project skill set and per-agent budgets
+scribe list                  # local skills (TUI on a terminal, JSON when piped)
+scribe adopt                 # claim hand-rolled skills already in tool dirs
+scribe sync                  # apply project loadout
+scribe project sync          # publish shareable .ai/ artifacts for teammates
+scribe show                  # resolved project skill set + per-agent budgets
+scribe doctor                # audit and repair managed skill health
+scribe tools                 # detected agents (claude, codex, cursor, gemini, custom)
+scribe skill tools <name>    # enable / disable / reset projection per skill per tool
+scribe registry connect ...  # add a registry
+scribe browse --query ...    # search registries before installing
 ```
-
-That is enough to start managing existing local skills between tools. Use `scribe tools` to see detected agents, and `scribe skill tools <name>` to enable, disable, or reset projection for one skill.
-
-Run `scribe project init` or drop a `.scribe.yaml` at the repo root to declare which kits, snippets, extra skills, or MCP server names this project wants — `scribe sync` then projects exactly that set into `<project>/.claude/skills/` + `<project>/.agents/skills/`, writes snippet blocks into `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` plus `.cursor/rules/<name>.mdc`, approves selected `.mcp.json` server names for Claude, and copies selected `.mcp.json` definitions into Codex and Cursor project config. Scribe does not start MCP processes. See [`docs/projects-and-kits.md`](docs/projects-and-kits.md).
-
-For team-sharable projects, authors run `scribe project sync` and commit `.scribe.yaml` plus `.ai/kits`, `.ai/skills`, and `.ai/scribe.lock`. Teammates connect the registries named in `.ai/scribe.lock`, then run `scribe sync` to reproduce the same kits and skills. Generated projection directories such as `.agents/skills/` are local sync output, not team-share artifacts.
-
-Registries are for adding shared/upstream skills. Connect one when you want more than your local set:
-
-```bash
-scribe registry connect anthropics/skills
-scribe sync
-```
-
-## What you get
-
-`scribe list` opens an interactive TUI on a terminal. Piped or in CI, it emits the JSON envelope for skills already available on the machine:
-
-```json
-{
-  "status": "ok",
-  "format_version": "1",
-  "data": {
-    "packages": [],
-    "skills": [
-      {
-        "name": "review-checklist",
-        "description": "Apply the team's review checklist before opening a PR.",
-        "revision": 1,
-        "content_hash": "e42bc8ef",
-        "targets": ["claude", "codex"],
-        "managed": true,
-        "origin": "local"
-      }
-    ]
-  },
-  "meta": { "duration_ms": 478, "command": "scribe list", "scribe_version": "dev" }
-}
-```
-
-`scribe sync` adopts clean local skills, reconciles projections, and reports a structured envelope per run:
-
-```json
-{
-  "status": "ok",
-  "format_version": "1",
-  "data": {
-    "adoption": { "adopted": 1, "skipped": 0, "conflicted": 0 },
-    "reconcile": { "installed": 1, "relinked": 2, "removed": 0, "conflicts_count": 0 },
-    "summary": { "failed": 0, "installed": 0, "skipped": 0, "updated": 0 }
-  }
-}
-```
-
-## Why scribe?
-
-- **Agents-first**: versioned JSON envelope, JSON Schema for every migrated command, distinct exit codes, machine-readable error remediation. Drops cleanly into any agent loop — Claude Code, Codex, Cursor, Gemini, or a custom tool you registered with `scribe tools add`.
-- **Project-local projection**: scopes skill availability to the project you're in, instead of dumping every installed skill into every session. Keeps Codex inside its 5440-byte description budget by construction.
-- **Adoption, not migration**: claims hand-rolled skills already in `~/.claude/skills/` etc. via symlink — nothing moves, nothing breaks, scribe just starts managing them.
-- **One manifest, every tool**: `scribe.yaml` works across every supported agent — built-ins (Claude Code, Codex, Cursor, Gemini) plus any custom tool you register. No per-tool maintenance.
 
 ## Documentation
 
-- [Comparison](docs/comparison.md) — how scribe compares with skills.sh, Superpowers, Anthropic skills, Cursor rules, Cline/Roo, and MCP
+- [Comparison](docs/comparison.md) — scribe vs. skills.sh, Superpowers, anthropics/skills, Cursor MDC, Cline/Roo, MCP
 - [Commands reference](docs/commands.md) — every subcommand grouped by use
 - [JSON envelope + agent contract](docs/json-envelope.md) — envelope shape, exit codes, `--fields`, schema introspection
 - [Projects, kits, and snippets](docs/projects-and-kits.md) — `.scribe.yaml`, kits, snippet rules
 - [Adoption](docs/adoption.md) — claim hand-rolled skills already on the machine
 - [Troubleshooting](docs/troubleshooting.md) — `scribe doctor`, repair flows, common issues
 
-Skill format follows [agentskills.io](https://agentskills.io). Anything that works with `skills.sh` or Paks works with scribe.
+## Status
 
-## Requirements
-
-- macOS or Linux
-- GitHub account with access to your team's skills repo
-- `gh` CLI recommended for auth (not required for public repos)
+- v1.1.0 — active development.
+- Requires macOS or Linux. Windows install via the PowerShell snippet in [SKILL.md](SKILL.md).
+- `gh` CLI recommended for auth (not required for public repos).
+- Issues: [github.com/Naoray/scribe/issues](https://github.com/Naoray/scribe/issues) — each one has enough context to pick up.
 
 ## Contributing
-
-See the [open issues](https://github.com/Naoray/scribe/issues) — each one has enough context to pick up and run with.
 
 ```bash
 git clone https://github.com/Naoray/scribe
