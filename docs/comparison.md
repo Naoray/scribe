@@ -8,7 +8,7 @@ Scribe is for teams that want a reproducible, cross-agent way to publish, instal
 |---|---|---|---|
 | Primary job | Skill manager: publish, install, project, sync | Repo-scoped instructions for Copilot Chat, code review, agent | Open `SKILL.md` format and public directory |
 | Where instructions live | `~/.scribe/` (canonical), projected to `.claude/`, `.cursor/`, `.codex/`, `.gemini/` | `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`, `AGENTS.md` | Per-skill `SKILL.md` (frontmatter) anywhere a tool can read |
-| Cross-tool support | Claude Code, Codex, Cursor, Gemini, custom tools | Copilot (Chat, code review, agent, cloud agent). `AGENTS.md` is also read by Claude (`CLAUDE.md`) and Gemini (`GEMINI.md`). | Any agent that consumes the spec |
+| Cross-tool support | Claude Code, Codex, Cursor, Gemini, custom tools | Copilot (Chat, code review, cloud agent). `AGENTS.md` is also read by Claude (`CLAUDE.md`) and Gemini (`GEMINI.md`). | Any agent that consumes the spec |
 | Path/file scoping | `.scribe.yaml` per project, kits, snippets | `applyTo: "src/**/*.ts"` glob frontmatter on `*.instructions.md` | Not part of spec |
 | Reproducibility | `scribe.lock` lockfile, `scribe sync`, `scribe doctor` | None — markdown files in git, no lockfile or sync command | None — repo or directory listing |
 | Discovery | Connected registries (Naoray, anthropics, custom) | None — author your own, or borrow from `awesome-copilot` | Public directory and leaderboard |
