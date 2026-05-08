@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,11 +33,20 @@ func TestDoctorCommandReportsIssues(t *testing.T) {
 	}
 
 	got := out.String()
+	if !strings.Contains(got, "scribe doctor — 1 issues across 1 skills") {
+		t.Fatalf("expected summary header in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Canonical metadata (1)") {
+		t.Fatalf("expected grouped canonical metadata in output, got:\n%s", got)
+	}
 	if !strings.Contains(got, "recap") {
 		t.Fatalf("expected recap in output, got:\n%s", got)
 	}
 	if !strings.Contains(got, "missing a description") {
 		t.Fatalf("expected canonical metadata message in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Run `scribe doctor --fix`") {
+		t.Fatalf("expected fix CTA in output, got:\n%s", got)
 	}
 }
 
@@ -428,7 +438,7 @@ func TestDoctorJSONOutput(t *testing.T) {
 	}
 }
 
-func TestDoctorTextIncludesTool(t *testing.T) {
+func TestDoctorTextIncludesGroupedTool(t *testing.T) {
 	var buf bytes.Buffer
 	err := writeDoctorText(&buf, "", doctor.Report{
 		Issues: []doctor.Issue{{
@@ -444,8 +454,208 @@ func TestDoctorTextIncludesTool(t *testing.T) {
 	}
 
 	got := buf.String()
-	if !strings.Contains(got, "tool=codex") {
+	if !strings.Contains(got, "Projection drift (1)") {
+		t.Fatalf("expected grouped projection drift output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "codex") {
 		t.Fatalf("expected tool in text output, got:\n%s", got)
+	}
+	if strings.Contains(got, "tool=codex") {
+		t.Fatalf("expected compact tool column instead of old tool label, got:\n%s", got)
+	}
+	if !strings.Contains(got, "[warn]") {
+		t.Fatalf("expected status in text output, got:\n%s", got)
+	}
+}
+
+func TestDoctorTextShowsErrorStatus(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeDoctorText(&buf, "", doctor.Report{
+		Issues: []doctor.Issue{{
+			Skill:   "recap",
+			Kind:    doctor.IssueCanonicalMetadata,
+			Status:  "error",
+			Message: "read canonical SKILL.md: denied",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("writeDoctorText: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "[error]") {
+		t.Fatalf("expected error status in text output, got:\n%s", got)
+	}
+}
+
+func TestDoctorTextFoldsMigrationBudgetRows(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	report := doctor.Report{Issues: []doctor.Issue{
+		{
+			Skill:   filepath.Join(home, "Workspace", "Artistfy", "Dashboard"),
+			Tool:    "claude",
+			Kind:    doctor.IssueMigrationBudgetOverflow,
+			Status:  "warn",
+			Message: "migration-derived projections exceed claude budget by 27443 bytes",
+		},
+		{
+			Skill:   filepath.Join(home, "Workspace", "Artistfy", "Dashboard"),
+			Tool:    "codex",
+			Kind:    doctor.IssueMigrationBudgetOverflow,
+			Status:  "warn",
+			Message: "migration-derived projections exceed codex budget by 22732 bytes",
+		},
+		{
+			Skill:   filepath.Join(home, "Workspace", "Mine", "site"),
+			Tool:    "claude",
+			Kind:    doctor.IssueMigrationBudgetOverflow,
+			Status:  "warn",
+			Message: "migration-derived projections exceed claude budget by 1048576 bytes",
+		},
+	}}
+
+	var buf bytes.Buffer
+	if err := writeDoctorText(&buf, "", report); err != nil {
+		t.Fatalf("writeDoctorText: %v", err)
+	}
+	got := buf.String()
+
+	if !strings.Contains(got, "Migration budget overflow (3)") {
+		t.Fatalf("expected migration group, got:\n%s", got)
+	}
+	if !strings.Contains(got, "~/Workspace/Artistfy/Dashboard") {
+		t.Fatalf("expected tilde path, got:\n%s", got)
+	}
+	if !strings.Contains(got, "claude +26.8 KB · codex +22.2 KB") {
+		t.Fatalf("expected folded tool byte summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, "claude +1.0 MB") {
+		t.Fatalf("expected MB formatting, got:\n%s", got)
+	}
+	if strings.Contains(got, "27443 bytes") {
+		t.Fatalf("expected human byte sizes only, got:\n%s", got)
+	}
+}
+
+func TestDoctorTextSummarizesProjectionDrift(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cursorPath := filepath.Join(home, ".cursor", "rules", "deploy.mdc")
+	claudePath := filepath.Join(home, ".claude", "skills", "deploy")
+
+	var buf bytes.Buffer
+	err := writeDoctorText(&buf, "", doctor.Report{
+		Issues: []doctor.Issue{{
+			Skill:   "deploy",
+			Tool:    "cursor",
+			Kind:    doctor.IssueProjectionDrift,
+			Status:  "warn",
+			Message: "unexpected managed projection cursor at " + cursorPath + "; missing managed projection for claude at " + claudePath,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("writeDoctorText: %v", err)
+	}
+	got := buf.String()
+
+	if !strings.Contains(got, "unexpected projection at ~/.cursor/rules/deploy.mdc") {
+		t.Fatalf("expected compact unexpected projection detail, got:\n%s", got)
+	}
+	if !strings.Contains(got, "missing projection at ~/.claude/skills/deploy") {
+		t.Fatalf("expected compact missing projection detail, got:\n%s", got)
+	}
+	if strings.Contains(got, "managed projection") {
+		t.Fatalf("expected managed projection noise removed, got:\n%s", got)
+	}
+}
+
+func TestDoctorTextTruncatesOnlyForTTY(t *testing.T) {
+	var issues []doctor.Issue
+	for i := 0; i < 12; i++ {
+		issues = append(issues, doctor.Issue{
+			Skill:   fmt.Sprintf("skill-%02d", i),
+			Kind:    doctor.IssueCanonicalMetadata,
+			Status:  "warn",
+			Message: "SKILL.md is missing a description",
+		})
+	}
+	report := doctor.Report{Issues: issues}
+
+	var ttyBuf bytes.Buffer
+	if err := writeDoctorTextWithOptions(&ttyBuf, "", report, true); err != nil {
+		t.Fatalf("writeDoctorTextWithOptions tty: %v", err)
+	}
+	ttyOut := stripANSI(ttyBuf.String())
+	if !strings.Contains(ttyOut, "… 2 more  (run with --skill <name> or --json for full list)") {
+		t.Fatalf("expected truncation hint, got:\n%s", ttyOut)
+	}
+	if strings.Contains(ttyOut, "skill-11") {
+		t.Fatalf("expected truncated tty output, got:\n%s", ttyOut)
+	}
+
+	var pipeBuf bytes.Buffer
+	if err := writeDoctorTextWithOptions(&pipeBuf, "", report, false); err != nil {
+		t.Fatalf("writeDoctorTextWithOptions pipe: %v", err)
+	}
+	pipeOut := stripANSI(pipeBuf.String())
+	if strings.Contains(pipeOut, "… 2 more") {
+		t.Fatalf("expected full piped output, got:\n%s", pipeOut)
+	}
+	if !strings.Contains(pipeOut, "skill-11") {
+		t.Fatalf("expected final row in piped output, got:\n%s", pipeOut)
+	}
+}
+
+func TestDoctorTextBufferOutputIsPlainAndUntruncated(t *testing.T) {
+	var issues []doctor.Issue
+	for i := 0; i < 12; i++ {
+		issues = append(issues, doctor.Issue{
+			Skill:   fmt.Sprintf("skill-%02d", i),
+			Kind:    doctor.IssueCanonicalMetadata,
+			Status:  "warn",
+			Message: "SKILL.md is missing a description",
+		})
+	}
+
+	var buf bytes.Buffer
+	if err := writeDoctorText(&buf, "", doctor.Report{Issues: issues}); err != nil {
+		t.Fatalf("writeDoctorText: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "\x1b[") {
+		t.Fatalf("expected plain buffer output, got:\n%s", got)
+	}
+	if strings.Contains(got, "… 2 more") {
+		t.Fatalf("expected untruncated buffer output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "skill-11") {
+		t.Fatalf("expected final row in buffer output, got:\n%s", got)
+	}
+}
+
+func TestDoctorFixTextUsesRepairSummary(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeDoctorFixText(&buf, "", []doctorFixResult{{
+		Name:             "deploy",
+		UpdatedCanonical: true,
+		RepairedTools:    []string{"cursor", "claude"},
+	}})
+	if err != nil {
+		t.Fatalf("writeDoctorFixText: %v", err)
+	}
+	got := buf.String()
+
+	for _, want := range []string{
+		"Repaired managed skills:",
+		"✓ deploy normalized canonical SKILL.md",
+		"✓ deploy repaired projections (cursor, claude)",
+		"Repaired 1 skills.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in output, got:\n%s", want, got)
+		}
 	}
 }
 

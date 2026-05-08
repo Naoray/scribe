@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +16,9 @@ import (
 	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/textdiff"
 	"github.com/Naoray/scribe/internal/tools"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 type tickSpinnerMsg struct{}
@@ -37,6 +40,12 @@ type updateDoneMsg struct {
 	merged     bool
 	conflicted bool
 	openPath   string
+}
+type upstreamPreviewMsg struct {
+	requestID uint64
+	rowName   string
+	skillMD   []byte
+	err       error
 }
 type toolsSavedMsg struct {
 	result skillEditResult
@@ -129,6 +138,50 @@ func (m listModel) runInstall(row listRow) tea.Cmd {
 		)
 		return commandDoneMsg{err: err}
 	}
+}
+
+func fetchUpstreamForDiffCmd(ctx context.Context, bag *workflow.Bag, row listRow, requestID uint64) tea.Cmd {
+	return func() tea.Msg {
+		if row.Entry == nil {
+			return upstreamPreviewMsg{requestID: requestID, rowName: row.Name, err: fmt.Errorf("source unknown")}
+		}
+		if err := listEnsureRemoteDepsFn(ctx, bag); err != nil {
+			return upstreamPreviewMsg{requestID: requestID, rowName: row.Name, err: err}
+		}
+		if bag.Provider == nil {
+			return upstreamPreviewMsg{requestID: requestID, rowName: row.Name, err: fmt.Errorf("registry provider unavailable")}
+		}
+		files, err := bag.Provider.Fetch(ctx, *row.Entry)
+		if err != nil {
+			return upstreamPreviewMsg{requestID: requestID, rowName: row.Name, err: err}
+		}
+		for _, file := range files {
+			if file.Path == "SKILL.md" {
+				return upstreamPreviewMsg{requestID: requestID, rowName: row.Name, skillMD: file.Content}
+			}
+		}
+		return upstreamPreviewMsg{requestID: requestID, rowName: row.Name, err: fmt.Errorf("SKILL.md not found in registry response")}
+	}
+}
+
+func prepareUpdatePreview(row listRow) (base []byte, local []byte, diffYours string, overflowed bool, overflowN int, err error) {
+	if row.Local == nil || row.Local.LocalPath == "" {
+		return nil, nil, "", false, 0, fmt.Errorf("local skill path unavailable")
+	}
+	local, err = os.ReadFile(filepath.Join(row.Local.LocalPath, "SKILL.md"))
+	if err != nil {
+		return nil, nil, "", false, 0, err
+	}
+	base, err = os.ReadFile(filepath.Join(row.Local.LocalPath, ".scribe-base.md"))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, nil, "", false, 0, err
+		}
+		base = local
+	}
+	diff := textdiff.Unified("SKILL.md", base, local)
+	diff, overflowed = textdiff.TruncateUnified(diff, updatePreviewMaxLines, updatePreviewMaxBytes)
+	return base, local, diff, overflowed, diffOverflowLines(diff), nil
 }
 
 func (m listModel) runUpdate(choice updateChoice) tea.Cmd {

@@ -79,19 +79,55 @@ func ThreeWayMerge(skillDir string, upstreamContent []byte) (MergeResult, error)
 // ComputeFileHash returns SHA-256 hash (first 8 hex chars) of file content.
 // Normalizes CRLF → LF for cross-platform determinism (must match discovery.skillFileHash).
 func ComputeFileHash(content []byte) string {
-	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+	content = normalizeLineEndings(content)
 	h := sha256.Sum256(content)
 	return hex.EncodeToString(h[:])[:8]
 }
 
-// IsLocallyModified checks if SKILL.md has been modified since last sync.
-func IsLocallyModified(skillDir string, installedHash string) bool {
-	if installedHash == "" {
-		return false
+func normalizeLineEndings(content []byte) []byte {
+	return bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+}
+
+func HasConflictMarkers(content []byte) bool {
+	if bytes.HasPrefix(content, []byte("<<<<<<< ")) {
+		return true
 	}
+	marker := []byte("\n<<<<<<< ")
+	for offset := 0; ; {
+		idx := bytes.Index(content[offset:], marker)
+		if idx < 0 {
+			return false
+		}
+		absolute := offset + idx
+		if absolute == 0 || content[absolute-1] != '\r' {
+			return true
+		}
+		offset = absolute + len(marker)
+	}
+}
+
+// IsLocallyModified checks if SKILL.md has been modified since last sync.
+// When .scribe-base.md is readable, it is the source of truth and is compared
+// directly with SKILL.md. When .scribe-base.md is missing, installedHash is the
+// legacy fallback for installs that do not have a sidecar yet. Other sidecar
+// read errors are treated conservatively as locally modified.
+func IsLocallyModified(skillDir string, installedHash string) bool {
 	content, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 	if err != nil {
 		return false
 	}
+
+	base, err := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
+	if err == nil {
+		return !bytes.Equal(normalizeLineEndings(content), normalizeLineEndings(base))
+	}
+	if !os.IsNotExist(err) {
+		return true
+	}
+
+	if installedHash == "" {
+		return false
+	}
+
 	return ComputeFileHash(content) != installedHash
 }

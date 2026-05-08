@@ -2,11 +2,19 @@ package logo_test
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/logo"
 )
+
+// ansiEscape strips CSI / OSC escape sequences for plain-text assertions.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+func stripANSI(s string) string {
+	return ansiEscape.ReplaceAllString(s, "")
+}
 
 func resetLogoEnv(t *testing.T) {
 	t.Helper()
@@ -15,81 +23,56 @@ func resetLogoEnv(t *testing.T) {
 	t.Setenv("SCRIBE_NO_BANNER", "")
 }
 
-func TestRenderFull(t *testing.T) {
+// firstLine returns the first non-empty line of s.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+func TestRenderBannerSingleLine(t *testing.T) {
 	resetLogoEnv(t)
 
 	var buf bytes.Buffer
-	logo.Render(&buf, "1.0.0", 80)
+	logo.Render(&buf, "1.0.13", 80)
 
 	out := buf.String()
-	if !strings.Contains(out, "███") {
-		t.Error("expected full block characters in wide terminal output")
+	plain := stripANSI(out)
+	first := firstLine(plain)
+	if !strings.Contains(first, "█████") {
+		t.Errorf("expected block characters on first line, got: %q", first)
 	}
-	if !strings.Contains(out, "1.0.0") {
-		t.Error("expected version string in output")
+	if !strings.Contains(first, "scribe") {
+		t.Errorf("expected 'scribe' on first line, got: %q", first)
+	}
+	if !strings.Contains(first, "─────") {
+		t.Errorf("expected '─────' divider on first line, got: %q", first)
+	}
+	if !strings.Contains(first, "v1.0.13") {
+		t.Errorf("expected version inline on first line, got: %q", first)
+	}
+
+	// Banner must be a single visual line — no second pixel-art row.
+	if strings.Count(plain, "█████") > 1 {
+		t.Errorf("expected only one block-character row, got: %q", plain)
 	}
 }
 
-func TestRenderCompact(t *testing.T) {
+func TestRenderNarrowFallback(t *testing.T) {
 	resetLogoEnv(t)
 
 	var buf bytes.Buffer
-	logo.Render(&buf, "1.0.0", 50)
-
-	out := buf.String()
-	if !strings.Contains(out, "/ __|") {
-		t.Error("expected compact logo characters in medium terminal output")
-	}
-	if !strings.Contains(out, ".------.") {
-		t.Error("expected chip motif prepended on compact logo")
-	}
-	if !strings.Contains(out, "|   S  |") {
-		t.Error("expected chip S row on compact logo")
-	}
-	if strings.Contains(out, "███") {
-		t.Error("should not contain full block characters at width 50")
-	}
-}
-
-func TestRenderTiny(t *testing.T) {
-	resetLogoEnv(t)
-
-	var buf bytes.Buffer
-	logo.Render(&buf, "1.0.0", 20)
-
-	out := buf.String()
-	if !strings.Contains(out, ".------.") {
-		t.Error("expected chip motif top border in tiny logo output")
-	}
-	if !strings.Contains(out, "|##    |") {
-		t.Error("expected chip pin-1 row in tiny logo output")
-	}
-	if !strings.Contains(out, "|   S  |") {
-		t.Error("expected chip S row in tiny logo output")
-	}
-	if !strings.Contains(out, "'------'") {
-		t.Error("expected chip motif bottom border in tiny logo output")
-	}
-	if strings.Contains(out, "███") || strings.Contains(out, "/ __|") {
-		t.Error("should not contain larger logo art at width 20")
-	}
-	if !strings.Contains(out, "1.0.0") {
-		t.Error("expected version string in tiny logo output")
-	}
-}
-
-func TestRenderPlainText(t *testing.T) {
-	resetLogoEnv(t)
-
-	var buf bytes.Buffer
-	logo.Render(&buf, "2.0.0", 8)
+	logo.Render(&buf, "2.0.0", 20)
 
 	out := buf.String()
 	if !strings.Contains(out, "Scribe v2.0.0") {
-		t.Errorf("expected plain text fallback, got: %s", out)
+		t.Errorf("expected plain text fallback at narrow width, got: %q", out)
 	}
-	if strings.Contains(out, "███") || strings.Contains(out, "/ __|") || strings.Contains(out, ".------.") {
-		t.Error("should not contain any ASCII art at very narrow width")
+	if strings.Contains(out, "█") {
+		t.Errorf("should not contain block characters at narrow width, got: %q", out)
 	}
 }
 
@@ -101,11 +84,13 @@ func TestRenderNoColor(t *testing.T) {
 	logo.Render(&buf, "1.0.0", 80)
 
 	out := buf.String()
-	// Should still contain block characters, just no ANSI escapes
-	if !strings.Contains(out, "███") {
+	if !strings.Contains(out, "█████") {
 		t.Error("expected block characters even with NO_COLOR")
 	}
-	if strings.Contains(out, "\033[") {
+	if !strings.Contains(out, "v1.0.0") {
+		t.Error("expected version inline even with NO_COLOR")
+	}
+	if strings.Contains(out, "\x1b[") {
 		t.Error("should not contain ANSI escape sequences when NO_COLOR is set")
 	}
 }
@@ -119,9 +104,9 @@ func TestRenderDumbTerminal(t *testing.T) {
 
 	out := buf.String()
 	if !strings.Contains(out, "Scribe v1.0.0") {
-		t.Errorf("expected plain text for TERM=dumb, got: %s", out)
+		t.Errorf("expected plain text for TERM=dumb, got: %q", out)
 	}
-	if strings.Contains(out, "███") {
+	if strings.Contains(out, "█") {
 		t.Error("should not contain block characters for TERM=dumb")
 	}
 }
@@ -135,7 +120,7 @@ func TestRenderNoBanner(t *testing.T) {
 
 	out := buf.String()
 	if out != "" {
-		t.Errorf("expected empty output when SCRIBE_NO_BANNER is set, got: %s", out)
+		t.Errorf("expected empty output when SCRIBE_NO_BANNER is set, got: %q", out)
 	}
 }
 
@@ -145,8 +130,12 @@ func TestRenderZeroWidth(t *testing.T) {
 	var buf bytes.Buffer
 	logo.Render(&buf, "1.0.0", 0)
 
-	out := buf.String()
-	if !strings.Contains(out, "Scribe v1.0.0") {
-		t.Errorf("expected plain text fallback for zero width, got: %s", out)
+	// Width 0 means "unknown" — assume wide and render the banner.
+	plain := stripANSI(buf.String())
+	if !strings.Contains(plain, "█████") {
+		t.Errorf("expected banner for unknown width (0), got: %q", plain)
+	}
+	if !strings.Contains(plain, "v1.0.0") {
+		t.Errorf("expected version in output, got: %q", plain)
 	}
 }

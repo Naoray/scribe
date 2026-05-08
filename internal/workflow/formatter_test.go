@@ -13,25 +13,34 @@ import (
 )
 
 func TestTextFormatter_SingleRegistry(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
 	var out, errOut bytes.Buffer
 	fmtr := workflow.NewFormatterWithWriters(false, false, &out, &errOut)
 
+	fmtr.OnSyncStart(1)
 	fmtr.OnRegistryStart("acme/skills")
-	fmtr.OnSkillInstalled("linter", false)
+	fmtr.OnSkillInstalled("linter", false, 1)
 	fmtr.OnSkillSkipped("formatter", sync.SkillStatus{
 		Installed: &state.InstalledSkill{Revision: 1},
 	})
 	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1, Skipped: 1})
 	fmtr.Flush()
 
-	// stderr should have the "syncing ..." header (single-registry mode)
-	if !strings.Contains(errOut.String(), "syncing acme/skills") {
-		t.Errorf("expected 'syncing acme/skills' header, got stderr: %s", errOut.String())
+	if !strings.Contains(errOut.String(), "→ checking 1 connected registry ...") {
+		t.Errorf("expected sync-start header, got stderr: %s", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "── acme/skills ──") {
+		t.Errorf("expected '── acme/skills ──' section header, got stderr: %s", errOut.String())
 	}
 
-	// stdout should have skill lines and done summary
 	if !strings.Contains(out.String(), "linter") {
 		t.Errorf("expected 'linter' in output, got: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "installed") {
+		t.Errorf("expected 'installed' verb, got: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "(rev 1)") {
+		t.Errorf("expected '(rev 1)' suffix, got: %s", out.String())
 	}
 	if !strings.Contains(out.String(), "done: 1 installed") {
 		t.Errorf("expected 'done: 1 installed' in output, got: %s", out.String())
@@ -39,20 +48,24 @@ func TestTextFormatter_SingleRegistry(t *testing.T) {
 }
 
 func TestTextFormatter_MultiRegistry(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
 	var out, errOut bytes.Buffer
 	fmtr := workflow.NewFormatterWithWriters(false, true, &out, &errOut)
 
+	fmtr.OnSyncStart(2)
 	fmtr.OnRegistryStart("acme/skills")
-	fmtr.OnSkillInstalled("linter", false)
+	fmtr.OnSkillInstalled("linter", false, 1)
 	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1})
 
 	fmtr.OnRegistryStart("acme/tools")
-	fmtr.OnSkillInstalled("debugger", true)
+	fmtr.OnSkillInstalled("debugger", true, 3)
 	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Updated: 1})
 
 	fmtr.Flush()
 
-	// stderr should have "── repo ──" headers
+	if !strings.Contains(errOut.String(), "→ checking 2 connected registries ...") {
+		t.Errorf("expected sync-start header, got stderr: %s", errOut.String())
+	}
 	if !strings.Contains(errOut.String(), "── acme/skills ──") {
 		t.Errorf("expected '── acme/skills ──' header, got stderr: %s", errOut.String())
 	}
@@ -60,9 +73,43 @@ func TestTextFormatter_MultiRegistry(t *testing.T) {
 		t.Errorf("expected '── acme/tools ──' header, got stderr: %s", errOut.String())
 	}
 
-	// summary should aggregate across registries
+	if !strings.Contains(out.String(), "(rev 1)") || !strings.Contains(out.String(), "(rev 3)") {
+		t.Errorf("expected per-row revisions in output, got: %s", out.String())
+	}
 	if !strings.Contains(out.String(), "1 installed, 1 updated") {
 		t.Errorf("expected aggregated summary, got: %s", out.String())
+	}
+}
+
+func TestTextFormatter_BudgetWarning(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var out, errOut bytes.Buffer
+	fmtr := workflow.NewFormatterWithWriters(false, false, &out, &errOut)
+
+	fmtr.OnBudgetWarning("codex", "Codex budget: 78% (4280 / 5440 bytes)")
+
+	if !strings.Contains(errOut.String(), "! Codex budget: 78% (4280 / 5440 bytes)") {
+		t.Errorf("expected '!' prefixed budget warning, got: %s", errOut.String())
+	}
+}
+
+func TestTextFormatter_AdoptionWithDeferredConflicts(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var out, errOut bytes.Buffer
+	fmtr := workflow.NewFormatterWithWriters(false, false, &out, &errOut)
+
+	fmtr.OnAdoptionConflictsDeferred([]string{"commit"})
+	fmtr.OnAdoptionStarted(3)
+	fmtr.OnAdopted("tdd", []string{"claude"})
+	fmtr.OnAdopted("code-review", []string{"claude"})
+	fmtr.OnAdopted("deploy", []string{"codex"})
+	fmtr.OnAdoptionComplete(3, 1, 0)
+
+	if !strings.Contains(out.String(), "✓ adopted 3 skills via symlink (originals untouched)") {
+		t.Errorf("expected adopted summary line, got: %s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "! 1 skipped (commit · use --force to override)") {
+		t.Errorf("expected '! 1 skipped' line, got: %s", errOut.String())
 	}
 }
 
@@ -71,7 +118,7 @@ func TestJSONFormatter(t *testing.T) {
 	fmtr := workflow.NewFormatterWithWriters(true, false, &out, &bytes.Buffer{})
 
 	fmtr.OnRegistryStart("acme/skills")
-	fmtr.OnSkillInstalled("linter", false)
+	fmtr.OnSkillInstalled("linter", false, 1)
 	fmtr.OnSkillSkipped("formatter", sync.SkillStatus{
 		Status:    sync.StatusCurrent,
 		Installed: &state.InstalledSkill{Revision: 2},

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"io"
 
 	clienv "github.com/Naoray/scribe/internal/cli/env"
@@ -79,6 +80,10 @@ func newJSONFormatter(out io.Writer, meta func() envelope.Meta) *jsonFormatter {
 	return &jsonFormatter{registries: []registryResult{}, meta: meta, renderer: renderer}
 }
 
+func (f *jsonFormatter) OnSyncStart(_ int) {
+	// JSON mode emits a single envelope on Flush; no per-start event needed.
+}
+
 func (f *jsonFormatter) OnRegistryStart(repo string) {
 	f.current = &registryResult{Registry: repo}
 }
@@ -91,7 +96,7 @@ func (f *jsonFormatter) OnSkillDownloading(_ string) {
 	// JSON mode doesn't emit progress.
 }
 
-func (f *jsonFormatter) OnSkillInstalled(name string, updated bool) {
+func (f *jsonFormatter) OnSkillInstalled(name string, updated bool, revision int) {
 	if f.current == nil {
 		return
 	}
@@ -99,9 +104,14 @@ func (f *jsonFormatter) OnSkillInstalled(name string, updated bool) {
 	if updated {
 		action = "updated"
 	}
+	ver := ""
+	if revision > 0 {
+		ver = fmt.Sprintf("rev %d", revision)
+	}
 	f.current.Skills = append(f.current.Skills, skillResult{
-		Name:   name,
-		Action: action,
+		Name:    name,
+		Action:  action,
+		Version: ver,
 	})
 }
 
@@ -266,8 +276,8 @@ func (f *jsonFormatter) OnAdoptionError(name string, err error) {
 	f.adoption.Skills = append(f.adoption.Skills, adoptedSkill{Name: name, Error: err.Error()})
 }
 
-func (f *jsonFormatter) OnAdoptionConflictsDeferred(count int) {
-	f.adoption.Conflicts = count
+func (f *jsonFormatter) OnAdoptionConflictsDeferred(names []string) {
+	f.adoption.Conflicts = len(names)
 }
 
 func (f *jsonFormatter) OnAdoptionComplete(adopted, _, failed int) {

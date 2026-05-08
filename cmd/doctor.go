@@ -8,9 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/config"
@@ -70,6 +73,15 @@ type doctorFixResult struct {
 	UpdatedCanonical bool     `json:"updated_canonical"`
 	RepairedTools    []string `json:"repaired_tools,omitempty"`
 }
+
+var (
+	doctorTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
+	doctorOKStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	doctorErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+	doctorDimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
+	doctorMutedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	doctorBoldStyle  = lipgloss.NewStyle().Bold(true)
+)
 
 type doctorSkillSnapshot struct {
 	Name         string
@@ -603,44 +615,17 @@ func buildDoctorReportJSON(skill string, report doctor.Report) doctorReportJSON 
 }
 
 func writeDoctorText(w io.Writer, skill string, report doctor.Report) error {
-	if len(report.Issues) == 0 {
-		if skill != "" {
-			_, err := fmt.Fprintf(w, "No managed skill issues found for %s.\n", skill)
-			return err
-		}
-		_, err := fmt.Fprintln(w, "No managed skill issues found.")
+	tty := writerIsTerminal(w)
+	var buf strings.Builder
+	if err := writeDoctorTextWithOptions(&buf, skill, report, tty); err != nil {
 		return err
 	}
-
-	if skill != "" {
-		if _, err := fmt.Fprintf(w, "Managed skill issues for %s:\n", skill); err != nil {
-			return err
-		}
-	} else {
-		if _, err := fmt.Fprintln(w, "Managed skill issues:"); err != nil {
-			return err
-		}
+	out := buf.String()
+	if !tty {
+		out = stripANSI(out)
 	}
-
-	for _, issue := range report.Issues {
-		if issue.Kind == doctor.IssueGlobalListingBudgetOverflow {
-			if err := writeGlobalListingBudgetIssue(w, issue); err != nil {
-				return err
-			}
-			continue
-		}
-		if issue.Tool != "" {
-			if _, err := fmt.Fprintf(w, "- %s [%s] %s tool=%s: %s\n", issue.Skill, issue.Status, issue.Kind, issue.Tool, issue.Message); err != nil {
-				return err
-			}
-			continue
-		}
-		if _, err := fmt.Fprintf(w, "- %s [%s] %s: %s\n", issue.Skill, issue.Status, issue.Kind, issue.Message); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	_, err := io.WriteString(w, out)
+	return err
 }
 
 func writeGlobalListingBudgetIssue(w io.Writer, issue doctor.Issue) error {
@@ -679,42 +664,417 @@ func doctorAgentLabel(tool string) string {
 }
 
 func writeDoctorFixText(w io.Writer, skill string, results []doctorFixResult) error {
+	tty := writerIsTerminal(w)
+	var buf strings.Builder
+	if err := writeDoctorFixTextStyled(&buf, skill, results); err != nil {
+		return err
+	}
+	out := buf.String()
+	if !tty {
+		out = stripANSI(out)
+	}
+	_, err := io.WriteString(w, out)
+	return err
+}
+
+func writeDoctorFixTextStyled(w io.Writer, skill string, results []doctorFixResult) error {
 	if len(results) == 0 {
-		if skill != "" {
-			_, err := fmt.Fprintf(w, "No managed skill issues found for %s.\n", skill)
-			return err
-		}
-		_, err := fmt.Fprintln(w, "No managed skill issues found.")
+		_, err := fmt.Fprintln(w, doctorOKStyle.Render("✓")+" "+doctorDimStyle.Render("No managed skill issues found."))
 		return err
 	}
 
 	if skill != "" {
-		if _, err := fmt.Fprintf(w, "Repaired managed skill %s:\n", skill); err != nil {
+		if _, err := fmt.Fprintln(w, doctorTitleStyle.Render(fmt.Sprintf("Repaired managed skill %s:", skill))); err != nil {
 			return err
 		}
 	} else {
-		if _, err := fmt.Fprintln(w, "Repaired managed skills:"); err != nil {
+		if _, err := fmt.Fprintln(w, doctorTitleStyle.Render("Repaired managed skills:")); err != nil {
 			return err
 		}
 	}
 
 	for _, result := range results {
-		message := "repaired projections"
 		if result.UpdatedCanonical {
-			message = "normalized canonical SKILL.md"
-		}
-		if _, err := fmt.Fprintf(w, "- %s %s", result.Name, message); err != nil {
-			return err
-		}
-		if len(result.RepairedTools) > 0 {
-			if _, err := fmt.Fprintf(w, " and repaired tools: %s", strings.Join(result.RepairedTools, ", ")); err != nil {
+			if _, err := fmt.Fprintf(w, "  %s %s normalized canonical SKILL.md\n", doctorOKStyle.Render("✓"), doctorBoldStyle.Render(result.Name)); err != nil {
 				return err
 			}
 		}
-		if _, err := fmt.Fprintln(w); err != nil {
-			return err
+		if len(result.RepairedTools) > 0 {
+			if _, err := fmt.Fprintf(w, "  %s %s repaired projections (%s)\n", doctorOKStyle.Render("✓"), doctorBoldStyle.Render(result.Name), doctorDimStyle.Render(strings.Join(result.RepairedTools, ", "))); err != nil {
+				return err
+			}
 		}
 	}
 
-	return nil
+	_, err := fmt.Fprintln(w, doctorDimStyle.Render(fmt.Sprintf("Repaired %d skills.", len(results))))
+	return err
+}
+
+func writeDoctorTextWithOptions(w io.Writer, skill string, report doctor.Report, truncate bool) error {
+	if len(report.Issues) == 0 {
+		_, err := fmt.Fprintln(w, doctorOKStyle.Render("✓")+" "+doctorDimStyle.Render("No managed skill issues found."))
+		return err
+	}
+
+	if skill != "" {
+		if _, err := fmt.Fprintln(w, doctorTitleStyle.Render(fmt.Sprintf("scribe doctor — %d issues for %s", len(report.Issues), skill))); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintln(w, doctorTitleStyle.Render(fmt.Sprintf("scribe doctor — %d issues across %d skills", len(report.Issues), countDoctorIssueSkills(report.Issues)))); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+
+	groups := groupDoctorIssuesByKind(report.Issues)
+	for gi, group := range groups {
+		if gi > 0 {
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(w, doctorBoldStyle.Render(fmt.Sprintf("%s (%d)", prettyDoctorKind(group.Kind), group.Count))); err != nil {
+			return err
+		}
+		if group.Kind == doctor.IssueGlobalListingBudgetOverflow {
+			for _, issue := range group.Issues {
+				if err := writeGlobalListingBudgetIssue(w, issue); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		rows := group.Rows
+		remaining := 0
+		if truncate && len(rows) > 10 {
+			remaining = len(rows) - 10
+			rows = rows[:10]
+		}
+		for _, row := range rows {
+			if _, err := fmt.Fprintln(w, renderDoctorIssueRow(row)); err != nil {
+				return err
+			}
+		}
+		if remaining > 0 {
+			if _, err := fmt.Fprintf(w, "  %s\n", doctorDimStyle.Render(fmt.Sprintf("… %d more  (run with --skill <name> or --json for full list)", remaining))); err != nil {
+				return err
+			}
+		}
+	}
+
+	_, err := fmt.Fprintln(w, "\n"+doctorDimStyle.Render("Run `scribe doctor --fix` to repair drift and normalize canonical metadata."))
+	return err
+}
+
+type doctorIssueGroup struct {
+	Kind   doctor.IssueKind
+	Count  int
+	Issues []doctor.Issue
+	Rows   []doctorIssueRow
+}
+
+type doctorIssueRow struct {
+	Kind    doctor.IssueKind
+	Skill   string
+	Tools   []string
+	Status  string
+	Message string
+}
+
+func groupDoctorIssuesByKind(issues []doctor.Issue) []doctorIssueGroup {
+	byKind := map[doctor.IssueKind][]doctor.Issue{}
+	for _, issue := range issues {
+		byKind[issue.Kind] = append(byKind[issue.Kind], issue)
+	}
+
+	groups := make([]doctorIssueGroup, 0, len(byKind))
+	for kind, kindIssues := range byKind {
+		groups = append(groups, doctorIssueGroup{
+			Kind:   kind,
+			Count:  len(kindIssues),
+			Issues: kindIssues,
+			Rows:   foldDoctorIssueRows(kind, kindIssues),
+		})
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].Count != groups[j].Count {
+			return groups[i].Count > groups[j].Count
+		}
+		return prettyDoctorKind(groups[i].Kind) < prettyDoctorKind(groups[j].Kind)
+	})
+	return groups
+}
+
+func foldDoctorIssueRows(kind doctor.IssueKind, issues []doctor.Issue) []doctorIssueRow {
+	bySkill := map[string][]doctor.Issue{}
+	for _, issue := range issues {
+		bySkill[issue.Skill] = append(bySkill[issue.Skill], issue)
+	}
+	skills := make([]string, 0, len(bySkill))
+	for skill := range bySkill {
+		skills = append(skills, skill)
+	}
+	sort.Strings(skills)
+
+	rows := make([]doctorIssueRow, 0, len(skills))
+	for _, skill := range skills {
+		skillIssues := bySkill[skill]
+		sort.SliceStable(skillIssues, func(i, j int) bool {
+			if skillIssues[i].Tool != skillIssues[j].Tool {
+				return skillIssues[i].Tool < skillIssues[j].Tool
+			}
+			return skillIssues[i].Message < skillIssues[j].Message
+		})
+		switch kind {
+		case doctor.IssueMigrationBudgetOverflow:
+			rows = append(rows, doctorIssueRow{
+				Kind:    kind,
+				Skill:   tildePath(skill),
+				Status:  foldedDoctorStatus(skillIssues),
+				Message: strings.Join(migrationBudgetParts(skillIssues), doctorDimStyle.Render(" · ")),
+			})
+		default:
+			rows = append(rows, doctorIssueRow{
+				Kind:    kind,
+				Skill:   tildePath(skill),
+				Tools:   issueTools(skillIssues),
+				Status:  foldedDoctorStatus(skillIssues),
+				Message: summarizeDoctorIssueMessage(kind, skillIssues),
+			})
+		}
+	}
+	return rows
+}
+
+func renderDoctorIssueRow(row doctorIssueRow) string {
+	status := renderDoctorStatus(row.Status)
+	switch row.Kind {
+	case doctor.IssueMigrationBudgetOverflow:
+		return "  " + renderDoctorColumn(row.Skill, 42, doctorDimStyle) + " " + status + " " + row.Message
+	default:
+		toolLabel := strings.Join(row.Tools, ", ")
+		if toolLabel == "" {
+			toolLabel = "-"
+		}
+		return "  " + renderDoctorColumn(row.Skill, 16, doctorBoldStyle) + " " + renderDoctorColumn(toolLabel, 8, doctorMutedStyle) + " " + status + " " + row.Message
+	}
+}
+
+func renderDoctorColumn(value string, width int, style lipgloss.Style) string {
+	if len(value) < width {
+		value += strings.Repeat(" ", width-len(value))
+	}
+	return style.Render(value)
+}
+
+func renderDoctorStatus(status string) string {
+	if status == "" {
+		status = "warn"
+	}
+	label := "[" + status + "]"
+	if len(label) < 7 {
+		label += strings.Repeat(" ", 7-len(label))
+	}
+	switch status {
+	case "error":
+		return doctorErrorStyle.Render(label)
+	default:
+		return doctorMutedStyle.Render(label)
+	}
+}
+
+func foldedDoctorStatus(issues []doctor.Issue) string {
+	status := ""
+	for _, issue := range issues {
+		switch issue.Status {
+		case "error":
+			return "error"
+		case "warn":
+			status = "warn"
+		default:
+			if status == "" {
+				status = issue.Status
+			}
+		}
+	}
+	return status
+}
+
+func migrationBudgetParts(issues []doctor.Issue) []string {
+	parts := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		label := issue.Tool
+		if label == "" {
+			label = "tool"
+		}
+		parts = append(parts, fmt.Sprintf("%s +%s", label, formatBytes(extractByteCount(issue.Message))))
+	}
+	return parts
+}
+
+func issueTools(issues []doctor.Issue) []string {
+	seen := map[string]bool{}
+	var tools []string
+	for _, issue := range issues {
+		if issue.Tool == "" || seen[issue.Tool] {
+			continue
+		}
+		seen[issue.Tool] = true
+		tools = append(tools, issue.Tool)
+	}
+	sort.Strings(tools)
+	return tools
+}
+
+func summarizeDoctorIssueMessage(kind doctor.IssueKind, issues []doctor.Issue) string {
+	seen := map[string]bool{}
+	var parts []string
+	for _, issue := range issues {
+		for _, part := range strings.Split(issue.Message, ";") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			part = summarizeDoctorMessagePart(kind, part)
+			if !seen[part] {
+				seen[part] = true
+				parts = append(parts, part)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, doctorDimStyle.Render(" · "))
+}
+
+func summarizeDoctorMessagePart(kind doctor.IssueKind, part string) string {
+	part = tildePath(part)
+	if kind != doctor.IssueProjectionDrift {
+		return part
+	}
+	switch {
+	case strings.HasPrefix(part, "unexpected managed projection "):
+		if path, ok := suffixAfter(part, " at "); ok {
+			return "unexpected projection at " + path
+		}
+	case strings.HasPrefix(part, "missing managed projection for "):
+		if path, ok := suffixAfter(part, " at "); ok {
+			return "missing projection at " + path
+		}
+	case strings.Contains(part, " projection at ") && strings.HasSuffix(part, " is conflicted"):
+		if path, ok := between(part, " projection at ", " is conflicted"); ok {
+			return "conflicted projection at " + path
+		}
+	case strings.Contains(part, " projection at ") && strings.HasSuffix(part, " does not point to the canonical target"):
+		if path, ok := between(part, " projection at ", " does not point to the canonical target"); ok {
+			return "projection target mismatch at " + path
+		}
+	}
+	return part
+}
+
+func suffixAfter(s, marker string) (string, bool) {
+	i := strings.LastIndex(s, marker)
+	if i < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(s[i+len(marker):]), true
+}
+
+func between(s, start, end string) (string, bool) {
+	i := strings.Index(s, start)
+	if i < 0 {
+		return "", false
+	}
+	rest := s[i+len(start):]
+	j := strings.Index(rest, end)
+	if j < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(rest[:j]), true
+}
+
+func prettyDoctorKind(kind doctor.IssueKind) string {
+	text := strings.ReplaceAll(string(kind), "_", " ")
+	if text == "" {
+		return ""
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
+}
+
+func countDoctorIssueSkills(issues []doctor.Issue) int {
+	seen := map[string]bool{}
+	for _, issue := range issues {
+		seen[issue.Skill] = true
+	}
+	return len(seen)
+}
+
+func extractByteCount(message string) int64 {
+	fields := strings.Fields(message)
+	for i, field := range fields {
+		if field == "bytes" && i > 0 {
+			n, err := strconv.ParseInt(fields[i-1], 10, 64)
+			if err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+func formatBytes(n int64) string {
+	const kb = 1024
+	const mb = 1024 * kb
+	switch {
+	case n >= mb:
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(mb))
+	default:
+		return fmt.Sprintf("%.1f KB", float64(n)/float64(kb))
+	}
+}
+
+func tildePath(s string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, home, "~")
+}
+
+type fdWriter interface {
+	Fd() uintptr
+}
+
+func writerIsTerminal(w io.Writer) bool {
+	f, ok := w.(fdWriter)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd()))
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == 0x1b {
+			if i+1 < len(s) && s[i+1] == '[' {
+				i += 2
+				for i < len(s) && (s[i] < '@' || s[i] > '~') {
+					i++
+				}
+			} else if i+1 < len(s) {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }

@@ -141,9 +141,10 @@ type SkillDownloadingMsg struct{ Name string }
 
 // SkillInstalledMsg is sent when a skill is successfully installed or updated.
 type SkillInstalledMsg struct {
-	Name    string
-	Updated bool // true = update, false = fresh install
-	Merged  bool // true if 3-way merge was used
+	Name     string
+	Updated  bool // true = update, false = fresh install
+	Merged   bool // true if 3-way merge was used
+	Revision int  // post-install revision number (1 for fresh install)
 }
 
 // SkillSkippedMsg is sent when a skill is already current — no action needed.
