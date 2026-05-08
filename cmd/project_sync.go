@@ -260,14 +260,27 @@ func projectEntryFromState(name string, installed state.InstalledSkill) (lockfil
 			SourceRegistry:     src.Registry,
 			CommitSHA:          src.LastSHA,
 			ContentHash:        hash,
-			InstallCommandHash: sync.CommandHash(installed.InstallCmd, installed.UpdateCmd, nil, nil),
+			InstallCommandHash: sync.CommandHash(installed.InstallCmd, installed.UpdateCmd, installed.Installs, installed.Updates),
 		},
 		SourceRepo: src.SourceRepo,
 		Path:       src.Path,
 		Type:       entryType,
 		Install:    installed.InstallCmd,
 		Update:     installed.UpdateCmd,
+		Installs:   cloneProjectStringMap(installed.Installs),
+		Updates:    cloneProjectStringMap(installed.Updates),
 	}, nil
+}
+
+func cloneProjectStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func installableDir(name string, installed state.InstalledSkill) (string, error) {

@@ -1501,6 +1501,8 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, teamRepo stri
 			Type:       "package",
 			InstallCmd: sk.Entry.Install,
 			UpdateCmd:  sk.Entry.Update,
+			Installs:   cloneStringMap(sk.Entry.Installs),
+			Updates:    cloneStringMap(sk.Entry.Updates),
 			CmdHash:    newHash,
 			Approval:   "approved",
 			ApprovedAt: time.Now().UTC(),
@@ -1572,6 +1574,8 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, teamRepo stri
 		existing.Sources = mergeSources(&existing, newSource)
 		existing.InstallCmd = sk.Entry.Install
 		existing.UpdateCmd = sk.Entry.Update
+		existing.Installs = cloneStringMap(sk.Entry.Installs)
+		existing.Updates = cloneStringMap(sk.Entry.Updates)
 		existing.CmdHash = newHash
 		existing.Approval = "approved"
 		existing.ApprovedAt = time.Now().UTC()
@@ -1698,6 +1702,17 @@ func cloneBlobSHAs(blobSHAs map[string]string) map[string]string {
 		clone[path] = sha
 	}
 	return clone
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 // updateSourceEntry updates the source entry for a registry in the installed skill state.

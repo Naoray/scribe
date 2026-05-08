@@ -113,6 +113,61 @@ func TestProjectSyncVendorsProjectSkillAndPinsRegistrySkill(t *testing.T) {
 	}
 }
 
+func TestProjectSyncPinsPackagePerToolCommands(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	mustChdir(t, project)
+	mustWriteProjectFile(t, filepath.Join(project, ".scribe.yaml"), "add: [superpowers]\n")
+	mustWriteProjectFile(t, filepath.Join(home, ".scribe", "packages", "superpowers", "SKILL.md"), "# superpowers\n")
+
+	installCmd := "scribe package install"
+	updateCmd := "scribe package update"
+	installs := map[string]string{"codex": "codex install superpowers"}
+	updates := map[string]string{"codex": "codex update superpowers"}
+	st := stateFixture(t, home)
+	st.Installed["superpowers"] = state.InstalledSkill{
+		Type:       "package",
+		InstallCmd: installCmd,
+		UpdateCmd:  updateCmd,
+		Installs:   installs,
+		Updates:    updates,
+		Sources: []state.SkillSource{{
+			Registry:   "acme/skills",
+			SourceRepo: "acme/source",
+			Path:       "packages/superpowers",
+			Ref:        "main",
+			LastSHA:    "abc123",
+			LastSynced: time.Now(),
+		}},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	cmd := newProjectSyncCommand()
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project sync: %v", err)
+	}
+	lf, err := projectstore.Project(project).LoadProjectLockfile()
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	entry, ok := lf.Entry("superpowers")
+	if !ok {
+		t.Fatal("superpowers pin missing")
+	}
+	if entry.Install != installCmd || entry.Update != updateCmd {
+		t.Fatalf("commands = install %q update %q", entry.Install, entry.Update)
+	}
+	if entry.Installs["codex"] != installs["codex"] || entry.Updates["codex"] != updates["codex"] {
+		t.Fatalf("per-tool commands = installs %#v updates %#v", entry.Installs, entry.Updates)
+	}
+	if want := isync.CommandHash(installCmd, updateCmd, installs, updates); entry.InstallCommandHash != want {
+		t.Fatalf("InstallCommandHash = %q, want %q", entry.InstallCommandHash, want)
+	}
+}
+
 func TestProjectSyncCheckDetectsDrift(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()

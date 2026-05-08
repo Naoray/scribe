@@ -152,12 +152,14 @@ type InstalledSkill struct {
 	Kind Kind `json:"kind,omitempty"`
 
 	// Package-specific fields (omitted for regular skills).
-	Type       string    `json:"type,omitempty"`
-	InstallCmd string    `json:"install_cmd,omitempty"`
-	UpdateCmd  string    `json:"update_cmd,omitempty"`
-	CmdHash    string    `json:"cmd_hash,omitempty"`
-	Approval   string    `json:"approval,omitempty"`
-	ApprovedAt time.Time `json:"approved_at,omitempty"`
+	Type       string            `json:"type,omitempty"`
+	InstallCmd string            `json:"install_cmd,omitempty"`
+	UpdateCmd  string            `json:"update_cmd,omitempty"`
+	Installs   map[string]string `json:"installs,omitempty"`
+	Updates    map[string]string `json:"updates,omitempty"`
+	CmdHash    string            `json:"cmd_hash,omitempty"`
+	Approval   string            `json:"approval,omitempty"`
+	ApprovedAt time.Time         `json:"approved_at,omitempty"`
 }
 
 // IsPackage reports whether this state entry is a tree-package (new kind
@@ -214,20 +216,22 @@ type legacyTeamState struct {
 }
 
 type legacyInstalledSkill struct {
-	Version     string    `json:"version"`
-	CommitSHA   string    `json:"commit_sha,omitempty"`
-	Source      string    `json:"source"`
-	InstalledAt time.Time `json:"installed_at"`
-	Targets     []string  `json:"targets,omitempty"`
-	Tools       []string  `json:"tools,omitempty"`
-	Paths       []string  `json:"paths"`
-	Registries  []string  `json:"registries,omitempty"`
-	Type        string    `json:"type,omitempty"`
-	InstallCmd  string    `json:"install_cmd,omitempty"`
-	UpdateCmd   string    `json:"update_cmd,omitempty"`
-	CmdHash     string    `json:"cmd_hash,omitempty"`
-	Approval    string    `json:"approval,omitempty"`
-	ApprovedAt  time.Time `json:"approved_at,omitempty"`
+	Version     string            `json:"version"`
+	CommitSHA   string            `json:"commit_sha,omitempty"`
+	Source      string            `json:"source"`
+	InstalledAt time.Time         `json:"installed_at"`
+	Targets     []string          `json:"targets,omitempty"`
+	Tools       []string          `json:"tools,omitempty"`
+	Paths       []string          `json:"paths"`
+	Registries  []string          `json:"registries,omitempty"`
+	Type        string            `json:"type,omitempty"`
+	InstallCmd  string            `json:"install_cmd,omitempty"`
+	UpdateCmd   string            `json:"update_cmd,omitempty"`
+	Installs    map[string]string `json:"installs,omitempty"`
+	Updates     map[string]string `json:"updates,omitempty"`
+	CmdHash     string            `json:"cmd_hash,omitempty"`
+	Approval    string            `json:"approval,omitempty"`
+	ApprovedAt  time.Time         `json:"approved_at,omitempty"`
 
 	// New v2 fields that may already exist in state (if re-loaded after partial migration)
 	Revision      int               `json:"revision,omitempty"`
@@ -727,10 +731,23 @@ func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
 		Type:          ls.Type,
 		InstallCmd:    ls.InstallCmd,
 		UpdateCmd:     ls.UpdateCmd,
+		Installs:      cloneStringMap(ls.Installs),
+		Updates:       cloneStringMap(ls.Updates),
 		CmdHash:       ls.CmdHash,
 		Approval:      ls.Approval,
 		ApprovedAt:    ls.ApprovedAt,
 	}
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 // appendUniqueSources appends sources from extra into base, skipping

@@ -150,7 +150,11 @@ func ResolveKitFilter(st *state.State) (filter []string, enabled bool) {
 	if err != nil || projectPath == "" {
 		return nil, false
 	}
-	pf, err := projectfile.Load(projectPath)
+	return resolveKitFilter(filepath.Dir(projectPath), st, false)
+}
+
+func resolveKitFilter(projectRoot string, st *state.State, teamShareMode bool) (filter []string, enabled bool) {
+	pf, err := projectfile.Load(filepath.Join(projectRoot, projectfile.Filename))
 	if err != nil {
 		return nil, false
 	}
@@ -158,7 +162,12 @@ func ResolveKitFilter(st *state.State) (filter []string, enabled bool) {
 	if err != nil {
 		return nil, false
 	}
-	kits, err := kit.LoadAll(filepath.Join(scribeDir, "kits"))
+	var kits map[string]*kit.Kit
+	if teamShareMode {
+		kits, err = projectstore.NewResolver(projectRoot, scribeDir).LoadKits()
+	} else {
+		kits, err = kit.LoadAll(filepath.Join(scribeDir, "kits"))
+	}
 	if err != nil {
 		return nil, false
 	}
@@ -186,7 +195,7 @@ func StepResolveKitFilter(_ context.Context, b *Bag) error {
 	if b.ProjectRoot == "" || b.State == nil {
 		return nil
 	}
-	b.KitFilter, b.KitFilterEnabled = ResolveKitFilter(b.State)
+	b.KitFilter, b.KitFilterEnabled = resolveKitFilter(b.ProjectRoot, b.State, b.TeamShareMode)
 	return nil
 }
 
