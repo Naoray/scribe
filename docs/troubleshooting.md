@@ -41,6 +41,7 @@ Live `scribe doctor --json` excerpt:
 - `snippet_projection_drift` — a snippet declared in `.scribe.yaml` has no block in its target agent rules file (`CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`), or the projected block content drifted from `~/.scribe/snippets/<name>.md`. Remediation: run `scribe sync` to rewrite the block.
 - `canonical_metadata` — frontmatter in the canonical `SKILL.md` deviates from the canonical shape (whitespace, ordering, frontmatter casing). `scribe doctor --fix` normalizes it.
 - `migration_budget_overflow` — a project on global-projection compat is over Codex's 5440-byte description budget; switch to project-local projection via `.scribe.yaml`.
+- `global_listing_budget_overflow` — installed skill descriptions are near or over an agent's global listing budget. If Claude Code reports `Skill listing will be truncated`, run `scribe doctor` to see scribe's estimate of your skill-description budget and the top contributors to consider removing.
 
 `scribe doctor` v1 does not attempt to rewrite mixed package layouts for Codex. It focuses on canonical-metadata health plus skill and snippet projection repair.
 
