@@ -51,11 +51,14 @@ That writes project-owned artifacts under `.ai/`:
 ```text
 .ai/kits/<name>.yaml
 .ai/skills/<project-skill>/SKILL.md
+.ai/skills/<project-skill>/.scribe-base.md
 .ai/skills/<project-skill>/.scribe-content-hash
 .ai/scribe.lock
 ```
 
-Commit `.scribe.yaml` and `.ai/` together. Teammates clone the repo, connect any registries named in `.ai/scribe.lock`, then run `scribe sync`. Project-vendored skills win over global skills with the same name. Registry skills are fetched at the pinned commit from `.ai/scribe.lock`.
+Commit `.scribe.yaml` and `.ai/` together. Do not commit generated tool projections such as `.agents/skills/`, `.claude/skills/`, or `.cursor/rules/` unless your project already manages those files for another reason.
+
+Teammates clone the repo, connect any registries named in `.ai/scribe.lock`, then run `scribe sync`. Project-vendored skills win over global skills with the same name. Registry skills are fetched at the pinned commit from `.ai/scribe.lock`. Project-vendored `SKILL.md` files are normalized with Scribe metadata before hashing, so teammate sync can project them for Codex without dirtying committed `.ai/` files.
 
 Use `scribe project sync --check` in CI to fail when committed `.ai/` artifacts drift from the current `.scribe.yaml` and local author state. Use `--force` only after reviewing project-side changes; it overwrites changed `.ai/` artifacts.
 
