@@ -22,18 +22,23 @@ import (
 type IssueKind string
 
 const (
-	IssueCanonicalMetadata       IssueKind = "canonical_metadata"
-	IssueMigrationBudgetOverflow IssueKind = "migration_budget_overflow"
-	IssueProjectionDrift         IssueKind = "projection_drift"
-	IssueSnippetProjectionDrift  IssueKind = "snippet_projection_drift"
+	IssueCanonicalMetadata           IssueKind = "canonical_metadata"
+	IssueGlobalListingBudgetOverflow IssueKind = "global_listing_budget_overflow"
+	IssueMigrationBudgetOverflow     IssueKind = "migration_budget_overflow"
+	IssueProjectionDrift             IssueKind = "projection_drift"
+	IssueSnippetProjectionDrift      IssueKind = "snippet_projection_drift"
 )
 
 type Issue struct {
-	Skill   string
-	Tool    string
-	Kind    IssueKind
-	Status  string
-	Message string
+	Skill         string
+	Tool          string
+	Kind          IssueKind
+	Status        string
+	Message       string
+	BudgetUsed    int
+	BudgetLimit   int
+	BudgetPercent int
+	LargestSkills []budget.Overflow
 }
 
 type Report struct {
@@ -75,6 +80,7 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 	}
 	issues = append(issues, inspectMigrationBudgetOverflow(st, name)...)
 	if name == "" {
+		issues = append(issues, inspectGlobalListingBudget(st)...)
 		issues = append(issues, inspectProjectSnippetDrift(cfg)...)
 	}
 
@@ -139,6 +145,95 @@ func inspectProjectSnippetDrift(cfg *config.Config) []Issue {
 		}
 	}
 	return issues
+}
+
+func inspectGlobalListingBudget(st *state.State) []Issue {
+	if st == nil {
+		return nil
+	}
+	agents := make([]string, 0, len(budget.AgentBudgets))
+	for agent := range budget.AgentBudgets {
+		agents = append(agents, agent)
+	}
+	sort.Strings(agents)
+	var issues []Issue
+	for _, agent := range agents {
+		skills, sizes := globalBudgetSkillsForAgent(st, agent)
+		result := budget.CheckBudget(skills, agent)
+		if result.Status != budget.StatusWarn && result.Status != budget.StatusRefuse {
+			continue
+		}
+		largest := topBudgetSkills(sizes, 5)
+		topNames := make([]string, 0, len(largest))
+		for _, item := range largest {
+			topNames = append(topNames, item.Skill)
+		}
+		issues = append(issues, Issue{
+			Tool:          agent,
+			Kind:          IssueGlobalListingBudgetOverflow,
+			Status:        string(result.Status),
+			Message:       fmt.Sprintf("global skill descriptions estimated at %d/%d bytes (%d%%) for %s; Claude Code may truncate the listing. Top contributors: %s", result.Used, result.Limit, result.Percent(), agent, strings.Join(topNames, ", ")),
+			BudgetUsed:    result.Used,
+			BudgetLimit:   result.Limit,
+			BudgetPercent: result.Percent(),
+			LargestSkills: largest,
+		})
+	}
+	return issues
+}
+
+func globalBudgetSkillsForAgent(st *state.State, agent string) ([]budget.Skill, map[string]int) {
+	names := make([]string, 0, len(st.Installed))
+	for name, installed := range st.Installed {
+		if !installedSkillOwnedByAgent(installed, agent) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	skills := make([]budget.Skill, 0, len(names))
+	sizes := make(map[string]int, len(names))
+	for _, name := range names {
+		dir, err := storeSkillDir(name)
+		if err != nil {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+		if err != nil {
+			continue
+		}
+		skill := budget.Skill{Name: name, Content: content}
+		skills = append(skills, skill)
+		sizes[name] = budget.EstimateDescriptionBytes(skill)
+	}
+	return skills, sizes
+}
+
+func installedSkillOwnedByAgent(installed state.InstalledSkill, agent string) bool {
+	if installed.IsPackage() {
+		return false
+	}
+	if installed.ToolsMode == state.ToolsModePinned {
+		return containsString(installed.Tools, agent)
+	}
+	return true
+}
+
+func topBudgetSkills(sizes map[string]int, limit int) []budget.Overflow {
+	largest := make([]budget.Overflow, 0, len(sizes))
+	for name, bytes := range sizes {
+		largest = append(largest, budget.Overflow{Skill: name, Bytes: bytes})
+	}
+	sort.SliceStable(largest, func(i, j int) bool {
+		if largest[i].Bytes != largest[j].Bytes {
+			return largest[i].Bytes > largest[j].Bytes
+		}
+		return largest[i].Skill < largest[j].Skill
+	})
+	if len(largest) > limit {
+		largest = largest[:limit]
+	}
+	return largest
 }
 
 func expectedSnippetTargets(targets, activeTools []string) []string {

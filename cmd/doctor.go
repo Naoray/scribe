@@ -46,17 +46,26 @@ Examples:
 }
 
 type doctorIssueJSON struct {
-	Skill   string `json:"skill"`
-	Tool    string `json:"tool,omitempty"`
-	Kind    string `json:"kind"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	Skill         string                  `json:"skill"`
+	Tool          string                  `json:"tool,omitempty"`
+	Kind          string                  `json:"kind"`
+	Status        string                  `json:"status"`
+	Message       string                  `json:"message"`
+	BudgetUsed    int                     `json:"budget_used,omitempty"`
+	BudgetLimit   int                     `json:"budget_limit,omitempty"`
+	BudgetPercent int                     `json:"budget_percent,omitempty"`
+	LargestSkills []doctorSkillBudgetJSON `json:"largest_skills,omitempty"`
 }
 
 type doctorReportJSON struct {
 	Skill  string            `json:"skill,omitempty"`
 	Fix    bool              `json:"fix"`
 	Issues []doctorIssueJSON `json:"issues"`
+}
+
+type doctorSkillBudgetJSON struct {
+	Skill string `json:"skill"`
+	Bytes int    `json:"bytes"`
 }
 
 type doctorFixResult struct {
@@ -583,12 +592,23 @@ func buildDoctorReportJSON(skill string, report doctor.Report) doctorReportJSON 
 		Issues: make([]doctorIssueJSON, 0, len(report.Issues)),
 	}
 	for _, issue := range report.Issues {
+		largest := make([]doctorSkillBudgetJSON, 0, len(issue.LargestSkills))
+		for _, item := range issue.LargestSkills {
+			largest = append(largest, doctorSkillBudgetJSON{
+				Skill: item.Skill,
+				Bytes: item.Bytes,
+			})
+		}
 		out.Issues = append(out.Issues, doctorIssueJSON{
-			Skill:   issue.Skill,
-			Tool:    issue.Tool,
-			Kind:    string(issue.Kind),
-			Status:  issue.Status,
-			Message: issue.Message,
+			Skill:         issue.Skill,
+			Tool:          issue.Tool,
+			Kind:          string(issue.Kind),
+			Status:        issue.Status,
+			Message:       issue.Message,
+			BudgetUsed:    issue.BudgetUsed,
+			BudgetLimit:   issue.BudgetLimit,
+			BudgetPercent: issue.BudgetPercent,
+			LargestSkills: largest,
 		})
 	}
 	return out
@@ -606,6 +626,41 @@ func writeDoctorText(w io.Writer, skill string, report doctor.Report) error {
 	}
 	_, err := io.WriteString(w, out)
 	return err
+}
+
+func writeGlobalListingBudgetIssue(w io.Writer, issue doctor.Issue) error {
+	agent := doctorAgentLabel(issue.Tool)
+	if _, err := fmt.Fprintf(w, "- %s skill-listing budget at %d/%d bytes (%d%%) [%s]\n", agent, issue.BudgetUsed, issue.BudgetLimit, issue.BudgetPercent, issue.Status); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "    %s may truncate skill descriptions in this session.\n", agent); err != nil {
+		return err
+	}
+	if len(issue.LargestSkills) > 0 {
+		if _, err := fmt.Fprintln(w, "    Largest contributors:"); err != nil {
+			return err
+		}
+		for _, item := range issue.LargestSkills {
+			if _, err := fmt.Fprintf(w, "      - %s (%d bytes)\n", item.Skill, item.Bytes); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := fmt.Fprintln(w, "    Action: scribe remove <name>  # or raise skillListingBudgetFraction in ~/.claude/settings.json")
+	return err
+}
+
+func doctorAgentLabel(tool string) string {
+	switch strings.ToLower(tool) {
+	case "claude":
+		return "Claude Code"
+	case "codex":
+		return "Codex"
+	case "":
+		return "Agent"
+	default:
+		return strings.ToUpper(tool[:1]) + tool[1:]
+	}
 }
 
 func writeDoctorFixText(w io.Writer, skill string, results []doctorFixResult) error {
@@ -684,6 +739,14 @@ func writeDoctorTextWithOptions(w io.Writer, skill string, report doctor.Report,
 		if _, err := fmt.Fprintln(w, doctorBoldStyle.Render(fmt.Sprintf("%s (%d)", prettyDoctorKind(group.Kind), group.Count))); err != nil {
 			return err
 		}
+		if group.Kind == doctor.IssueGlobalListingBudgetOverflow {
+			for _, issue := range group.Issues {
+				if err := writeGlobalListingBudgetIssue(w, issue); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		rows := group.Rows
 		remaining := 0
 		if truncate && len(rows) > 10 {
@@ -707,9 +770,10 @@ func writeDoctorTextWithOptions(w io.Writer, skill string, report doctor.Report,
 }
 
 type doctorIssueGroup struct {
-	Kind  doctor.IssueKind
-	Count int
-	Rows  []doctorIssueRow
+	Kind   doctor.IssueKind
+	Count  int
+	Issues []doctor.Issue
+	Rows   []doctorIssueRow
 }
 
 type doctorIssueRow struct {
@@ -729,9 +793,10 @@ func groupDoctorIssuesByKind(issues []doctor.Issue) []doctorIssueGroup {
 	groups := make([]doctorIssueGroup, 0, len(byKind))
 	for kind, kindIssues := range byKind {
 		groups = append(groups, doctorIssueGroup{
-			Kind:  kind,
-			Count: len(kindIssues),
-			Rows:  foldDoctorIssueRows(kind, kindIssues),
+			Kind:   kind,
+			Count:  len(kindIssues),
+			Issues: kindIssues,
+			Rows:   foldDoctorIssueRows(kind, kindIssues),
 		})
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
