@@ -21,7 +21,24 @@ import (
 const labelWidth = 10 // "Registries" is the longest label at 10 chars
 
 func runDefault(cmd *cobra.Command, args []string) error {
-	return runList(cmd, args)
+	// JSON mode falls through to the list workflow so `scribe --json` keeps
+	// returning machine-readable data.
+	if jsonFlagPassed(cmd) {
+		return runList(cmd, args)
+	}
+
+	// Non-TTY (piped/redirected) also falls through — the logo would just be
+	// noise in scripts.
+	if !isatty.IsTerminal(os.Stdout.Fd()) {
+		return runList(cmd, args)
+	}
+
+	width, _, _ := term.GetSize(int(os.Stdout.Fd()))
+	if width <= 0 {
+		width = 80
+	}
+	logo.Render(os.Stdout, Version, width)
+	return cmd.Help()
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
