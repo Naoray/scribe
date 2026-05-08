@@ -92,7 +92,28 @@ func TestComputeFileHash(t *testing.T) {
 	}
 }
 
-func TestIsLocallyModified(t *testing.T) {
+func TestIsLocallyModified_SidecarMatchesSkill_ReturnsFalse(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("original content")
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), content, 0o644)
+	os.WriteFile(filepath.Join(dir, ".scribe-base.md"), content, 0o644)
+
+	if IsLocallyModified(dir, "deadbeef") {
+		t.Error("should not report modified when SKILL.md matches .scribe-base.md")
+	}
+}
+
+func TestIsLocallyModified_SidecarDiffersFromSkill_ReturnsTrue(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("changed content"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".scribe-base.md"), []byte("original content"), 0o644)
+
+	if !IsLocallyModified(dir, "") {
+		t.Error("should report modified when SKILL.md differs from .scribe-base.md")
+	}
+}
+
+func TestIsLocallyModified_SidecarMissingUsesFallbackHash(t *testing.T) {
 	dir := t.TempDir()
 
 	content := []byte("original content")
@@ -100,23 +121,61 @@ func TestIsLocallyModified(t *testing.T) {
 
 	os.WriteFile(filepath.Join(dir, "SKILL.md"), content, 0o644)
 
-	// Unmodified.
 	if IsLocallyModified(dir, hash) {
-		t.Error("should not report modified when content matches hash")
+		t.Error("should not report modified when content matches fallback hash")
 	}
 
-	// Modified.
 	os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("changed content"), 0o644)
 	if !IsLocallyModified(dir, hash) {
-		t.Error("should report modified when content differs from hash")
+		t.Error("should report modified when content differs from fallback hash")
 	}
+}
 
-	// Empty hash → not modified (first install, no hash recorded yet).
+func TestIsLocallyModified_SidecarMissingEmptyFallback_ReturnsFalse(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("content"), 0o644)
+
 	if IsLocallyModified(dir, "") {
 		t.Error("empty hash should not report modified")
 	}
+}
 
-	// Missing file → not modified.
+func TestIsLocallyModified_CRLFNormalizedComparison(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("line1\r\nline2\r\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".scribe-base.md"), []byte("line1\nline2\n"), 0o644)
+
+	if IsLocallyModified(dir, "") {
+		t.Error("line ending differences should not report modified")
+	}
+}
+
+func TestIsLocallyModified_DriftedFallbackHash_TrustsSidecar(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("# claude-api\n\nunchanged skill\n")
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), content, 0o644)
+	os.WriteFile(filepath.Join(dir, ".scribe-base.md"), content, 0o644)
+
+	if IsLocallyModified(dir, "deadbeef") {
+		t.Error("stale fallback hash should not report modified when sidecar matches")
+	}
+}
+
+func TestIsLocallyModified_SidecarReadError_ReturnsTrue(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("original content")
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), content, 0o644)
+	os.Mkdir(filepath.Join(dir, ".scribe-base.md"), 0o755)
+
+	if !IsLocallyModified(dir, ComputeFileHash(content)) {
+		t.Error("sidecar read errors other than not-exist should report modified")
+	}
+}
+
+func TestIsLocallyModified_MissingSkill_ReturnsFalse(t *testing.T) {
+	dir := t.TempDir()
+	hash := ComputeFileHash([]byte("content"))
+
 	if IsLocallyModified(filepath.Join(dir, "nonexistent"), hash) {
 		t.Error("missing file should not report modified")
 	}
