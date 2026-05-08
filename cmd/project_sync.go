@@ -20,6 +20,7 @@ import (
 	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/projectstore"
+	"github.com/Naoray/scribe/internal/skillmd"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -210,7 +211,7 @@ func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendor
 func vendorProjectSkill(projectRoot, srcDir, name string, opts *projectSyncOptions) (bool, error) {
 	dstDir := filepath.Join(projectRoot, ".ai", "skills", name)
 	if opts.check {
-		srcHash, err := lockfile.HashSet(srcDir)
+		srcHash, err := normalizedProjectSkillHash(srcDir, name)
 		if err != nil {
 			return false, err
 		}
@@ -223,11 +224,46 @@ func vendorProjectSkill(projectRoot, srcDir, name string, opts *projectSyncOptio
 	if err := copyDir(srcDir, dstDir, opts.force); err != nil {
 		return false, err
 	}
+	if err := normalizeVendoredSkill(dstDir, name); err != nil {
+		return false, err
+	}
 	hash, err := lockfile.HashSet(dstDir)
 	if err != nil {
 		return false, err
 	}
 	return false, projectstore.WriteMarker(dstDir, hash, "scribe", time.Now())
+}
+
+func normalizedProjectSkillHash(srcDir, name string) (string, error) {
+	tmp, err := os.MkdirTemp("", "scribe-project-skill-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	dst := filepath.Join(tmp, name)
+	if err := copyDir(srcDir, dst, false); err != nil {
+		return "", err
+	}
+	if err := normalizeVendoredSkill(dst, name); err != nil {
+		return "", err
+	}
+	return lockfile.HashSet(dst)
+}
+
+func normalizeVendoredSkill(skillDir, name string) error {
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	content, err := os.ReadFile(skillPath)
+	if err != nil {
+		return err
+	}
+	_, normalized, err := skillmd.Normalize(name, content)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(skillPath, normalized, 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(skillDir, ".scribe-base.md"), normalized, 0o644)
 }
 
 func projectEntryFromState(name string, installed state.InstalledSkill) (lockfile.ProjectEntry, error) {

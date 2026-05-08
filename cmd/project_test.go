@@ -97,6 +97,13 @@ func TestProjectSyncVendorsProjectSkillAndPinsRegistrySkill(t *testing.T) {
 	if _, _, err := projectstore.VerifyMarker(filepath.Join(project, ".ai", "skills", "review")); err != nil {
 		t.Fatalf("verify vendored marker: %v", err)
 	}
+	vendored, err := os.ReadFile(filepath.Join(project, ".ai", "skills", "review", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read vendored skill: %v", err)
+	}
+	if !strings.HasPrefix(string(vendored), "---\nname: review\ndescription: \"\"\n---\n\n") {
+		t.Fatalf("vendored skill was not normalized for project sync:\n%s", vendored)
+	}
 	if _, err := os.Stat(filepath.Join(project, ".ai", "kits", "core.yaml")); err != nil {
 		t.Fatalf("project kit missing: %v", err)
 	}
