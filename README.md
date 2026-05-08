@@ -7,7 +7,7 @@
 |___/\___|_|_\___|___/___|
 ```
 
-> Agent-first skill manager for any AI coding agent. Built-in support for Claude Code, Codex, Cursor, and Gemini; register any other agent with `scribe tools add`. Your team's AI coding skills, always in sync — one manifest, one command.
+> Agent-first skill manager for any AI coding agent. North star: "make agents usable on my machine." Built-in support for Claude Code, Codex, Cursor, and Gemini; register any other agent with `scribe tools add`. Your team's AI coding skills, always in sync — one manifest, one command.
 
 <!-- TODO: hero terminal screenshot or asciinema GIF of `scribe list` TUI -->
 
