@@ -113,7 +113,11 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 	if yes || !isTTY {
 		// Auto mode: adopt clean candidates, skip conflicts.
 		if len(plan.Conflicts) > 0 {
-			formatter.OnAdoptionConflictsDeferred(len(plan.Conflicts))
+			names := make([]string, 0, len(plan.Conflicts))
+			for _, c := range plan.Conflicts {
+				names = append(names, c.Name)
+			}
+			formatter.OnAdoptionConflictsDeferred(names)
 		}
 		finalCandidates = adopt.Resolve(plan, nil) // nil decisions → all conflicts skipped
 	} else {

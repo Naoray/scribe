@@ -42,10 +42,11 @@ type adoptCompleteCall struct {
 }
 
 // No-ops for non-adoption Formatter methods.
+func (r *adoptRecorder) OnSyncStart(_ int)                             {}
 func (r *adoptRecorder) OnRegistryStart(_ string)                      {}
 func (r *adoptRecorder) OnSkillResolved(_ string, _ isync.SkillStatus) {}
 func (r *adoptRecorder) OnSkillDownloading(_ string)                   {}
-func (r *adoptRecorder) OnSkillInstalled(_ string, _ bool)             {}
+func (r *adoptRecorder) OnSkillInstalled(_ string, _ bool, _ int)      {}
 func (r *adoptRecorder) OnSkillSkipped(_ string, _ isync.SkillStatus)  {}
 func (r *adoptRecorder) OnSkillSkippedByDenyList(_, _ string)          {}
 func (r *adoptRecorder) OnSkillError(_ string, _ error)                {}
@@ -85,8 +86,8 @@ func (r *adoptRecorder) OnAdopted(name string, targetTools []string) {
 func (r *adoptRecorder) OnAdoptionError(name string, err error) {
 	r.errors = append(r.errors, adoptErrCall{name: name, err: err})
 }
-func (r *adoptRecorder) OnAdoptionConflictsDeferred(count int) {
-	r.conflictsDeferred = append(r.conflictsDeferred, count)
+func (r *adoptRecorder) OnAdoptionConflictsDeferred(names []string) {
+	r.conflictsDeferred = append(r.conflictsDeferred, len(names))
 }
 func (r *adoptRecorder) OnAdoptionComplete(adopted, skipped, failed int) {
 	r.complete = append(r.complete, adoptCompleteCall{adopted, skipped, failed})

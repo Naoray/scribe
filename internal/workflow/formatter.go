@@ -15,10 +15,11 @@ import (
 // never branch on JSON vs text or single vs multi-registry.
 type Formatter interface {
 	// Sync lifecycle
+	OnSyncStart(repoCount int)
 	OnRegistryStart(repo string)
 	OnSkillResolved(name string, status sync.SkillStatus)
 	OnSkillDownloading(name string)
-	OnSkillInstalled(name string, updated bool)
+	OnSkillInstalled(name string, updated bool, revision int)
 	OnSkillSkipped(name string, status sync.SkillStatus)
 	OnSkillSkippedByDenyList(name, registry string)
 	OnSkillError(name string, err error)
@@ -53,7 +54,7 @@ type Formatter interface {
 	OnAdoptionStarted(candidateCount int)
 	OnAdopted(name string, targetTools []string)
 	OnAdoptionError(name string, err error)
-	OnAdoptionConflictsDeferred(count int)
+	OnAdoptionConflictsDeferred(names []string)
 	OnAdoptionComplete(adopted, skipped, failed int)
 
 	// Flush writes any buffered output (JSON mode). Text mode is a no-op.
