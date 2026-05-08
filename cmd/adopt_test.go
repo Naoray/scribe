@@ -153,6 +153,49 @@ func TestAdopt_NoInteractionForcesAuto(t *testing.T) {
 	}
 }
 
+func TestDecideAdoptPlan_ForceBypassesTTYPrompt(t *testing.T) {
+	plan := adopt.Plan{
+		Adopt: []adopt.Candidate{
+			{Name: "clean-skill", LocalPath: "/tmp/clean-skill"},
+		},
+		Conflicts: []adopt.Conflict{
+			{
+				Name:      "conflict-one",
+				Managed:   state.InstalledSkill{InstalledHash: "managed-one"},
+				Unmanaged: adopt.Candidate{Name: "conflict-one", LocalPath: "/tmp/conflict-one"},
+			},
+			{
+				Name:      "conflict-two",
+				Managed:   state.InstalledSkill{InstalledHash: "managed-two"},
+				Unmanaged: adopt.Candidate{Name: "conflict-two", LocalPath: "/tmp/conflict-two"},
+			},
+		},
+	}
+
+	decision := decideAdoptPlan(plan, adoptPlanOptions{
+		Force: true,
+		Yes:   false,
+		IsTTY: true,
+	})
+
+	if decision.NeedsPrompt {
+		t.Fatal("force should resolve conflicts without prompting")
+	}
+	if len(decision.DeferredConflicts) > 0 {
+		t.Fatalf("force should not defer conflicts, got %v", decision.DeferredConflicts)
+	}
+
+	got := make(map[string]bool, len(decision.Candidates))
+	for _, c := range decision.Candidates {
+		got[c.Name] = true
+	}
+	for _, name := range []string{"clean-skill", "conflict-one", "conflict-two"} {
+		if !got[name] {
+			t.Fatalf("expected %q to be selected for adoption; got candidates %v", name, got)
+		}
+	}
+}
+
 // TestAdopt_JSONStructure verifies the dry-run JSON shape for a known fixture.
 func TestAdopt_JSONStructure(t *testing.T) {
 	setupAdoptHome(t, "shape-skill", "# shape-skill\ncontent")

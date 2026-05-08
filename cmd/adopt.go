@@ -114,27 +114,17 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 
 	formatter := workflow.NewFormatterForContext(cmd.Context(), useJSON, false)
 
-	var finalCandidates []adopt.Candidate
+	decision := decideAdoptPlan(plan, adoptPlanOptions{
+		Force: force,
+		Yes:   yes,
+		IsTTY: isTTY,
+	})
+	if len(decision.DeferredConflicts) > 0 {
+		formatter.OnAdoptionConflictsDeferred(decision.DeferredConflicts)
+	}
 
-	if yes || !isTTY {
-		// Auto mode: adopt clean candidates. With --force, override conflicts
-		// by replacing the managed copy. Without --force, defer them.
-		var decisions map[string]adopt.Decision
-		if force && len(plan.Conflicts) > 0 {
-			decisions = make(map[string]adopt.Decision, len(plan.Conflicts))
-			for _, c := range plan.Conflicts {
-				decisions[c.Name] = adopt.DecisionOverwriteManaged
-			}
-		} else if len(plan.Conflicts) > 0 {
-			names := make([]string, 0, len(plan.Conflicts))
-			for _, c := range plan.Conflicts {
-				names = append(names, c.Name)
-			}
-			formatter.OnAdoptionConflictsDeferred(names)
-		}
-		finalCandidates = adopt.Resolve(plan, decisions)
-	} else {
-		// Interactive TTY: prompt for each conflict.
+	finalCandidates := decision.Candidates
+	if decision.NeedsPrompt {
 		var err error
 		finalCandidates, err = promptAdoptPlan(plan)
 		if err != nil {
@@ -182,6 +172,43 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+type adoptPlanOptions struct {
+	Force bool
+	Yes   bool
+	IsTTY bool
+}
+
+type adoptPlanDecision struct {
+	Candidates        []adopt.Candidate
+	DeferredConflicts []string
+	NeedsPrompt       bool
+}
+
+func decideAdoptPlan(plan adopt.Plan, opts adoptPlanOptions) adoptPlanDecision {
+	if opts.Force {
+		decisions := make(map[string]adopt.Decision, len(plan.Conflicts))
+		for _, c := range plan.Conflicts {
+			decisions[c.Name] = adopt.DecisionOverwriteManaged
+		}
+		return adoptPlanDecision{Candidates: adopt.Resolve(plan, decisions)}
+	}
+
+	if opts.Yes || !opts.IsTTY {
+		decision := adoptPlanDecision{
+			Candidates: adopt.Resolve(plan, nil),
+		}
+		if len(plan.Conflicts) > 0 {
+			decision.DeferredConflicts = make([]string, 0, len(plan.Conflicts))
+			for _, c := range plan.Conflicts {
+				decision.DeferredConflicts = append(decision.DeferredConflicts, c.Name)
+			}
+		}
+		return decision
+	}
+
+	return adoptPlanDecision{NeedsPrompt: true}
 }
 
 // filterPlanByName returns a plan containing only the candidate or conflict with the given name.
