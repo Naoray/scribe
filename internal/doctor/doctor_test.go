@@ -595,6 +595,55 @@ func TestDoctor_WarnsMigrationBudgetOverflow(t *testing.T) {
 	t.Fatalf("Issues = %+v, want migration budget overflow", report.Issues)
 }
 
+func TestDoctor_WarnsGlobalListingBudgetOverflow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	old := budget.AgentBudgets
+	budget.AgentBudgets = map[string]int{"claude": 50}
+	t.Cleanup(func() { budget.AgentBudgets = old })
+	writeSkill(t, "small", []byte("---\nname: small\ndescription: "+strings.Repeat("s", 20)+"\n---\n"))
+	writeSkill(t, "large", []byte("---\nname: large\ndescription: "+strings.Repeat("l", 80)+"\n---\n"))
+	st := &state.State{
+		SchemaVersion: 5,
+		Installed: map[string]state.InstalledSkill{
+			"small": {
+				Revision:  1,
+				Tools:     []string{"claude"},
+				ToolsMode: state.ToolsModePinned,
+			},
+			"large": {
+				Revision:  1,
+				Tools:     []string{"claude"},
+				ToolsMode: state.ToolsModePinned,
+			},
+		},
+	}
+	report, err := InspectManagedSkills(nil, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+	var matches []Issue
+	for _, issue := range report.Issues {
+		if issue.Kind == IssueGlobalListingBudgetOverflow {
+			matches = append(matches, issue)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("global listing budget issues = %d, want 1: %+v", len(matches), report.Issues)
+	}
+	issue := matches[0]
+	if issue.Tool != "claude" {
+		t.Fatalf("Tool = %q, want claude", issue.Tool)
+	}
+	if len(issue.LargestSkills) != 2 {
+		t.Fatalf("LargestSkills = %+v, want 2 entries", issue.LargestSkills)
+	}
+	if issue.LargestSkills[0].Skill != "large" {
+		t.Fatalf("largest skill = %q, want large: %+v", issue.LargestSkills[0].Skill, issue.LargestSkills)
+	}
+}
+
 func TestDoctor_NoNewWarningsAfterMigrate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

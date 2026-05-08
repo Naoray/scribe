@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/doctor"
 	"github.com/Naoray/scribe/internal/state"
@@ -36,6 +37,61 @@ func TestDoctorCommandReportsIssues(t *testing.T) {
 	}
 	if !strings.Contains(got, "missing a description") {
 		t.Fatalf("expected canonical metadata message in output, got:\n%s", got)
+	}
+}
+
+func TestDoctorTextRendersGlobalListingBudgetIssue(t *testing.T) {
+	report := doctor.Report{Issues: []doctor.Issue{{
+		Tool:          "claude",
+		Kind:          doctor.IssueGlobalListingBudgetOverflow,
+		Status:        "warn",
+		BudgetUsed:    78,
+		BudgetLimit:   80,
+		BudgetPercent: 98,
+		LargestSkills: []budget.Overflow{
+			{Skill: "claude-api", Bytes: 45},
+			{Skill: "obsidian-vault", Bytes: 30},
+		},
+	}}}
+	var out bytes.Buffer
+	if err := writeDoctorText(&out, "", report); err != nil {
+		t.Fatalf("writeDoctorText: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"Claude Code skill-listing budget at 78/80 bytes (98%)",
+		"Largest contributors:",
+		"- claude-api (45 bytes)",
+		"skillListingBudgetFraction",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestDoctorJSONIncludesGlobalListingBudgetDetails(t *testing.T) {
+	report := doctor.Report{Issues: []doctor.Issue{{
+		Tool:          "claude",
+		Kind:          doctor.IssueGlobalListingBudgetOverflow,
+		Status:        "warn",
+		BudgetUsed:    78,
+		BudgetLimit:   80,
+		BudgetPercent: 98,
+		LargestSkills: []budget.Overflow{
+			{Skill: "claude-api", Bytes: 45},
+		},
+	}}}
+	out := buildDoctorReportJSON("", report)
+	if len(out.Issues) != 1 {
+		t.Fatalf("issues = %d, want 1", len(out.Issues))
+	}
+	issue := out.Issues[0]
+	if issue.BudgetUsed != 78 || issue.BudgetLimit != 80 || issue.BudgetPercent != 98 {
+		t.Fatalf("budget fields = %+v, want used/limit/percent", issue)
+	}
+	if len(issue.LargestSkills) != 1 || issue.LargestSkills[0].Skill != "claude-api" || issue.LargestSkills[0].Bytes != 45 {
+		t.Fatalf("largest skills = %+v, want claude-api byte details", issue.LargestSkills)
 	}
 }
 
