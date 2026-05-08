@@ -18,7 +18,7 @@ Effect: a session's skill set is determined by `cwd`. Two repos see two differen
 
 ## `.scribe.yaml`
 
-A `.scribe.yaml` at a project root declares the project's intent. All keys are optional.
+A `.scribe.yaml` at a project root declares the project's intent. All keys are optional. Run `scribe project init` to scaffold the file, optionally with `--kits web,backend` for non-interactive setup.
 
 ```yaml
 # .scribe.yaml — committed to the repo so the team shares the same skill set

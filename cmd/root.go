@@ -283,6 +283,7 @@ func newRootCmd() *cobra.Command {
 		newAdoptCommand(),
 		newStatusCommand(),
 		newInitCommand(),
+		newProjectCommand(),
 		newShowCommand(),
 		newSchemaCommand(cmd),
 		newResolveCommand(),

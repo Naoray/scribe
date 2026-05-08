@@ -71,10 +71,14 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe init` | --force, --json | yes |
 | `scribe install` | --alias, --all, --force, --json, --registry | no |
 | `scribe kit create` | --description, --force, --json, --mcp-servers, --registry, --skills | no |
+| `scribe kit list` | --fields, --json | no |
+| `scribe kit show` | --json | no |
 | `scribe kit` | --json | no |
 | `scribe list` | --fields, --json, --registry, --remote | yes |
 | `scribe migrate global-to-projects` | --dry-run, --force, --json, --no-interaction, --project, --undo | yes |
 | `scribe migrate` | --json | no |
+| `scribe project init` | --force, --json, --kits | yes |
+| `scribe project` | --json | no |
 | `scribe push` | --json | yes |
 | `scribe registry add` | --install, --json, --no-interaction, --registry | no |
 | `scribe registry connect` | --install-all, --json | yes |
