@@ -192,6 +192,9 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.substate == listSubstateUpdateChoice {
 		return m.updateUpdateChoice(msg)
 	}
+	if m.substate == listSubstateUpdateConflictExists {
+		return m.updateUpdateConflictExists(msg)
+	}
 	if m.substate == listSubstateTools {
 		return m.updateToolsEditor(msg)
 	}
@@ -461,6 +464,24 @@ func (m listModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m listModel) updateUpdateChoice(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "tab":
+		if m.activeViewport == viewportYours {
+			m.activeViewport = viewportIncoming
+		} else {
+			m.activeViewport = viewportYours
+		}
+		return m, nil
+	case "j", "down", "k", "up", "pgdown", "pagedown", "d", "pgup", "pageup":
+		return m, forwardScrollKey(&m, msg)
+	}
+	if m.updatePreview.err != nil {
+		switch msg.String() {
+		case "m", "r", "u", "enter":
+			m.statusMsg = "Registry unavailable; keep local or cancel."
+			return m, nil
+		}
+	}
 	if !m.updateHasMods {
 		switch msg.String() {
 		case "u", "enter":
@@ -493,6 +514,28 @@ func (m listModel) updateUpdateChoice(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.statusMsg = "Kept local version. Registry update skipped."
 		m.updateHasMods = false
 		return m, nil
+	case "esc", "escape":
+		m = m.clearUpdatePreview()
+		m.substate = listSubstateNone
+		m.statusMsg = ""
+		m.updateHasMods = false
+	}
+	return m, nil
+}
+
+func (m listModel) updateUpdateConflictExists(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "r":
+		if m.cursor < 0 || m.cursor >= len(m.filtered) {
+			return m, nil
+		}
+		row := m.filtered[m.cursor]
+		m = m.clearUpdatePreview()
+		m.substate = listSubstateNone
+		m.statusMsg = ""
+		return m, tea.ExecProcess(exec.Command(os.Args[0], "resolve", row.Name), func(err error) tea.Msg {
+			return commandDoneMsg{err: err}
+		})
 	case "esc", "escape":
 		m = m.clearUpdatePreview()
 		m.substate = listSubstateNone
