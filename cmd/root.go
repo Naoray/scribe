@@ -13,6 +13,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/Naoray/scribe/internal/agent"
 	"github.com/Naoray/scribe/internal/app"
@@ -20,10 +21,20 @@ import (
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/cli/output"
 	"github.com/Naoray/scribe/internal/firstrun"
+	"github.com/Naoray/scribe/internal/logo"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/storemigrate"
 	"github.com/Naoray/scribe/internal/tools"
 )
+
+// termSize returns the stderr terminal width, defaulting to 80 when unknown.
+func termSize() (int, int, error) {
+	w, h, err := term.GetSize(int(os.Stderr.Fd()))
+	if w <= 0 {
+		w = 80
+	}
+	return w, h, err
+}
 
 // Version is set at build time via ldflags.
 var Version = "dev"
@@ -197,6 +208,13 @@ func newRootCmd() *cobra.Command {
 			if len(added) > 0 {
 				out := c.ErrOrStderr()
 				if builtinsFirstRun {
+					// Print the chip+S logo above the welcome banner when stderr
+					// is a TTY. Tests inject a buffer (non-TTY) and still expect
+					// the welcome line to land on stderr untouched.
+					if isatty.IsTerminal(os.Stderr.Fd()) {
+						width, _, _ := termSize()
+						logo.Render(out, resolveVersion(Version, readBuildInfo()), width)
+					}
 					fmt.Fprintln(out, "Welcome to Scribe! Adding built-in registries...")
 					for _, repo := range added {
 						fmt.Fprintf(out, "  + %s\n", repo)
