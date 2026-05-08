@@ -92,6 +92,52 @@ func TestComputeFileHash(t *testing.T) {
 	}
 }
 
+func TestHasConflictMarkers(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "top of file",
+			content: "<<<<<<< HEAD\nlocal\n=======\nupstream\n>>>>>>> feature\n",
+			want:    true,
+		},
+		{
+			name:    "mid file",
+			content: "before\n<<<<<<< feature\nlocal\n=======\nupstream\n>>>>>>> feature\n",
+			want:    true,
+		},
+		{
+			name:    "indented marker",
+			content: "  <<<<<<< nope\n",
+			want:    false,
+		},
+		{
+			name:    "prose marker",
+			content: "this line mentions <<<<<<< as prose\n",
+			want:    false,
+		},
+		{
+			name:    "crlf marker",
+			content: "before\r\n<<<<<<< foo\n",
+			want:    false,
+		},
+		{
+			name:    "empty",
+			content: "",
+			want:    false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasConflictMarkers([]byte(tt.content)); got != tt.want {
+				t.Fatalf("HasConflictMarkers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsLocallyModified_SidecarMatchesSkill_ReturnsFalse(t *testing.T) {
 	dir := t.TempDir()
 	content := []byte("original content")
