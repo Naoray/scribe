@@ -161,6 +161,17 @@ func TestIsLocallyModified_DriftedFallbackHash_TrustsSidecar(t *testing.T) {
 	}
 }
 
+func TestIsLocallyModified_SidecarReadError_ReturnsTrue(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("original content")
+	os.WriteFile(filepath.Join(dir, "SKILL.md"), content, 0o644)
+	os.Mkdir(filepath.Join(dir, ".scribe-base.md"), 0o755)
+
+	if !IsLocallyModified(dir, ComputeFileHash(content)) {
+		t.Error("sidecar read errors other than not-exist should report modified")
+	}
+}
+
 func TestIsLocallyModified_MissingSkill_ReturnsFalse(t *testing.T) {
 	dir := t.TempDir()
 	hash := ComputeFileHash([]byte("content"))

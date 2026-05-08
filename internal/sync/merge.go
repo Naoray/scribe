@@ -89,9 +89,10 @@ func normalizeLineEndings(content []byte) []byte {
 }
 
 // IsLocallyModified checks if SKILL.md has been modified since last sync.
-// When .scribe-base.md exists, it is the source of truth and is compared
-// directly with SKILL.md. installedHash is only a legacy fallback for installs
-// that do not have a sidecar yet.
+// When .scribe-base.md is readable, it is the source of truth and is compared
+// directly with SKILL.md. When .scribe-base.md is missing, installedHash is the
+// legacy fallback for installs that do not have a sidecar yet. Other sidecar
+// read errors are treated conservatively as locally modified.
 func IsLocallyModified(skillDir string, installedHash string) bool {
 	content, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 	if err != nil {
@@ -101,6 +102,9 @@ func IsLocallyModified(skillDir string, installedHash string) bool {
 	base, err := os.ReadFile(filepath.Join(skillDir, ".scribe-base.md"))
 	if err == nil {
 		return !bytes.Equal(normalizeLineEndings(content), normalizeLineEndings(base))
+	}
+	if !os.IsNotExist(err) {
+		return true
 	}
 
 	if installedHash == "" {
