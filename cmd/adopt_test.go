@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Naoray/scribe/internal/adopt"
+	"github.com/Naoray/scribe/internal/state"
 )
 
 // writeTestSkill creates a minimal skill dir with SKILL.md.
@@ -219,5 +222,78 @@ func TestAdopt_NonTTYNoInteractionErrors(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "non-interactive") && !strings.Contains(msg, "--no-interaction") {
 		t.Errorf("expected error mentioning non-interactive or --no-interaction, got: %q", msg)
+	}
+}
+
+// TestWriteDryRunPlan_MockupShape ensures the human-readable adoption plan
+// matches the website mockup: scanning header, Plan: heading, "+ name from
+// <src>" rows, and "! name conflict (use --force)" rows for conflicts.
+func TestWriteDryRunPlan_MockupShape(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("HOME", "/Users/test")
+
+	plan := adopt.Plan{
+		Adopt: []adopt.Candidate{
+			{Name: "tdd", LocalPath: "/Users/test/.claude/skills/tdd"},
+			{Name: "code-review", LocalPath: "/Users/test/.claude/skills/code-review"},
+			{Name: "deploy", LocalPath: "/Users/test/.codex/skills/deploy"},
+		},
+		Conflicts: []adopt.Conflict{
+			{
+				Name:      "commit",
+				Managed:   state.InstalledSkill{InstalledHash: "abc123"},
+				Unmanaged: adopt.Candidate{LocalPath: "/Users/test/.claude/skills/commit", Hash: "def456"},
+			},
+		},
+	}
+
+	scanPaths := []string{
+		"/Users/test/.claude/skills",
+		"/Users/test/.codex/skills",
+	}
+
+	var buf bytes.Buffer
+	writeDryRunPlan(&buf, plan, scanPaths)
+	out := buf.String()
+
+	wantSubs := []string{
+		"→ scanning ~/.claude/skills, ~/.codex/skills",
+		"Plan:",
+		"+ tdd",
+		"from ~/.claude/skills/tdd",
+		"+ code-review",
+		"from ~/.claude/skills/code-review",
+		"+ deploy",
+		"from ~/.codex/skills/deploy",
+		"! commit",
+		"conflict (use --force)",
+	}
+	for _, sub := range wantSubs {
+		if !strings.Contains(out, sub) {
+			t.Errorf("dry-run output missing %q\nfull output:\n%s", sub, out)
+		}
+	}
+
+	// Conflict line must be styled with `!`, not `+`.
+	if strings.Contains(out, "+ commit") {
+		t.Errorf("conflict skill should use '!' marker, not '+': %s", out)
+	}
+}
+
+func TestTildify(t *testing.T) {
+	cases := []struct {
+		path, home, want string
+	}{
+		{"/Users/test/.claude/skills/tdd", "/Users/test", "~/.claude/skills/tdd"},
+		{"/Users/test", "/Users/test", "~"},
+		{"/etc/hosts", "/Users/test", "/etc/hosts"},
+		{"/Users/testing/file", "/Users/test", "/Users/testing/file"}, // prefix-only false match
+		{"", "/Users/test", ""},
+	}
+	for _, c := range cases {
+		got := tildify(c.path, c.home)
+		if got != c.want {
+			t.Errorf("tildify(%q, %q) = %q, want %q", c.path, c.home, got, c.want)
+		}
 	}
 }
