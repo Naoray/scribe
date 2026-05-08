@@ -88,6 +88,24 @@ func normalizeLineEndings(content []byte) []byte {
 	return bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
 }
 
+func HasConflictMarkers(content []byte) bool {
+	if bytes.HasPrefix(content, []byte("<<<<<<< ")) {
+		return true
+	}
+	marker := []byte("\n<<<<<<< ")
+	for offset := 0; ; {
+		idx := bytes.Index(content[offset:], marker)
+		if idx < 0 {
+			return false
+		}
+		absolute := offset + idx
+		if absolute == 0 || content[absolute-1] != '\r' {
+			return true
+		}
+		offset = absolute + len(marker)
+	}
+}
+
 // IsLocallyModified checks if SKILL.md has been modified since last sync.
 // When .scribe-base.md is readable, it is the source of truth and is compared
 // directly with SKILL.md. When .scribe-base.md is missing, installedHash is the
