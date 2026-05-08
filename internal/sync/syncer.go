@@ -351,6 +351,19 @@ func (s *Syncer) RunProject(ctx context.Context, st *state.State, lf *lockfile.P
 	if err != nil {
 		return err
 	}
+	if s.KitFilterEnabled {
+		allowed := make(map[string]bool, len(s.KitFilter))
+		for _, name := range s.KitFilter {
+			allowed[name] = true
+		}
+		filtered := statuses[:0]
+		for _, status := range statuses {
+			if allowed[status.Name] {
+				filtered = append(filtered, status)
+			}
+		}
+		statuses = filtered
+	}
 	byRegistry := map[string][]SkillStatus{}
 	for _, status := range statuses {
 		registry := ""
@@ -405,7 +418,12 @@ func (s *Syncer) projectLockStatuses(lf *lockfile.ProjectLockfile, st *state.Sta
 			}
 			if !sourceCurrent {
 				status = StatusOutdated
-			} else if pin.Type != "package" {
+			} else if pin.Type == "package" {
+				want := CommandHash(pin.Install, pin.Update, pin.Installs, pin.Updates)
+				if pin.InstallCommandHash != "" && installed.CmdHash != "" && installed.CmdHash != want {
+					status = StatusOutdated
+				}
+			} else {
 				hash, err := lockfile.HashSet(filepath.Join(storeDir, pin.Name))
 				if err != nil || hash != pin.ContentHash {
 					status = StatusOutdated

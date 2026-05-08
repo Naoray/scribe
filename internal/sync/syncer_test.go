@@ -153,6 +153,63 @@ func TestRunProject_FetchesPinnedRegistryEntry(t *testing.T) {
 	}
 }
 
+func TestRunProject_KitFilterLimitsLockfilePins(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+	files := []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# skill\n")}}
+	contentHash, err := sync.HashInstallableFiles(files)
+	if err != nil {
+		t.Fatalf("HashInstallableFiles: %v", err)
+	}
+	prov := &mockProvider{files: files}
+	syncer := &sync.Syncer{
+		Provider:         prov,
+		Tools:            []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot:      projectRoot,
+		KitFilter:        []string{"recap"},
+		KitFilterEnabled: true,
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+	lf := &lockfile.ProjectLockfile{
+		FormatVersion: lockfile.SchemaVersion,
+		Kind:          lockfile.ProjectKind,
+		Entries: []lockfile.ProjectEntry{
+			{
+				Entry: lockfile.Entry{
+					Name:           "recap",
+					SourceRegistry: "acme/registry",
+					CommitSHA:      "abc123",
+					ContentHash:    contentHash,
+				},
+				SourceRepo: "acme/source",
+				Path:       "skills/recap",
+				Type:       "skill",
+			},
+			{
+				Entry: lockfile.Entry{
+					Name:           "debugger",
+					SourceRegistry: "acme/registry",
+					CommitSHA:      "abc123",
+					ContentHash:    contentHash,
+				},
+				SourceRepo: "acme/source",
+				Path:       "skills/debugger",
+				Type:       "skill",
+			},
+		},
+	}
+	if err := syncer.RunProject(context.Background(), st, lf); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if _, ok := st.Installed["recap"]; !ok {
+		t.Fatal("recap should be installed")
+	}
+	if _, ok := st.Installed["debugger"]; ok {
+		t.Fatal("debugger should not be installed outside kit filter")
+	}
+}
+
 func TestRun_KitFilterLimitsProjection(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -824,6 +881,65 @@ func TestApply_PackageOutdated_WithUpdateCmd(t *testing.T) {
 	}
 	if executor.commands[0] != updateCmd {
 		t.Errorf("expected update command, got %q", executor.commands[0])
+	}
+}
+
+func TestRunProject_PackageCommandHashDriftUpdates(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	executor := &mockExecutor{}
+	installCmd := "claude plugin install superpowers"
+	oldUpdateCmd := "claude plugin update superpowers --old"
+	newUpdateCmd := "claude plugin update superpowers --new"
+	oldHash := sync.CommandHash(installCmd, oldUpdateCmd, nil, nil)
+	newHash := sync.CommandHash(installCmd, newUpdateCmd, nil, nil)
+
+	syncer := &sync.Syncer{
+		Executor:    executor,
+		TrustAll:    true,
+		ProjectRoot: t.TempDir(),
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"superpowers": {
+			Type:       "package",
+			InstallCmd: installCmd,
+			UpdateCmd:  oldUpdateCmd,
+			CmdHash:    oldHash,
+			Approval:   "approved",
+			Sources: []state.SkillSource{{
+				Registry: "acme/registry",
+				Ref:      "abc123",
+				LastSHA:  "abc123",
+			}},
+		},
+	}}
+	lf := &lockfile.ProjectLockfile{
+		FormatVersion: lockfile.SchemaVersion,
+		Kind:          lockfile.ProjectKind,
+		Entries: []lockfile.ProjectEntry{{
+			Entry: lockfile.Entry{
+				Name:               "superpowers",
+				SourceRegistry:     "acme/registry",
+				CommitSHA:          "abc123",
+				ContentHash:        "package-content",
+				InstallCommandHash: newHash,
+			},
+			SourceRepo: "acme/source",
+			Path:       "packages/superpowers",
+			Type:       "package",
+			Install:    installCmd,
+			Update:     newUpdateCmd,
+		}},
+	}
+
+	if err := syncer.RunProject(context.Background(), st, lf); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if len(executor.commands) != 1 || executor.commands[0] != newUpdateCmd {
+		t.Fatalf("commands = %v, want [%q]", executor.commands, newUpdateCmd)
+	}
+	if got := st.Installed["superpowers"].CmdHash; got != newHash {
+		t.Fatalf("CmdHash = %q, want %q", got, newHash)
 	}
 }
 
