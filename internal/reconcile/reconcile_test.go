@@ -96,6 +96,57 @@ func TestReconcileUsesProjectRootForCodexProjection(t *testing.T) {
 	}
 }
 
+func TestReconcileUsesProjectSkillDirAsCanonical(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+
+	projectSkillDir := filepath.Join(projectRoot, ".ai", "skills", "review")
+	if err := os.MkdirAll(projectSkillDir, 0o755); err != nil {
+		t.Fatalf("mkdir project skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectSkillDir, "SKILL.md"), []byte("# review\n"), 0o644); err != nil {
+		t.Fatalf("write project skill: %v", err)
+	}
+	projectSkillDir, _ = filepath.EvalSymlinks(projectSkillDir)
+
+	projectPath := filepath.Join(projectRoot, ".agents", "skills", "review")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(projectSkillDir, projectPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	st := &state.State{SchemaVersion: state.CurrentSchemaVersion, Installed: map[string]state.InstalledSkill{
+		"review": {
+			Revision:     1,
+			Origin:       state.OriginProject,
+			ManagedPaths: []string{projectPath},
+			Projections: []state.ProjectionEntry{{
+				Project: projectRoot,
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+
+	engine := reconcile.Engine{
+		Tools:       []tools.Tool{tools.CodexTool{}},
+		ProjectRoot: projectRoot,
+		Now:         func() time.Time { return time.Unix(1, 0).UTC() },
+	}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Installed != 0 || summary.Removed != 0 || summary.Relinked != 0 || len(summary.Conflicts) != 0 {
+		t.Fatalf("summary = %+v, want no changes", summary)
+	}
+	if len(actions) != 1 || actions[0].Kind != reconcile.ActionUnchanged || actions[0].Path != projectPath {
+		t.Fatalf("actions = %+v, want unchanged project skill projection", actions)
+	}
+}
+
 func TestReconcileProjectProjectionOverridesGlobalPinnedTools(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

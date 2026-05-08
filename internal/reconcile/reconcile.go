@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -127,7 +128,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			continue
 		}
 
-		canonicalDir := filepath.Join(storeDir, name)
+		canonicalDir := e.canonicalDirForSkill(storeDir, name, skill)
 		expectedTools := skill.EffectiveToolsForProject(activeNames, e.ProjectRoot)
 		expectedPaths := make(map[string]string, len(expectedTools))
 		newManaged := make(map[string]bool)
@@ -266,6 +267,16 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 	}
 
 	return summary, actions, nil
+}
+
+func (e *Engine) canonicalDirForSkill(storeDir, name string, skill state.InstalledSkill) string {
+	if e.ProjectRoot != "" && skill.Origin == state.OriginProject {
+		projectDir := projectstore.Project(e.ProjectRoot).SkillDir(name)
+		if info, err := os.Stat(projectDir); err == nil && info.IsDir() {
+			return projectDir
+		}
+	}
+	return filepath.Join(storeDir, name)
 }
 
 func (e *Engine) removeOrphanedGlobalCodexProjections(st *state.State, storeDir string, byName map[string]tools.Tool) (int, []Action, error) {

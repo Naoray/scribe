@@ -10,7 +10,9 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -116,6 +118,46 @@ func TestStepResolveKitFilter_WithProjectFile(t *testing.T) {
 	}
 	if !b.KitFilterEnabled {
 		t.Fatal("KitFilterEnabled should be true after kit resolution")
+	}
+}
+
+func TestStepResolveKitFilter_TeamShareUsesProjectKits(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, projectfile.Filename), []byte("kits:\n  - team-kit\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, ".ai", "kits"), 0o755); err != nil {
+		t.Fatalf("mkdir project kits: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".ai", "kits", "team-kit.yaml"), []byte("name: team-kit\nskills:\n  - recap\n"), 0o644); err != nil {
+		t.Fatalf("write project kit: %v", err)
+	}
+	if err := projectstore.Project(projectDir).WriteProjectLockfile(&lockfile.ProjectLockfile{
+		FormatVersion: lockfile.SchemaVersion,
+		Kind:          lockfile.ProjectKind,
+	}); err != nil {
+		t.Fatalf("write project lock: %v", err)
+	}
+	t.Chdir(projectDir)
+
+	b := &Bag{
+		ProjectRoot:   projectDir,
+		TeamShareMode: true,
+		State: &state.State{Installed: map[string]state.InstalledSkill{
+			"recap":    {},
+			"debugger": {},
+		}},
+	}
+	if err := StepResolveKitFilter(context.Background(), b); err != nil {
+		t.Fatalf("StepResolveKitFilter: %v", err)
+	}
+	if !b.KitFilterEnabled {
+		t.Fatal("KitFilterEnabled should be true in team-share mode")
+	}
+	if len(b.KitFilter) != 1 || b.KitFilter[0] != "recap" {
+		t.Fatalf("KitFilter = %v, want [recap]", b.KitFilter)
 	}
 }
 
