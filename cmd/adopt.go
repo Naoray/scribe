@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
@@ -40,6 +42,7 @@ Examples:
 	}
 	addNoInteractionFlag(cmd, "Force auto-adopt: adopt clean candidates, skip conflicts", true)
 	cmd.Flags().Bool("dry-run", false, "Print plan without writing anything")
+	cmd.Flags().Bool("force", false, "Override conflicts by replacing the managed copy with the unmanaged one")
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().Bool("verbose", false, "Include paths and hashes in plan output")
 	return markJSONSupported(cmd)
@@ -48,6 +51,7 @@ Examples:
 func runAdopt(cmd *cobra.Command, args []string) error {
 	yes := noInteractionFlagPassed(cmd)
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	force, _ := cmd.Flags().GetBool("force")
 	jsonFlag := jsonFlagPassed(cmd)
 
 	useJSON := jsonFlag || !isatty.IsTerminal(os.Stdout.Fd())
@@ -89,16 +93,18 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	scanPaths, _ := cfg.AdoptionPaths()
+
 	// Bypasses formatter — one-shot output, not an event stream.
 	if dryRun {
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		return printDryRun(cmd, plan, useJSON, verbose)
+		return printDryRun(cmd, plan, scanPaths, useJSON, verbose)
 	}
 
 	// Non-TTY + --json without --no-interaction: also print dry-run style plan.
 	if useJSON && !yes {
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		return printDryRun(cmd, plan, true, verbose)
+		return printDryRun(cmd, plan, scanPaths, true, verbose)
 	}
 
 	resolvedTools, err := tools.ResolveActive(cfg)
@@ -108,16 +114,17 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 
 	formatter := workflow.NewFormatterForContext(cmd.Context(), useJSON, false)
 
-	var finalCandidates []adopt.Candidate
+	decision := decideAdoptPlan(plan, adoptPlanOptions{
+		Force: force,
+		Yes:   yes,
+		IsTTY: isTTY,
+	})
+	if len(decision.DeferredConflicts) > 0 {
+		formatter.OnAdoptionConflictsDeferred(decision.DeferredConflicts)
+	}
 
-	if yes || !isTTY {
-		// Auto mode: adopt clean candidates, skip conflicts.
-		if len(plan.Conflicts) > 0 {
-			formatter.OnAdoptionConflictsDeferred(len(plan.Conflicts))
-		}
-		finalCandidates = adopt.Resolve(plan, nil) // nil decisions → all conflicts skipped
-	} else {
-		// Interactive TTY: prompt for each conflict.
+	finalCandidates := decision.Candidates
+	if decision.NeedsPrompt {
 		var err error
 		finalCandidates, err = promptAdoptPlan(plan)
 		if err != nil {
@@ -167,6 +174,43 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+type adoptPlanOptions struct {
+	Force bool
+	Yes   bool
+	IsTTY bool
+}
+
+type adoptPlanDecision struct {
+	Candidates        []adopt.Candidate
+	DeferredConflicts []string
+	NeedsPrompt       bool
+}
+
+func decideAdoptPlan(plan adopt.Plan, opts adoptPlanOptions) adoptPlanDecision {
+	if opts.Force {
+		decisions := make(map[string]adopt.Decision, len(plan.Conflicts))
+		for _, c := range plan.Conflicts {
+			decisions[c.Name] = adopt.DecisionOverwriteManaged
+		}
+		return adoptPlanDecision{Candidates: adopt.Resolve(plan, decisions)}
+	}
+
+	if opts.Yes || !opts.IsTTY {
+		decision := adoptPlanDecision{
+			Candidates: adopt.Resolve(plan, nil),
+		}
+		if len(plan.Conflicts) > 0 {
+			decision.DeferredConflicts = make([]string, 0, len(plan.Conflicts))
+			for _, c := range plan.Conflicts {
+				decision.DeferredConflicts = append(decision.DeferredConflicts, c.Name)
+			}
+		}
+		return decision
+	}
+
+	return adoptPlanDecision{NeedsPrompt: true}
+}
+
 // filterPlanByName returns a plan containing only the candidate or conflict with the given name.
 func filterPlanByName(p adopt.Plan, name string) adopt.Plan {
 	var filtered adopt.Plan
@@ -205,7 +249,7 @@ type dryRunConflict struct {
 }
 
 // printDryRun outputs the plan without making any writes.
-func printDryRun(cmd *cobra.Command, plan adopt.Plan, useJSON, verbose bool) error {
+func printDryRun(cmd *cobra.Command, plan adopt.Plan, scanPaths []string, useJSON, verbose bool) error {
 	if useJSON {
 		p := dryRunPlan{
 			DryRun:    true,
@@ -233,29 +277,108 @@ func printDryRun(cmd *cobra.Command, plan adopt.Plan, useJSON, verbose bool) err
 		return renderMutatorEnvelope(cmd, p, envelope.StatusOK)
 	}
 
-	// Text output.
-	total := len(plan.Adopt) + len(plan.Conflicts)
-	if total == 0 {
-		fmt.Println("Nothing to adopt.")
-		return nil
+	writeDryRunPlan(cmd.OutOrStdout(), plan, scanPaths)
+	return nil
+}
+
+// writeDryRunPlan renders the human-readable adoption plan.
+func writeDryRunPlan(w io.Writer, plan adopt.Plan, scanPaths []string) {
+	st := newAdoptStyles()
+	home, _ := os.UserHomeDir()
+
+	if pretty := tildifyPaths(scanPaths, home); len(pretty) > 0 {
+		fmt.Fprintln(w, st.dim.Render("→ scanning "+strings.Join(pretty, ", ")))
+		fmt.Fprintln(w)
 	}
 
-	fmt.Printf("Would adopt %d skill(s), %d conflict(s) (dry-run)\n", len(plan.Adopt), len(plan.Conflicts))
+	if len(plan.Adopt) == 0 && len(plan.Conflicts) == 0 {
+		fmt.Fprintln(w, "Nothing to adopt.")
+		return
+	}
+
+	fmt.Fprintln(w, st.bold.Render("Plan:"))
+	colWidth := planColumnWidth(plan)
 	for _, c := range plan.Adopt {
-		if verbose {
-			fmt.Printf("  + %s  (%s) → %s\n", c.Name, strings.Join(c.Targets, ","), c.LocalPath)
-		} else {
-			fmt.Printf("  + %s\n", c.Name)
+		src := tildify(c.LocalPath, home)
+		fmt.Fprintf(w, "  %s %s  %s\n",
+			st.ok.Render("+"),
+			st.bold.Render(padName(c.Name, colWidth)),
+			st.dim.Render("from "+src),
+		)
+	}
+	for _, c := range plan.Conflicts {
+		fmt.Fprintf(w, "  %s %s  %s\n",
+			st.warn.Render("!"),
+			st.bold.Render(padName(c.Name, colWidth)),
+			st.warn.Render("conflict (use --force)"),
+		)
+	}
+}
+
+func planColumnWidth(plan adopt.Plan) int {
+	w := 0
+	for _, c := range plan.Adopt {
+		if l := len([]rune(c.Name)); l > w {
+			w = l
 		}
 	}
 	for _, c := range plan.Conflicts {
-		if verbose {
-			fmt.Printf("  ! %s  conflict: managed=%s unmanaged=%s\n", c.Name, shortHash(c.Managed.InstalledHash), shortHash(c.Unmanaged.Hash))
-		} else {
-			fmt.Printf("  ! %s  (conflict)\n", c.Name)
+		if l := len([]rune(c.Name)); l > w {
+			w = l
 		}
 	}
-	return nil
+	return w
+}
+
+func padName(name string, width int) string {
+	pad := width - len([]rune(name))
+	if pad < 0 {
+		pad = 0
+	}
+	return name + strings.Repeat(" ", pad)
+}
+
+func tildify(p, home string) string {
+	if home == "" || p == "" {
+		return p
+	}
+	if strings.HasPrefix(p, home+string(os.PathSeparator)) {
+		return "~" + p[len(home):]
+	}
+	if p == home {
+		return "~"
+	}
+	return p
+}
+
+func tildifyPaths(paths []string, home string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		out = append(out, tildify(p, home))
+	}
+	return out
+}
+
+type adoptStyles struct {
+	bold lipgloss.Style
+	dim  lipgloss.Style
+	ok   lipgloss.Style
+	warn lipgloss.Style
+}
+
+func newAdoptStyles() adoptStyles {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return adoptStyles{}
+	}
+	return adoptStyles{
+		bold: lipgloss.NewStyle().Bold(true),
+		dim:  lipgloss.NewStyle().Faint(true),
+		ok:   lipgloss.NewStyle().Foreground(lipgloss.Color("#60E890")),
+		warn: lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")),
+	}
 }
 
 // promptAdoptPlan shows a TTY prompt for each conflict and returns the resolved candidate list.

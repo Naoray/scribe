@@ -811,9 +811,10 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 								}
 								_ = EnforceRetention(skillDir, DefaultMaxVersions)
 								s.emit(SkillInstalledMsg{
-									Name:    sk.Name,
-									Updated: true,
-									Merged:  true,
+									Name:     sk.Name,
+									Updated:  true,
+									Merged:   true,
+									Revision: existing.Revision,
 								})
 								summary.Updated++
 								continue
@@ -964,8 +965,9 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			s.emit(SkillInstalledMsg{
-				Name:    installName,
-				Updated: sk.Status == StatusOutdated,
+				Name:     installName,
+				Updated:  sk.Status == StatusOutdated,
+				Revision: nextRevision(installed),
 			})
 			if sk.Status == StatusOutdated {
 				summary.Updated++
@@ -1055,7 +1057,7 @@ func (s *Syncer) promoteProjectProjection(name string, st *state.State, summary 
 	if err := st.Save(); err != nil {
 		s.emit(SkillErrorMsg{Name: name, Err: fmt.Errorf("save state after %s: %w", name, err)})
 	}
-	s.emit(SkillInstalledMsg{Name: name, Updated: true})
+	s.emit(SkillInstalledMsg{Name: name, Updated: true, Revision: next.Revision})
 	summary.Updated++
 }
 

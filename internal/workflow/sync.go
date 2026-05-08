@@ -832,7 +832,11 @@ func StepAdopt(_ context.Context, b *Bag) error {
 	}
 
 	if len(conflicts) > 0 {
-		b.Formatter.OnAdoptionConflictsDeferred(len(conflicts))
+		names := make([]string, 0, len(conflicts))
+		for _, c := range conflicts {
+			names = append(names, c.Name)
+		}
+		b.Formatter.OnAdoptionConflictsDeferred(names)
 	}
 
 	if len(candidates) == 0 {
@@ -889,7 +893,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 			case sync.SkillDownloadingMsg:
 				b.Formatter.OnSkillDownloading(m.Name)
 			case sync.SkillInstalledMsg:
-				b.Formatter.OnSkillInstalled(m.Name, m.Updated)
+				b.Formatter.OnSkillInstalled(m.Name, m.Updated, m.Revision)
 			case sync.SkillErrorMsg:
 				b.Formatter.OnSkillError(m.Name, m.Err)
 			case sync.BudgetWarningMsg:
@@ -953,6 +957,8 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	if ConflictModeForProcess(b.JSONFlag) == ConflictModeInteractive && b.AliasName == "" {
 		syncer.NameConflictResolver = PromptNameConflictResolution
 	}
+
+	b.Formatter.OnSyncStart(len(b.Repos))
 
 	if b.TeamShareMode {
 		projectLock, err := projectstore.Project(b.ProjectRoot).LoadProjectLockfile()
