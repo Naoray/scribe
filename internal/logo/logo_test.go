@@ -40,8 +40,41 @@ func TestRenderCompact(t *testing.T) {
 	if !strings.Contains(out, "/ __|") {
 		t.Error("expected compact logo characters in medium terminal output")
 	}
+	if !strings.Contains(out, ".------.") {
+		t.Error("expected chip motif prepended on compact logo")
+	}
+	if !strings.Contains(out, "|   S  |") {
+		t.Error("expected chip S row on compact logo")
+	}
 	if strings.Contains(out, "███") {
 		t.Error("should not contain full block characters at width 50")
+	}
+}
+
+func TestRenderTiny(t *testing.T) {
+	resetLogoEnv(t)
+
+	var buf bytes.Buffer
+	logo.Render(&buf, "1.0.0", 20)
+
+	out := buf.String()
+	if !strings.Contains(out, ".------.") {
+		t.Error("expected chip motif top border in tiny logo output")
+	}
+	if !strings.Contains(out, "|##    |") {
+		t.Error("expected chip pin-1 row in tiny logo output")
+	}
+	if !strings.Contains(out, "|   S  |") {
+		t.Error("expected chip S row in tiny logo output")
+	}
+	if !strings.Contains(out, "'------'") {
+		t.Error("expected chip motif bottom border in tiny logo output")
+	}
+	if strings.Contains(out, "███") || strings.Contains(out, "/ __|") {
+		t.Error("should not contain larger logo art at width 20")
+	}
+	if !strings.Contains(out, "1.0.0") {
+		t.Error("expected version string in tiny logo output")
 	}
 }
 
@@ -49,14 +82,14 @@ func TestRenderPlainText(t *testing.T) {
 	resetLogoEnv(t)
 
 	var buf bytes.Buffer
-	logo.Render(&buf, "2.0.0", 30)
+	logo.Render(&buf, "2.0.0", 8)
 
 	out := buf.String()
 	if !strings.Contains(out, "Scribe v2.0.0") {
 		t.Errorf("expected plain text fallback, got: %s", out)
 	}
-	if strings.Contains(out, "███") || strings.Contains(out, "/ __|") {
-		t.Error("should not contain any ASCII art at narrow width")
+	if strings.Contains(out, "███") || strings.Contains(out, "/ __|") || strings.Contains(out, ".------.") {
+		t.Error("should not contain any ASCII art at very narrow width")
 	}
 }
 
