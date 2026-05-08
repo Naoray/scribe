@@ -6,10 +6,12 @@ import (
 	"os/exec"
 	"strings"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
+	"github.com/Naoray/scribe/internal/textdiff"
 	"github.com/Naoray/scribe/internal/tools"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -27,6 +29,7 @@ const (
 	listSubstateNone listSubstate = iota
 	listSubstateConfirm
 	listSubstateUpdateChoice
+	listSubstateUpdateConflictExists
 	listSubstateTools
 )
 
@@ -45,7 +48,19 @@ const (
 	focusPreview
 )
 
+type viewportTarget int
+
+const (
+	viewportYours viewportTarget = iota
+	viewportIncoming
+)
+
 type listRow = workflow.ListRow
+
+const (
+	updatePreviewMaxLines = 500
+	updatePreviewMaxBytes = 64 * 1024
+)
 
 type listModel struct {
 	stage          listStage
@@ -74,7 +89,25 @@ type listModel struct {
 	restoreDetail  bool
 	statusMsg      string
 	updateHasMods  bool
-	pendingTickID  int
+	updatePreview  struct {
+		loading           bool
+		err               error
+		requestID         uint64
+		rowName           string
+		rowGroup          string
+		diffYours         string
+		diffIncoming      string
+		diffOverflowed    bool
+		yoursOverflowN    int
+		incomingOverflowN int
+		baseSkillMD       []byte
+		localSkillMD      []byte
+	}
+	viewYours        viewport.Model
+	viewIncoming     viewport.Model
+	activeViewport   viewportTarget
+	previewIDCounter uint64
+	pendingTickID    int
 
 	ctx context.Context
 	bag *workflow.Bag
@@ -89,10 +122,12 @@ type listModel struct {
 
 func newListModel(ctx context.Context, bag *workflow.Bag) listModel {
 	return listModel{
-		stage:  stageLoading,
-		search: bag.InitialQuery,
-		ctx:    ctx,
-		bag:    bag,
+		stage:        stageLoading,
+		search:       bag.InitialQuery,
+		ctx:          ctx,
+		bag:          bag,
+		viewYours:    viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
+		viewIncoming: viewport.New(viewport.WithWidth(0), viewport.WithHeight(0)),
 	}
 }
 
@@ -119,12 +154,13 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 	case tickSpinnerMsg:
-		if m.stage == stageLoading {
+		if m.stage == stageLoading || m.updatePreview.loading || m.backgroundLoad {
 			m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
 			return m, tickSpinnerCmd()
 		}
 		return m, nil
 	case rowsLoadedMsg:
+		m = m.clearUpdatePreview()
 		m.stage = stageBrowse
 		m.rows = msg.rows
 		m.warnings = msg.warnings
@@ -143,6 +179,7 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, nil
 	case registryStatusesLoadedMsg:
+		m = m.clearUpdatePreview()
 		m.backgroundLoad = false
 		m = m.applyRegistryStatuses(msg.statuses)
 		if len(msg.warnings) > 0 {
@@ -172,6 +209,7 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = ""
 		return m, loadRowsCmd(m.ctx, m.bag)
 	case updateDoneMsg:
+		m = m.clearUpdatePreview()
 		if msg.err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
 			return m, nil
@@ -198,6 +236,23 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}))
 		}
 		return m, tea.Batch(cmds...)
+	case upstreamPreviewMsg:
+		if msg.requestID != m.updatePreview.requestID || msg.rowName != m.updatePreview.rowName {
+			return m, nil
+		}
+		m.updatePreview.loading = false
+		m.updatePreview.err = msg.err
+		if msg.err != nil {
+			return m, nil
+		}
+		incoming := textdiff.Unified("SKILL.md", m.updatePreview.baseSkillMD, msg.skillMD)
+		truncatedIncoming, incomingOverflowed := textdiff.TruncateUnified(incoming, updatePreviewMaxLines, updatePreviewMaxBytes)
+		m.updatePreview.diffIncoming = truncatedIncoming
+		m.updatePreview.incomingOverflowN = diffOverflowLines(truncatedIncoming)
+		m.updatePreview.diffOverflowed = m.updatePreview.diffOverflowed || incomingOverflowed
+		m.viewYours.SetContent(m.updatePreview.diffYours)
+		m.viewIncoming.SetContent(m.updatePreview.diffIncoming)
+		return m, nil
 	case toolsSavedMsg:
 		if msg.err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
@@ -242,6 +297,48 @@ func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateList(msg)
 	}
 	return m, nil
+}
+
+func (m listModel) nextPreviewID() (listModel, uint64) {
+	m.previewIDCounter++
+	return m, m.previewIDCounter
+}
+
+func (m listModel) clearUpdatePreview() listModel {
+	if m.updatePreview.requestID != 0 {
+		m.previewIDCounter++
+	}
+	m.updatePreview.loading = false
+	m.updatePreview.err = nil
+	m.updatePreview.requestID = 0
+	m.updatePreview.rowName = ""
+	m.updatePreview.rowGroup = ""
+	m.updatePreview.diffYours = ""
+	m.updatePreview.diffIncoming = ""
+	m.updatePreview.diffOverflowed = false
+	m.updatePreview.yoursOverflowN = 0
+	m.updatePreview.incomingOverflowN = 0
+	m.updatePreview.baseSkillMD = nil
+	m.updatePreview.localSkillMD = nil
+	m.viewYours.SetContent("")
+	m.viewIncoming.SetContent("")
+	return m
+}
+
+func diffOverflowLines(diff string) int {
+	const marker = "… diff truncated: "
+	idx := strings.LastIndex(diff, marker)
+	if idx < 0 {
+		return 0
+	}
+	var n int
+	for _, r := range diff[idx+len(marker):] {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }
 
 func (m listModel) applyRegistryStatuses(statusesByRepo map[string][]sync.SkillStatus) listModel {

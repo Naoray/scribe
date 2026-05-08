@@ -1161,8 +1161,8 @@ func TestExecuteActionUpdate_ModifiedSkillPromptsForStrategy(t *testing.T) {
 	}
 
 	nm, cmd := m.executeAction("update")
-	if cmd != nil {
-		t.Fatal("expected modified skill update to wait for user choice")
+	if cmd == nil {
+		t.Fatal("expected modified skill update to start preview fetch")
 	}
 	lm := nm.(listModel)
 	if lm.substate != listSubstateUpdateChoice {

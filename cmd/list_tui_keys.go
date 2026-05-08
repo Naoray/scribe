@@ -267,11 +267,18 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.updateCommandMode(msg)
 		}
 		text := typedText(msg)
+		previousRowName := ""
+		if m.cursor >= 0 && m.cursor < len(m.filtered) {
+			previousRowName = m.filtered[m.cursor].Name
+		}
 		switch key {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
 				m = m.ensureCursorVisible()
+				if m.filtered[m.cursor].Name != previousRowName {
+					m = m.clearUpdatePreview()
+				}
 				m.actionCursor = 0
 				m.excerptOffset = 0
 				m.statusMsg = ""
@@ -280,6 +287,9 @@ func (m listModel) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 				m = m.ensureCursorVisible()
+				if m.filtered[m.cursor].Name != previousRowName {
+					m = m.clearUpdatePreview()
+				}
 				m.actionCursor = 0
 				m.excerptOffset = 0
 				m.statusMsg = ""
@@ -454,10 +464,12 @@ func (m listModel) updateUpdateChoice(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	if !m.updateHasMods {
 		switch msg.String() {
 		case "u", "enter":
+			m = m.clearUpdatePreview()
 			m.substate = listSubstateNone
 			m.statusMsg = "Updating..."
 			return m, m.runUpdate(updateChoiceMerge)
 		case "esc", "escape":
+			m = m.clearUpdatePreview()
 			m.substate = listSubstateNone
 			m.statusMsg = ""
 		}
@@ -466,19 +478,23 @@ func (m listModel) updateUpdateChoice(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 
 	switch msg.String() {
 	case "m":
+		m = m.clearUpdatePreview()
 		m.substate = listSubstateNone
 		m.statusMsg = "Updating..."
 		return m, m.runUpdate(updateChoiceMerge)
 	case "r":
+		m = m.clearUpdatePreview()
 		m.substate = listSubstateNone
 		m.statusMsg = "Updating..."
 		return m, m.runUpdate(updateChoicePreferTheirs)
 	case "l":
+		m = m.clearUpdatePreview()
 		m.substate = listSubstateNone
 		m.statusMsg = "Kept local version. Registry update skipped."
 		m.updateHasMods = false
 		return m, nil
 	case "esc", "escape":
+		m = m.clearUpdatePreview()
 		m.substate = listSubstateNone
 		m.statusMsg = ""
 		m.updateHasMods = false
@@ -640,16 +656,46 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 		if row.Entry == nil {
 			return m, nil
 		}
-		if rowHasLocalModifications(row, m.bag.State) && !row.Entry.IsPackage() {
+		if row.Entry.IsPackage() {
+			m = m.clearUpdatePreview()
 			m.substate = listSubstateUpdateChoice
-			m.updateHasMods = true
-			m.statusMsg = "Local edits detected. Choose: [r]egistry version, keep [l]ocal version, or [m]erge with upstream."
+			m.updateHasMods = false
+			m.statusMsg = "No local edits detected. Update will replace the local copy with the registry version."
 			return m, nil
 		}
+		base, local, diffYours, yoursOverflowed, yoursOverflowN, err := prepareUpdatePreview(row)
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("Could not read local SKILL.md: %v", err)
+			return m, nil
+		}
+		m = m.clearUpdatePreview()
+		if sync.HasConflictMarkers(local) {
+			m.substate = listSubstateUpdateConflictExists
+			m.updateHasMods = true
+			m.statusMsg = "Unresolved conflict markers in SKILL.md."
+			return m, nil
+		}
+		m, requestID := m.nextPreviewID()
 		m.substate = listSubstateUpdateChoice
-		m.updateHasMods = false
+		m.updateHasMods = rowHasLocalModifications(row, m.bag.State) && !row.Entry.IsPackage()
+		m.updatePreview.loading = true
+		m.updatePreview.requestID = requestID
+		m.updatePreview.rowName = row.Name
+		m.updatePreview.rowGroup = row.Group
+		m.updatePreview.diffYours = diffYours
+		m.updatePreview.diffOverflowed = yoursOverflowed
+		m.updatePreview.yoursOverflowN = yoursOverflowN
+		m.updatePreview.baseSkillMD = base
+		m.updatePreview.localSkillMD = local
+		m.activeViewport = viewportYours
+		m.viewYours.SetContent(diffYours)
+		m.viewIncoming.SetContent("")
+		if m.updateHasMods {
+			m.statusMsg = "Local edits detected. Choose: [r]egistry version, keep [l]ocal version, or [m]erge with upstream."
+			return m, tea.Batch(tickSpinnerCmd(), fetchUpstreamForDiffCmd(m.ctx, m.bag, row, requestID))
+		}
 		m.statusMsg = "No local edits detected. Update will replace the local copy with the registry version."
-		return m, nil
+		return m, tea.Batch(tickSpinnerCmd(), fetchUpstreamForDiffCmd(m.ctx, m.bag, row, requestID))
 	case "adopt":
 		if row.Local == nil || row.Managed {
 			return m, nil
@@ -696,6 +742,7 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m listModel) resetSearch() listModel {
+	m = m.clearUpdatePreview()
 	m.search = ""
 	m.searchMode = false
 	m = m.refreshFiltered()
@@ -710,6 +757,7 @@ func (m listModel) backspaceSearch() listModel {
 		m.searchMode = false
 		return m
 	}
+	m = m.clearUpdatePreview()
 	m.search = m.search[:len(m.search)-1]
 	if m.search == "" {
 		m.searchMode = false
@@ -725,6 +773,7 @@ func (m listModel) appendSearch(key string) listModel {
 	if len(key) != 1 {
 		return m
 	}
+	m = m.clearUpdatePreview()
 	m.searchMode = true
 	m.search += key
 	m = m.refreshFiltered()
