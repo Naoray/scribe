@@ -1,4 +1,24 @@
+## v1.2.0 — 2026-05-08
+
+### Added
+- **List TUI updates can show the diff before you apply** — press `r`, `l`, or `m` to inspect remote, local, or merged skill changes inline before choosing whether to update.
+- **Status, sync, and adopt output now match the website mockups** — command banners, summaries, and action text use the same compact CLI language across the main project workflows.
+- **`scribe doctor` warns when global skill listings exceed agent budgets** — doctor now flags overflow risk before oversized global skill inventories make agent skill discovery noisy.
+
+### Changed
+- **`scribe doctor` text output is easier to scan** — doctor results now group checks, findings, and remediation text with clearer terminal structure.
+
+### Fixed
+- **`scribe sync` no longer reports stale local edits from old installed hashes** — stale `installed_hash` state no longer triggers false-positive "Local edits detected" warnings.
+- **Team-share project sync paths now reconcile shared projects correctly** — project sharing, lockfile hashing, and project-store resolution now converge without dropping expected sync state.
+
+### Documentation
+- **README now leads with engineer workflows** — the project overview was rewritten around concrete `scribe` usage instead of marketing copy.
+- **CONTRIBUTING.md documents the website launch flow** — contributors now have a repo-local guide for website-related changes.
+
 ## v1.1.1 — 2026-05-07
+
+_Backfilled in v1.2.0 release notes — entry was missed at original v1.1.1 cut._
 
 ### Added
 - **`scribe project init` scaffolds project loadouts** — create a committed `.scribe.yaml`, optionally seeded with local kits via `--kits`, with JSON envelope output for agents.
