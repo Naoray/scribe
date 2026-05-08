@@ -42,9 +42,9 @@ For larger changes (new commands, new envelope fields, breaking flag changes), d
 
 ### Prerequisites
 
-- Go 1.22 or newer (`go version`).
+- Go 1.26.1 or newer (`go version`). Check `go.mod` for the current pinned version.
 - `git`.
-- `gh` CLI is recommended for registry commands and authenticated GitHub access; not strictly required for public repos.
+- `gh` CLI authenticated against GitHub. Public-repo browse paths work without it, but every write flow (`registry connect` against private repos, `registry create`, `registry add`, `push`) requires `gh auth login`.
 - macOS or Linux. Windows is not supported.
 
 ### Build and run
@@ -78,7 +78,8 @@ Write table-driven tests where practical. Cover behavior changes, not just happy
 Scribe relies on standard Go tooling:
 
 ```bash
-gofmt -w .
+gofmt -l .          # report unformatted files (CI runs this)
+gofmt -w .          # write formatting in place
 go vet ./...
 ```
 
@@ -115,7 +116,7 @@ When adding or modifying a command, follow these rules:
 - **Bump `format_version` only on breaking shape changes.** Adding a new optional field under `data` is not breaking; renaming or removing a field is.
 - **Ship a JSON Schema.** Migrated commands provide input + output schemas via `scribe schema <command> --json`. Update the schema alongside the implementation; `cmd/schema_test.go` enforces this.
 - **Support `--fields`** on read-only tabular commands when the schema declares projection-friendly fields. Unknown fields are silently ignored.
-- **Auto-detect non-TTY.** Commands emit JSON automatically when stdout is not a TTY or `CI=true`. Do not gate JSON behind `--json` only.
+- **Auto-detect non-TTY.** Commands emit JSON automatically when stdout is not a TTY (the global `CI=true` short-circuit lives in `cmd/root_hub.go`; per-command paths still rely on TTY detection). Do not gate JSON behind `--json` only.
 - **Never write human prose to stdout in JSON mode.** Logs, progress, and warnings go to stderr. The envelope is the entire stdout payload.
 
 If a command genuinely cannot emit JSON yet, return the `JSON_NOT_SUPPORTED` error envelope with exit code `2` and a remediation pointer to the migration tracking issue.
@@ -158,7 +159,7 @@ scribe registry connect my-org/my-skills
 scribe sync
 ```
 
-`registry connect` adds the repo to `~/.scribe/registries.yaml` and fetches its catalog. `sync` then projects the registry's skills into the agents you have detected.
+`registry connect` records the repo in `~/.scribe/config.yaml` (or `config.toml` on legacy installs) and fetches its catalog. `sync` then projects the registry's skills into the agents you have detected.
 
 For one-off discovery without committing:
 
@@ -172,7 +173,7 @@ scribe browse --registry my-org/my-skills
 scribe registry add review-checklist
 ```
 
-This opens a PR against the registry repo with the skill content. You need write access (or fork-and-PR rights) to the registry. See `docs/commands.md` for the full registry command surface — `enable`, `disable`, `forget`, `resync`, `list`, `migrate`.
+This commits the skill directly to the registry's default branch via the GitHub API, so you need push access. If you only have fork rights, push the skill to your fork and open a PR by hand instead. See `docs/commands.md` for the full registry command surface — `enable`, `disable`, `forget`, `resync`, `list`, `migrate`.
 
 ### Registry conventions
 
