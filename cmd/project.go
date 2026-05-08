@@ -5,8 +5,8 @@ import "github.com/spf13/cobra"
 func newProjectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "project",
-		Short: "Manage team-sharable project artifacts",
+		Short: "Manage Scribe project artifacts",
 	}
-	cmd.AddCommand(newProjectSyncCommand(), newProjectSkillCommand())
+	cmd.AddCommand(newProjectInitCommand(), newProjectSyncCommand(), newProjectSkillCommand())
 	return cmd
 }
