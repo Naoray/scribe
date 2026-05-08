@@ -5,8 +5,8 @@ import "github.com/spf13/cobra"
 func newProjectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "project",
-		Short: "Manage the Scribe project file (.scribe.yaml)",
+		Short: "Manage Scribe project artifacts",
 	}
-	cmd.AddCommand(newProjectInitCommand())
+	cmd.AddCommand(newProjectInitCommand(), newProjectSyncCommand(), newProjectSkillCommand())
 	return cmd
 }

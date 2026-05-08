@@ -24,8 +24,8 @@ func TestLoadMissing(t *testing.T) {
 	if len(s.Installed) != 0 {
 		t.Errorf("expected empty Installed, got %d entries", len(s.Installed))
 	}
-	if s.SchemaVersion != 5 {
-		t.Errorf("expected SchemaVersion=5, got %d", s.SchemaVersion)
+	if s.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("expected current SchemaVersion, got %d", s.SchemaVersion)
 	}
 	if s.BinaryUpdateChecks == nil {
 		t.Fatal("expected BinaryUpdateChecks to be initialized")
@@ -75,8 +75,8 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.LastSync.IsZero() {
 		t.Error("expected LastSync to be set")
 	}
-	if loaded.SchemaVersion != 5 {
-		t.Errorf("expected SchemaVersion=5, got %d", loaded.SchemaVersion)
+	if loaded.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("expected current SchemaVersion, got %d", loaded.SchemaVersion)
 	}
 
 	skill, ok := loaded.Installed["gstack"]
@@ -94,6 +94,25 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if skill.InstalledAt.IsZero() {
 		t.Error("expected InstalledAt to be set")
+	}
+}
+
+func TestVendorStateRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	firstSeen := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	s, _ := state.Load()
+	s.VendorState["project-skill"] = state.VendorState{FirstSeenAt: firstSeen}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := loaded.VendorState["project-skill"].FirstSeenAt; !got.Equal(firstSeen) {
+		t.Fatalf("FirstSeenAt = %v, want %v", got, firstSeen)
 	}
 }
 
@@ -465,8 +484,8 @@ func TestStateMigrateV4ToV5InitializesRemovedByUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if st.SchemaVersion != 5 {
-		t.Fatalf("SchemaVersion = %d, want 5", st.SchemaVersion)
+	if st.SchemaVersion != state.CurrentSchemaVersion {
+		t.Fatalf("SchemaVersion = %d, want current schema", st.SchemaVersion)
 	}
 	if st.RemovedByUser == nil {
 		t.Fatal("RemovedByUser is nil, want empty slice")
@@ -492,8 +511,8 @@ func TestLoadEmptyFileReturnsEmptyV5State(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if st.SchemaVersion != 5 {
-		t.Fatalf("SchemaVersion = %d, want 5", st.SchemaVersion)
+	if st.SchemaVersion != state.CurrentSchemaVersion {
+		t.Fatalf("SchemaVersion = %d, want current schema", st.SchemaVersion)
 	}
 	if len(st.Installed) != 0 {
 		t.Fatalf("Installed len = %d, want 0", len(st.Installed))
@@ -538,6 +557,9 @@ func TestStateMigrateLegacyToolsPathsToProjectionsRoundTrip(t *testing.T) {
 	if st.Kits == nil || st.Snippets == nil {
 		t.Fatalf("Kits/Snippets should be initialized: kits=%#v snippets=%#v", st.Kits, st.Snippets)
 	}
+	if st.VendorState == nil {
+		t.Fatal("VendorState should be initialized on v5 migration")
+	}
 
 	if err := st.Save(); err != nil {
 		t.Fatalf("Save migrated: %v", err)
@@ -546,8 +568,8 @@ func TestStateMigrateLegacyToolsPathsToProjectionsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reload migrated: %v", err)
 	}
-	if reloaded.SchemaVersion != 5 {
-		t.Fatalf("SchemaVersion = %d, want 5", reloaded.SchemaVersion)
+	if reloaded.SchemaVersion != state.CurrentSchemaVersion {
+		t.Fatalf("SchemaVersion = %d, want current schema", reloaded.SchemaVersion)
 	}
 	assertGlobalProjection(t, reloaded.Installed["recap"], []string{"claude", "codex"})
 }
@@ -583,8 +605,8 @@ func TestStateMigrateV5DenyListPreservedWhileAddingProjections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load v5 deny-list fixture: %v", err)
 	}
-	if st.SchemaVersion != 5 {
-		t.Fatalf("SchemaVersion = %d, want 5", st.SchemaVersion)
+	if st.SchemaVersion != state.CurrentSchemaVersion {
+		t.Fatalf("SchemaVersion = %d, want current schema", st.SchemaVersion)
 	}
 	assertGlobalProjection(t, st.Installed["recap"], []string{"claude"})
 	if len(st.RemovedByUser) != 1 {
@@ -660,8 +682,8 @@ func TestMigrationNamespacesKeys(t *testing.T) {
 		t.Errorf("expected Revision=1, got %d", skill.Revision)
 	}
 
-	if s.SchemaVersion != 5 {
-		t.Errorf("expected SchemaVersion=5, got %d", s.SchemaVersion)
+	if s.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("expected current SchemaVersion, got %d", s.SchemaVersion)
 	}
 }
 
@@ -851,8 +873,8 @@ func TestStateMigrateV2ToV3(t *testing.T) {
 	if skill.Sources[0].Registry != "ArtistfyHQ/team-skills" || skill.Sources[0].LastSHA != "def456" {
 		t.Errorf("unexpected migrated sources: %v", skill.Sources)
 	}
-	if s.SchemaVersion != 5 {
-		t.Errorf("expected SchemaVersion=5, got %d", s.SchemaVersion)
+	if s.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("expected current SchemaVersion, got %d", s.SchemaVersion)
 	}
 }
 
@@ -889,8 +911,8 @@ func TestMigrationSchemaV2(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 5 {
-		t.Errorf("expected SchemaVersion=5, got %d", s.SchemaVersion)
+	if s.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("expected current SchemaVersion, got %d", s.SchemaVersion)
 	}
 
 	// Qualified key should become bare.
@@ -955,8 +977,8 @@ func TestMigrationPreservesRevisionAndHash(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 5 {
-		t.Errorf("SchemaVersion: got %d, want 5", s.SchemaVersion)
+	if s.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("SchemaVersion: got %d, want current schema", s.SchemaVersion)
 	}
 	skill := s.Installed["gstack"]
 	if skill.Revision != 5 {
@@ -1126,8 +1148,8 @@ func TestMigrationBareKeyCollisionCollapses(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 5 {
-		t.Errorf("expected SchemaVersion 5, got %d", s.SchemaVersion)
+	if s.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("expected current SchemaVersion, got %d", s.SchemaVersion)
 	}
 
 	// Should have exactly one "deploy" key, not two.
@@ -1224,8 +1246,8 @@ func TestMigrationSchemaV4NormalizesBranchBlobSHA(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 5 {
-		t.Errorf("SchemaVersion: got %d, want 5", s.SchemaVersion)
+	if s.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("SchemaVersion: got %d, want current schema", s.SchemaVersion)
 	}
 
 	xray, ok := s.Installed["xray"]
@@ -1329,8 +1351,8 @@ func TestMigrationSchemaV4Idempotent(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if s.SchemaVersion != 5 {
-		t.Errorf("SchemaVersion: got %d, want 5", s.SchemaVersion)
+	if s.SchemaVersion != state.CurrentSchemaVersion {
+		t.Errorf("SchemaVersion: got %d, want current schema", s.SchemaVersion)
 	}
 	xray := s.Installed["xray"]
 	if len(xray.Sources) != 1 {
