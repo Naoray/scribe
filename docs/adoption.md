@@ -5,11 +5,11 @@ If you've been hand-rolling skills in `~/.claude/skills/`, `~/.codex/skills/`, o
 ## Quick start
 
 ```bash
-scribe adopt                 # interactive: review conflicts, adopt clean candidates
-scribe adopt --no-interaction  # auto-adopt all clean candidates
-scribe adopt --dry-run       # preview the plan, no writes
-scribe adopt <name>          # adopt a single named skill
-scribe adopt --json          # machine-readable plan + result
+scribe adopt                    # interactive review + adopt
+scribe adopt --no-interaction   # auto-adopt clean candidates
+scribe adopt --dry-run          # preview, no writes
+scribe adopt <name>             # adopt one skill by name
+scribe adopt --json             # machine-readable plan
 ```
 
 Adopted skills appear with `(local)` in `scribe list`. They have no upstream and stay until you `scribe remove` them.
