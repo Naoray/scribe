@@ -9,9 +9,9 @@ import (
 )
 
 // minWidth is the smallest terminal column count that fits the full lockup.
-// Card (12) + gap (1) + "cribe" art (24) = 37 cols. minWidth = 39 leaves a
+// Card (12) + gap (1) + "cribe" art (28) = 41 cols. minWidth = 43 leaves a
 // 2-col safety margin; below that we fall back to plain text.
-const minWidth = 39
+const minWidth = 43
 
 // Brand palette — pulled directly from the Scribe website (scribe-mark.svg):
 //
@@ -27,7 +27,10 @@ const (
 // FIGlet "Slant" rows split across the chip card (the S) and the wordmark
 // continuation ("cribe") so the lockup reads as one word: [S]cribe.
 //
-// Generated with `figlet -f slant` and adjusted to fit the card.
+// Generated with `figlet -f slant -k` (kerning, no smushing). Default
+// smushing merges the `c` bottom-right with the `r` top, making the `c`
+// look like an `e` with a horizontal bar — kerning keeps each letter
+// visually distinct.
 var (
 	sArt = [5]string{
 		"    _____ ",
@@ -37,11 +40,11 @@ var (
 		" /____/   ",
 	}
 	cribeArt = [5]string{
-		"             _ __       ",
-		"  __________(_) /_  ___ ",
-		` / ___/ ___/ / __ \/ _ \`,
-		"/ /__/ /  / / /_/ /  __/",
-		`\___/_/  /_/_.___/\___/ `,
+		"               _  __        ",
+		"  _____ _____ (_)/ /_   ___ ",
+		` / ___// ___// // __ \ / _ \`,
+		"/ /__ / /   / // /_/ //  __/",
+		`\___//_/   /_//_.___/ \___/ `,
 	}
 )
 
@@ -57,11 +60,11 @@ var (
 //
 //	┌──────────┐
 //	│██        │
-//	│    _____ │             _ __
-//	│   / ___/ │  __________(_) /_  ___
-//	│   \__ \  │ / ___/ ___/ / __ \/ _ \
-//	│  ___/ /  │/ /__/ /  / / /_/ /  __/
-//	│ /____/   │\___/_/  /_/_.___/\___/
+//	│    _____ │               _  __
+//	│   / ___/ │  _____ _____ (_)/ /_   ___
+//	│   \__ \  │ / ___// ___// // __ \ / _ \
+//	│  ___/ /  │/ /__ / /   / // /_/ //  __/
+//	│ /____/   │\___//_/   /_//_.___/ \___/
 //	└──────────┘
 //
 //	v<version>   ·   one skill. every agent.

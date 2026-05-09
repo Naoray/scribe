@@ -47,8 +47,9 @@ func TestRenderLockup(t *testing.T) {
 		}
 	}
 	// "cribe" FIGlet art beside the card — distinctive slices that only
-	// appear in cribe glyphs (not in the S).
-	for _, slice := range []string{"(_) /_", `___/ / __ \`, "_.___/"} {
+	// appear in cribe glyphs (not in the S). Generated with `figlet -k`
+	// (kerning) so c and r stay visually distinct.
+	for _, slice := range []string{"(_)/ /_", "_____ _____", "_.___/"} {
 		if !strings.Contains(plain, slice) {
 			t.Errorf("expected cribe art slice %q, got: %q", slice, plain)
 		}
@@ -96,7 +97,7 @@ func TestRenderNoColor(t *testing.T) {
 			t.Errorf("expected S art slice %q in NO_COLOR mode", slice)
 		}
 	}
-	for _, slice := range []string{"(_) /_", "_.___/"} {
+	for _, slice := range []string{"(_)/ /_", "_.___/"} {
 		if !strings.Contains(out, slice) {
 			t.Errorf("expected cribe art slice %q in NO_COLOR mode", slice)
 		}
