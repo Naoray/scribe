@@ -6,6 +6,8 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 
 ## Daily use
 
+The commands you'll reach for every session — install, list, sync, and keep skills tidy. Most readers can stay in this section.
+
 | Command | What it does |
 |---|---|
 | `scribe` | Open the local skill manager (interactive TUI when stdout is a TTY) |
@@ -33,6 +35,8 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 
 ## Registry management
 
+Connect, create, share, and audit the skill registries this machine pulls from. A registry is a GitHub repo with a `scribe.yaml` and a `skills/` directory.
+
 | Command | What it does |
 |---|---|
 | `scribe registry connect <repo>` | Connect to a skill registry (alias: `scribe connect`) |
@@ -45,6 +49,8 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe registry migrate` | Convert a `scribe.toml` registry to `scribe.yaml` |
 
 ## Skills and tools
+
+Tune individual skills, project-author new ones, and decide which AI tools each skill projects to. Use these once your basic install and sync flow is working.
 
 | Command | What it does |
 |---|---|
@@ -62,12 +68,16 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 
 ## Conflicts and recovery
 
+When the canonical store and a tool-local copy disagree, these commands let you pick a winner or recover after manual edits. Pair with `scribe doctor` to find what needs attention.
+
 | Command | What it does |
 |---|---|
 | `scribe resolve <skill>` | Resolve a sync conflict with `--ours` (keep canonical) or `--theirs` (accept tool-local) |
 | `scribe restore <skill>` | Restore a skill from the canonical store after manual deletion |
 
 ## Configuration
+
+Inspect or change persistent settings stored in `~/.scribe/config.yaml`. These affect every project on this machine.
 
 | Command | What it does |
 |---|---|
@@ -76,6 +86,8 @@ For machine-readable details (input flags, output schema, exit codes), pair this
 | `scribe config adoption` | Show adoption settings (`--mode`, `--add-path`, `--remove-path`) |
 
 ## Other
+
+Schema introspection for agents, version checks, and the interactive setup guide.
 
 | Command | What it does |
 |---|---|
