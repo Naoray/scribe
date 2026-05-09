@@ -59,8 +59,7 @@ var (
 // Layout:
 //
 //	┌──────────┐
-//	│██        │
-//	│    _____ │               _  __
+//	│██  _____ │               _  __
 //	│   / ___/ │  _____ _____ (_)/ /_   ___
 //	│   \__ \  │ / ___// ___// // __ \ / _ \
 //	│  ___/ /  │/ /__ / /   / // /_/ //  __/
@@ -109,14 +108,22 @@ func Render(w io.Writer, version string, width int) {
 
 	const gap = " "
 
-	// Row 1: top frame, no wordmark beside.
+	// Row 1: top frame.
 	fmt.Fprintln(w, inkStyle.Render("┌──────────┐"))
 
-	// Row 2: chip in NW interior, no wordmark beside.
-	fmt.Fprintln(w, inkStyle.Render("│")+chipStyle.Render("██")+inkStyle.Render("        │"))
+	// Row 2: chip overlaid on S row 1 (the chip occupies the NW interior
+	// corner where sArt[0] otherwise has leading whitespace), beside
+	// cribe row 1.
+	row1 := inkStyle.Render("│") +
+		chipStyle.Render("██") +
+		wordStyle.Render(sArt[0][2:]) +
+		inkStyle.Render("│") +
+		gap +
+		wordStyle.Render(cribeArt[0])
+	fmt.Fprintln(w, row1)
 
-	// Rows 3–7: S art inside card + matching "cribe" FIGlet art beside.
-	for i := 0; i < 5; i++ {
+	// Rows 3–6: remaining S art rows + matching "cribe" rows.
+	for i := 1; i < 5; i++ {
 		row := inkStyle.Render("│") +
 			wordStyle.Render(sArt[i]) +
 			inkStyle.Render("│") +
@@ -125,7 +132,7 @@ func Render(w io.Writer, version string, width int) {
 		fmt.Fprintln(w, row)
 	}
 
-	// Row 8: bottom frame.
+	// Row 7: bottom frame.
 	fmt.Fprintln(w, inkStyle.Render("└──────────┘"))
 
 	// Metadata line below the lockup.
@@ -141,8 +148,8 @@ func renderPlain(w io.Writer, versionTail string) {
 	const gap = " "
 
 	fmt.Fprintln(w, "┌──────────┐")
-	fmt.Fprintln(w, "│██        │")
-	for i := 0; i < 5; i++ {
+	fmt.Fprintln(w, "│██"+sArt[0][2:]+"│"+gap+cribeArt[0])
+	for i := 1; i < 5; i++ {
 		fmt.Fprintln(w, "│"+sArt[i]+"│"+gap+cribeArt[i])
 	}
 	fmt.Fprintln(w, "└──────────┘")
