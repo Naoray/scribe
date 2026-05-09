@@ -12,12 +12,14 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/doctor"
+	"github.com/Naoray/scribe/internal/logo"
 	"github.com/Naoray/scribe/internal/skillmd"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
@@ -160,7 +162,15 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		}
 		return r.Flush()
 	}
-	return writeDoctorText(cmd.OutOrStdout(), skillFlag, report)
+	out := cmd.OutOrStdout()
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		width, _, _ := term.GetSize(int(os.Stdout.Fd()))
+		if width <= 0 {
+			width = 80
+		}
+		logo.Render(out, Version, width)
+	}
+	return writeDoctorText(out, skillFlag, report)
 }
 
 func applyDoctorFixes(cfg *config.Config, st *state.State, skillName string, report doctor.Report) ([]doctorFixResult, error) {
