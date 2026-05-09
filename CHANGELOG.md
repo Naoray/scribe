@@ -1,3 +1,12 @@
+## v1.3.0 — 2026-05-09
+
+### Added
+- **New brand mark + wordmark lockup across the CLI** — replaces the old single-line gradient banner with a chip+S brand mark beside a FIGlet "Slant" `cribe` wordmark, mirroring the website logo. Uses the website palette directly (`#15212a` ink, `#f3ede1` cream, `#b9540f` orange chip).
+- **Logo coverage extended to more commands** — `scribe`, `scribe list`, `scribe status`, `scribe doctor`, `scribe upgrade`, `scribe upgrade --check`, and `scribe guide` (interactive) all now print the brand lockup. First-run banner also includes it.
+
+### Changed
+- **Logo respects terminal capabilities** — falls back to plain `Scribe v<x>` below 43 cols, on `TERM=dumb`, and is suppressed entirely with `SCRIBE_NO_BANNER=1`. `NO_COLOR` strips ANSI but keeps the structural lockup.
+
 ## v1.2.0 — 2026-05-08
 
 ### Added
