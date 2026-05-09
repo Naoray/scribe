@@ -30,15 +30,24 @@ func TestRenderLockup(t *testing.T) {
 	logo.Render(&buf, "1.0.13", 80)
 
 	plain := stripANSI(buf.String())
-	// Brand mark frame
-	for _, want := range []string{"┌──────┐", "└──────┘", "│"} {
+	// Brand mark frame — 12 cols total (2 borders + 10 interior).
+	for _, want := range []string{"┌──────────┐", "└──────────┘", "│"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("expected mark frame %q, got: %q", want, plain)
 		}
 	}
-	// Chip square (orange in styled output)
-	if !strings.Contains(plain, "▇") {
-		t.Errorf("expected chip square ▇, got: %q", plain)
+	// Orange chip square in NW interior corner — two cells of █ approximate
+	// a square given the ~2:1 cell aspect ratio of typical terminal fonts.
+	if !strings.Contains(plain, "██") {
+		t.Errorf("expected chip square ██ in NW, got: %q", plain)
+	}
+	// Registration ticks in the other three interior corners. These are
+	// the load-bearing brand cue (matching scribe-mark.svg) — without them
+	// this would just be a plain box.
+	for _, tick := range []string{"┐", "└", "┘"} {
+		if !strings.Contains(plain, tick) {
+			t.Errorf("expected registration tick %q in card interior, got: %q", tick, plain)
+		}
 	}
 	// Wordmark + version live on the middle row of the lockup.
 	if !strings.Contains(plain, "scribe") {
@@ -47,9 +56,13 @@ func TestRenderLockup(t *testing.T) {
 	if !strings.Contains(plain, "v1.0.13") {
 		t.Errorf("expected version, got: %q", plain)
 	}
-	// Italic stylized 'S' inside the mark
+	// Italic stylized 'S' inside the mark.
 	if !strings.Contains(plain, "S") {
 		t.Errorf("expected 'S' inside mark, got: %q", plain)
+	}
+	// Tagline borrowed from the website banner.
+	if !strings.Contains(plain, "one skill. every agent.") {
+		t.Errorf("expected tagline 'one skill. every agent.', got: %q", plain)
 	}
 }
 
@@ -76,14 +89,27 @@ func TestRenderNoColor(t *testing.T) {
 	logo.Render(&buf, "1.0.0", 80)
 
 	out := buf.String()
-	if !strings.Contains(out, "┌──────┐") {
+	if !strings.Contains(out, "┌──────────┐") {
 		t.Error("expected mark frame even with NO_COLOR")
+	}
+	// Chip and registration ticks must survive in NO_COLOR mode — they're
+	// part of the structural mark, not the styling layer.
+	if !strings.Contains(out, "██") {
+		t.Error("expected chip square in NO_COLOR mode")
+	}
+	for _, tick := range []string{"┐", "└", "┘"} {
+		if !strings.Contains(out, tick) {
+			t.Errorf("expected registration tick %q in NO_COLOR mode", tick)
+		}
 	}
 	if !strings.Contains(out, "scribe") {
 		t.Error("expected wordmark even with NO_COLOR")
 	}
 	if !strings.Contains(out, "v1.0.0") {
 		t.Error("expected version even with NO_COLOR")
+	}
+	if !strings.Contains(out, "one skill. every agent.") {
+		t.Error("expected tagline even with NO_COLOR")
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Error("should not contain ANSI escape sequences when NO_COLOR is set")
@@ -127,7 +153,7 @@ func TestRenderZeroWidth(t *testing.T) {
 
 	// Width 0 means "unknown" — assume wide and render the full lockup.
 	plain := stripANSI(buf.String())
-	if !strings.Contains(plain, "┌──────┐") {
+	if !strings.Contains(plain, "┌──────────┐") {
 		t.Errorf("expected lockup for unknown width (0), got: %q", plain)
 	}
 	if !strings.Contains(plain, "v1.0.0") {
