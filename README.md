@@ -7,6 +7,8 @@
 |___/\___|_|_\___|___/___|
 ```
 
+**Website:** [usescribe.dev](https://usescribe.dev) · **Docs:** [usescribe.dev/docs](https://usescribe.dev/docs/)
+
 A skill manager for AI coding agents. One canonical store of `SKILL.md` files, symlinked into `~/.claude/skills/`, `.cursor/rules/`, `~/.agents/skills/`, and Gemini. Project-scoped, lockfile-pinned, and scriptable through a versioned JSON envelope.
 
 For engineers running Claude Code, Cursor, Codex, or Gemini who got tired of copying skill files between four directories.
