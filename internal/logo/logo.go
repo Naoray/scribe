@@ -4,27 +4,39 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
-
-	"image/color"
 
 	"charm.land/lipgloss/v2"
 )
 
-// bannerWidth is the minimum terminal width below which we fall back to plain
-// text. The banner itself is ~30 chars; pad with version + buffer.
-const bannerWidth = 30
+// minWidth is the smallest terminal column count that fits the full lockup.
+// Mark (8) + gap (3) + "scribe" (6) + gap (3) + version tail (~7) ≈ 27.
+const minWidth = 28
 
-// Render writes the Scribe banner and version to w on a single line.
+// Brand palette — pulled directly from the Scribe website (scribe-mark.svg):
 //
-// Layout: `█████ scribe ─────  v<version>`
-//   - blocks + "scribe": cyan→green gradient (left to right)
-//   - "─────" divider: continues the gradient
-//   - " v<version>": dim
+//	#15212a — ink (dark text/frame)
+//	#f3ede1 — cream (page background / inverted ink for dark terminals)
+//	#b9540f — burnt orange (chip accent square in the top-left of the mark)
+const (
+	colorInk    = "#15212a"
+	colorCream  = "#f3ede1"
+	colorOrange = "#b9540f"
+)
+
+// Render writes the Scribe brand lockup and version to w.
 //
-// width is the terminal width in columns. Below bannerWidth, falls back to
-// plain `Scribe v<version>`. Honors SCRIBE_NO_BANNER, TERM=dumb, NO_COLOR.
-// width <= 0 is treated as unknown (assume wide enough for the banner).
+// Layout (mark + wordmark, matching the website's scribe-lockup.svg):
+//
+//	┌──────┐
+//	│▇     │
+//	│      │   scribe   v<version>
+//	│   S  │
+//	└──────┘
+//
+// Colors invert by terminal background so the ink stays legible.
+// Honors SCRIBE_NO_BANNER (suppresses output), TERM=dumb (plain text fallback),
+// NO_COLOR (strips ANSI), and width below minWidth (plain text fallback).
+// width <= 0 is treated as unknown (assume wide enough).
 func Render(w io.Writer, version string, width int) {
 	if os.Getenv("SCRIBE_NO_BANNER") != "" {
 		return
@@ -33,46 +45,52 @@ func Render(w io.Writer, version string, width int) {
 		fmt.Fprintf(w, "Scribe v%s\n", version)
 		return
 	}
-	if width > 0 && width < bannerWidth {
+	if width > 0 && width < minWidth {
 		fmt.Fprintf(w, "Scribe v%s\n", version)
 		return
 	}
 
-	const (
-		blocks  = "█████"
-		name    = " scribe "
-		divider = "─────"
-	)
-	bannerCore := blocks + name + divider // gradient applied across this run
-	versionPart := fmt.Sprintf("  v%s", version)
+	versionTail := fmt.Sprintf("v%s", version)
 
-	noColor := os.Getenv("NO_COLOR") != ""
-	if noColor {
-		fmt.Fprintln(w, bannerCore+versionPart)
-		fmt.Fprintln(w)
+	if os.Getenv("NO_COLOR") != "" {
+		renderPlain(w, versionTail)
 		return
 	}
 
-	colors := gradient(len([]rune(bannerCore)))
-	var sb strings.Builder
-	for i, r := range []rune(bannerCore) {
-		style := lipgloss.NewStyle().Foreground(colors[i]).Bold(true)
-		sb.WriteString(style.Render(string(r)))
+	ink := lipgloss.Color(colorInk)
+	if lipgloss.HasDarkBackground(os.Stdin, os.Stderr) {
+		ink = lipgloss.Color(colorCream)
 	}
-	dim := lipgloss.NewStyle().Faint(true)
-	sb.WriteString(dim.Render(versionPart))
+	orange := lipgloss.Color(colorOrange)
 
-	fmt.Fprintln(w, sb.String())
+	var (
+		inkStyle  = lipgloss.NewStyle().Foreground(ink)
+		chipStyle = lipgloss.NewStyle().Foreground(orange)
+		nameStyle = lipgloss.NewStyle().Foreground(ink).Bold(true).Italic(true)
+		versStyle = lipgloss.NewStyle().Foreground(ink).Faint(true)
+	)
+
+	row1 := inkStyle.Render("┌──────┐")
+	row2 := inkStyle.Render("│") + chipStyle.Render("▇") + inkStyle.Render("     │")
+	row3 := inkStyle.Render("│      │") + "   " + nameStyle.Render("scribe") + "   " + versStyle.Render(versionTail)
+	row4 := inkStyle.Render("│   ") + nameStyle.Render("S") + inkStyle.Render("  │")
+	row5 := inkStyle.Render("└──────┘")
+
+	fmt.Fprintln(w, row1)
+	fmt.Fprintln(w, row2)
+	fmt.Fprintln(w, row3)
+	fmt.Fprintln(w, row4)
+	fmt.Fprintln(w, row5)
 	fmt.Fprintln(w)
 }
 
-// gradient returns n colors blended cyan→green, choosing palette by background.
-func gradient(n int) []color.Color {
-	var start, end string
-	if lipgloss.HasDarkBackground(os.Stdin, os.Stderr) {
-		start, end = "#00B4D8", "#60E890"
-	} else {
-		start, end = "#0077B6", "#2D6A4F"
-	}
-	return lipgloss.Blend1D(n, lipgloss.Color(start), lipgloss.Color(end))
+// renderPlain emits the lockup with no ANSI escapes — used for NO_COLOR mode.
+// Bold/italic styling is also dropped since NO_COLOR consumers want plain text.
+func renderPlain(w io.Writer, versionTail string) {
+	fmt.Fprintln(w, "┌──────┐")
+	fmt.Fprintln(w, "│▇     │")
+	fmt.Fprintln(w, "│      │   scribe   "+versionTail)
+	fmt.Fprintln(w, "│   S  │")
+	fmt.Fprintln(w, "└──────┘")
+	fmt.Fprintln(w)
 }

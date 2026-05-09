@@ -23,41 +23,33 @@ func resetLogoEnv(t *testing.T) {
 	t.Setenv("SCRIBE_NO_BANNER", "")
 }
 
-// firstLine returns the first non-empty line of s.
-func firstLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
-		if line != "" {
-			return line
-		}
-	}
-	return ""
-}
-
-func TestRenderBannerSingleLine(t *testing.T) {
+func TestRenderLockup(t *testing.T) {
 	resetLogoEnv(t)
 
 	var buf bytes.Buffer
 	logo.Render(&buf, "1.0.13", 80)
 
-	out := buf.String()
-	plain := stripANSI(out)
-	first := firstLine(plain)
-	if !strings.Contains(first, "█████") {
-		t.Errorf("expected block characters on first line, got: %q", first)
+	plain := stripANSI(buf.String())
+	// Brand mark frame
+	for _, want := range []string{"┌──────┐", "└──────┘", "│"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected mark frame %q, got: %q", want, plain)
+		}
 	}
-	if !strings.Contains(first, "scribe") {
-		t.Errorf("expected 'scribe' on first line, got: %q", first)
+	// Chip square (orange in styled output)
+	if !strings.Contains(plain, "▇") {
+		t.Errorf("expected chip square ▇, got: %q", plain)
 	}
-	if !strings.Contains(first, "─────") {
-		t.Errorf("expected '─────' divider on first line, got: %q", first)
+	// Wordmark + version live on the middle row of the lockup.
+	if !strings.Contains(plain, "scribe") {
+		t.Errorf("expected 'scribe' wordmark, got: %q", plain)
 	}
-	if !strings.Contains(first, "v1.0.13") {
-		t.Errorf("expected version inline on first line, got: %q", first)
+	if !strings.Contains(plain, "v1.0.13") {
+		t.Errorf("expected version, got: %q", plain)
 	}
-
-	// Banner must be a single visual line — no second pixel-art row.
-	if strings.Count(plain, "█████") > 1 {
-		t.Errorf("expected only one block-character row, got: %q", plain)
+	// Italic stylized 'S' inside the mark
+	if !strings.Contains(plain, "S") {
+		t.Errorf("expected 'S' inside mark, got: %q", plain)
 	}
 }
 
@@ -71,8 +63,8 @@ func TestRenderNarrowFallback(t *testing.T) {
 	if !strings.Contains(out, "Scribe v2.0.0") {
 		t.Errorf("expected plain text fallback at narrow width, got: %q", out)
 	}
-	if strings.Contains(out, "█") {
-		t.Errorf("should not contain block characters at narrow width, got: %q", out)
+	if strings.Contains(out, "┌") {
+		t.Errorf("should not contain mark frame at narrow width, got: %q", out)
 	}
 }
 
@@ -84,11 +76,14 @@ func TestRenderNoColor(t *testing.T) {
 	logo.Render(&buf, "1.0.0", 80)
 
 	out := buf.String()
-	if !strings.Contains(out, "█████") {
-		t.Error("expected block characters even with NO_COLOR")
+	if !strings.Contains(out, "┌──────┐") {
+		t.Error("expected mark frame even with NO_COLOR")
+	}
+	if !strings.Contains(out, "scribe") {
+		t.Error("expected wordmark even with NO_COLOR")
 	}
 	if !strings.Contains(out, "v1.0.0") {
-		t.Error("expected version inline even with NO_COLOR")
+		t.Error("expected version even with NO_COLOR")
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Error("should not contain ANSI escape sequences when NO_COLOR is set")
@@ -106,8 +101,8 @@ func TestRenderDumbTerminal(t *testing.T) {
 	if !strings.Contains(out, "Scribe v1.0.0") {
 		t.Errorf("expected plain text for TERM=dumb, got: %q", out)
 	}
-	if strings.Contains(out, "█") {
-		t.Error("should not contain block characters for TERM=dumb")
+	if strings.Contains(out, "┌") {
+		t.Error("should not contain mark frame for TERM=dumb")
 	}
 }
 
@@ -130,10 +125,10 @@ func TestRenderZeroWidth(t *testing.T) {
 	var buf bytes.Buffer
 	logo.Render(&buf, "1.0.0", 0)
 
-	// Width 0 means "unknown" — assume wide and render the banner.
+	// Width 0 means "unknown" — assume wide and render the full lockup.
 	plain := stripANSI(buf.String())
-	if !strings.Contains(plain, "█████") {
-		t.Errorf("expected banner for unknown width (0), got: %q", plain)
+	if !strings.Contains(plain, "┌──────┐") {
+		t.Errorf("expected lockup for unknown width (0), got: %q", plain)
 	}
 	if !strings.Contains(plain, "v1.0.0") {
 		t.Errorf("expected version in output, got: %q", plain)
