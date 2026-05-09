@@ -1,0 +1,12 @@
+name: Notify website on release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST Cloudflare Pages deploy hook
+        run: curl -fsS -X POST "${{ secrets.SCRIBE_WEBSITE_DEPLOY_HOOK }}"
