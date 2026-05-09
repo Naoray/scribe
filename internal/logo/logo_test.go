@@ -30,8 +30,8 @@ func TestRenderLockup(t *testing.T) {
 	logo.Render(&buf, "1.0.13", 80)
 
 	plain := stripANSI(buf.String())
-	// Brand mark frame — 14 cols total (2 borders + 12 interior).
-	for _, want := range []string{"┌────────────┐", "└────────────┘", "│"} {
+	// Brand mark frame — 12 cols total (2 borders + 10 interior).
+	for _, want := range []string{"┌──────────┐", "└──────────┘", "│"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("expected mark frame %q, got: %q", want, plain)
 		}
@@ -85,7 +85,7 @@ func TestRenderNoColor(t *testing.T) {
 	logo.Render(&buf, "1.0.0", 80)
 
 	out := buf.String()
-	if !strings.Contains(out, "┌────────────┐") {
+	if !strings.Contains(out, "┌──────────┐") {
 		t.Error("expected mark frame even with NO_COLOR")
 	}
 	if !strings.Contains(out, "██") {
@@ -149,7 +149,7 @@ func TestRenderZeroWidth(t *testing.T) {
 
 	// Width 0 means "unknown" — assume wide and render the full lockup.
 	plain := stripANSI(buf.String())
-	if !strings.Contains(plain, "┌────────────┐") {
+	if !strings.Contains(plain, "┌──────────┐") {
 		t.Errorf("expected lockup for unknown width (0), got: %q", plain)
 	}
 	if !strings.Contains(plain, "v1.0.0") {

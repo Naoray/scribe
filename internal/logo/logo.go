@@ -9,9 +9,9 @@ import (
 )
 
 // minWidth is the smallest terminal column count that fits the full lockup.
-// Card (14) + gap (2) + "cribe" art (24) = 40 cols. minWidth = 42 leaves a
+// Card (12) + gap (1) + "cribe" art (24) = 37 cols. minWidth = 39 leaves a
 // 2-col safety margin; below that we fall back to plain text.
-const minWidth = 42
+const minWidth = 39
 
 // Brand palette — pulled directly from the Scribe website (scribe-mark.svg):
 //
@@ -30,11 +30,11 @@ const (
 // Generated with `figlet -f slant` and adjusted to fit the card.
 var (
 	sArt = [5]string{
-		"    _____   ",
-		"   / ___/   ",
-		`   \__ \    `,
-		"  ___/ /    ",
-		" /____/     ",
+		"    _____ ",
+		"   / ___/ ",
+		`   \__ \  `,
+		"  ___/ /  ",
+		" /____/   ",
 	}
 	cribeArt = [5]string{
 		"             _ __       ",
@@ -55,14 +55,14 @@ var (
 //
 // Layout:
 //
-//	┌────────────┐
-//	│██          │
-//	│    _____   │              _ __
-//	│   / ___/   │   __________(_) /_  ___
-//	│   \__ \    │  / ___/ ___/ / __ \/ _ \
-//	│  ___/ /    │ / /__/ /  / / /_/ /  __/
-//	│ /____/     │ \___/_/  /_/_.___/\___/
-//	└────────────┘
+//	┌──────────┐
+//	│██        │
+//	│    _____ │             _ __
+//	│   / ___/ │  __________(_) /_  ___
+//	│   \__ \  │ / ___/ ___/ / __ \/ _ \
+//	│  ___/ /  │/ /__/ /  / / /_/ /  __/
+//	│ /____/   │\___/_/  /_/_.___/\___/
+//	└──────────┘
 //
 //	v<version>   ·   one skill. every agent.
 //
@@ -104,13 +104,13 @@ func Render(w io.Writer, version string, width int) {
 		taglStyle = lipgloss.NewStyle().Foreground(ink).Italic(true)
 	)
 
-	const gap = "  "
+	const gap = " "
 
 	// Row 1: top frame, no wordmark beside.
-	fmt.Fprintln(w, inkStyle.Render("┌────────────┐"))
+	fmt.Fprintln(w, inkStyle.Render("┌──────────┐"))
 
 	// Row 2: chip in NW interior, no wordmark beside.
-	fmt.Fprintln(w, inkStyle.Render("│")+chipStyle.Render("██")+inkStyle.Render("          │"))
+	fmt.Fprintln(w, inkStyle.Render("│")+chipStyle.Render("██")+inkStyle.Render("        │"))
 
 	// Rows 3–7: S art inside card + matching "cribe" FIGlet art beside.
 	for i := 0; i < 5; i++ {
@@ -123,7 +123,7 @@ func Render(w io.Writer, version string, width int) {
 	}
 
 	// Row 8: bottom frame.
-	fmt.Fprintln(w, inkStyle.Render("└────────────┘"))
+	fmt.Fprintln(w, inkStyle.Render("└──────────┘"))
 
 	// Metadata line below the lockup.
 	fmt.Fprintln(w)
@@ -135,14 +135,14 @@ func Render(w io.Writer, version string, width int) {
 // any ANSI escape sequences — for NO_COLOR consumers. Bold/italic styling
 // drops; the structural lockup (chip, S, "cribe" wordmark, tagline) survives.
 func renderPlain(w io.Writer, versionTail string) {
-	const gap = "  "
+	const gap = " "
 
-	fmt.Fprintln(w, "┌────────────┐")
-	fmt.Fprintln(w, "│██          │")
+	fmt.Fprintln(w, "┌──────────┐")
+	fmt.Fprintln(w, "│██        │")
 	for i := 0; i < 5; i++ {
 		fmt.Fprintln(w, "│"+sArt[i]+"│"+gap+cribeArt[i])
 	}
-	fmt.Fprintln(w, "└────────────┘")
+	fmt.Fprintln(w, "└──────────┘")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, versionTail+"   ·   one skill. every agent.")
 	fmt.Fprintln(w)
