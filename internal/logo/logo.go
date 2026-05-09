@@ -9,10 +9,9 @@ import (
 )
 
 // minWidth is the smallest terminal column count that fits the full lockup.
-// Card (14) + gap (3) + tagline "one skill. every agent." (23) ≈ 40.
-// 38 leaves a sliver of slack while still falling back gracefully on
-// genuinely narrow terminals (<38 cols).
-const minWidth = 38
+// Card (14) + gap (2) + "cribe" art (24) = 40 cols. minWidth = 42 leaves a
+// 2-col safety margin; below that we fall back to plain text.
+const minWidth = 42
 
 // Brand palette — pulled directly from the Scribe website (scribe-mark.svg):
 //
@@ -25,24 +24,47 @@ const (
 	colorOrange = "#b9540f"
 )
 
+// FIGlet "Slant" rows split across the chip card (the S) and the wordmark
+// continuation ("cribe") so the lockup reads as one word: [S]cribe.
+//
+// Generated with `figlet -f slant` and adjusted to fit the card.
+var (
+	sArt = [5]string{
+		"    _____   ",
+		"   / ___/   ",
+		`   \__ \    `,
+		"  ___/ /    ",
+		" /____/     ",
+	}
+	cribeArt = [5]string{
+		"             _ __       ",
+		"  __________(_) /_  ___ ",
+		` / ___/ ___/ / __ \/ _ \`,
+		"/ /__/ /  / / /_/ /  __/",
+		`\___/_/  /_/_.___/\___/ `,
+	}
+)
+
 // Render writes the Scribe brand mark + wordmark lockup to w.
 //
 // The mark mirrors public/scribe-mark.svg: a thin-frame square card with
 // an orange "chip" filling the NW interior corner and a calligraphic
-// italic S filling the body of the card. The S is rendered in FIGlet
-// "Slant" style so it actually slants in any terminal — independent of
-// whether the terminal supports italic ANSI styling.
+// italic S filling the body of the card. The wordmark "cribe" continues
+// from the card in the same FIGlet "Slant" font, so the whole reads as
+// "Scribe" with the S styled as a contained brand mark.
 //
 // Layout:
 //
 //	┌────────────┐
 //	│██          │
-//	│    _____   │   scribe   v<version>
-//	│   / ___/   │
-//	│   \__ \    │   one skill. every agent.
-//	│  ___/ /    │
-//	│ /____/     │
+//	│    _____   │              _ __
+//	│   / ___/   │   __________(_) /_  ___
+//	│   \__ \    │  / ___/ ___/ / __ \/ _ \
+//	│  ___/ /    │ / /__/ /  / / /_/ /  __/
+//	│ /____/     │ \___/_/  /_/_.___/\___/
 //	└────────────┘
+//
+//	v<version>   ·   one skill. every agent.
 //
 // Colors invert by terminal background so ink stays legible. Honors
 // SCRIBE_NO_BANNER (suppress), TERM=dumb (plain "Scribe v<version>"),
@@ -78,48 +100,50 @@ func Render(w io.Writer, version string, width int) {
 		inkStyle  = lipgloss.NewStyle().Foreground(ink)
 		dimStyle  = lipgloss.NewStyle().Foreground(ink).Faint(true)
 		chipStyle = lipgloss.NewStyle().Foreground(orange).Bold(true)
-		sStyle    = lipgloss.NewStyle().Foreground(ink).Bold(true)
-		nameStyle = lipgloss.NewStyle().Foreground(ink).Bold(true).Italic(true)
+		wordStyle = lipgloss.NewStyle().Foreground(ink).Bold(true)
 		taglStyle = lipgloss.NewStyle().Foreground(ink).Italic(true)
 	)
 
-	// Frame: 14 cells wide (2 borders + 12 interior).
-	// Body of the card holds a 5-row FIGlet "Slant" S, drawn in ink, with
-	// the orange chip occupying the NW interior corner on row 1.
-	top := inkStyle.Render("┌────────────┐")
-	bot := inkStyle.Render("└────────────┘")
+	const gap = "  "
 
-	row1 := inkStyle.Render("│") + chipStyle.Render("██") + inkStyle.Render("          │")
-	row2 := inkStyle.Render("│    ") + sStyle.Render("_____") + inkStyle.Render("   │") +
-		"   " + nameStyle.Render("scribe") + "   " + dimStyle.Render(versionTail)
-	row3 := inkStyle.Render("│   ") + sStyle.Render("/ ___/") + inkStyle.Render("   │")
-	row4 := inkStyle.Render("│   ") + sStyle.Render(`\__ \ `) + inkStyle.Render("  │") +
-		"   " + taglStyle.Render("one skill. every agent.")
-	row5 := inkStyle.Render("│  ") + sStyle.Render(`___/ / `) + inkStyle.Render("  │")
-	row6 := inkStyle.Render("│ ") + sStyle.Render(`/____/  `) + inkStyle.Render(" │")
+	// Row 1: top frame, no wordmark beside.
+	fmt.Fprintln(w, inkStyle.Render("┌────────────┐"))
 
-	fmt.Fprintln(w, top)
-	fmt.Fprintln(w, row1)
-	fmt.Fprintln(w, row2)
-	fmt.Fprintln(w, row3)
-	fmt.Fprintln(w, row4)
-	fmt.Fprintln(w, row5)
-	fmt.Fprintln(w, row6)
-	fmt.Fprintln(w, bot)
+	// Row 2: chip in NW interior, no wordmark beside.
+	fmt.Fprintln(w, inkStyle.Render("│")+chipStyle.Render("██")+inkStyle.Render("          │"))
+
+	// Rows 3–7: S art inside card + matching "cribe" FIGlet art beside.
+	for i := 0; i < 5; i++ {
+		row := inkStyle.Render("│") +
+			wordStyle.Render(sArt[i]) +
+			inkStyle.Render("│") +
+			gap +
+			wordStyle.Render(cribeArt[i])
+		fmt.Fprintln(w, row)
+	}
+
+	// Row 8: bottom frame.
+	fmt.Fprintln(w, inkStyle.Render("└────────────┘"))
+
+	// Metadata line below the lockup.
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, dimStyle.Render(versionTail)+"   "+inkStyle.Render("·")+"   "+taglStyle.Render("one skill. every agent."))
 	fmt.Fprintln(w)
 }
 
 // renderPlain emits the same glyph layout as the styled path but without
 // any ANSI escape sequences — for NO_COLOR consumers. Bold/italic styling
-// drops; the structural mark (chip, S, wordmark, tagline) survives.
+// drops; the structural lockup (chip, S, "cribe" wordmark, tagline) survives.
 func renderPlain(w io.Writer, versionTail string) {
+	const gap = "  "
+
 	fmt.Fprintln(w, "┌────────────┐")
 	fmt.Fprintln(w, "│██          │")
-	fmt.Fprintln(w, "│    _____   │   scribe   "+versionTail)
-	fmt.Fprintln(w, "│   / ___/   │")
-	fmt.Fprintln(w, `│   \__ \    │   one skill. every agent.`)
-	fmt.Fprintln(w, "│  ___/ /    │")
-	fmt.Fprintln(w, "│ /____/     │")
+	for i := 0; i < 5; i++ {
+		fmt.Fprintln(w, "│"+sArt[i]+"│"+gap+cribeArt[i])
+	}
 	fmt.Fprintln(w, "└────────────┘")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, versionTail+"   ·   one skill. every agent.")
 	fmt.Fprintln(w)
 }

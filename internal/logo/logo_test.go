@@ -40,17 +40,20 @@ func TestRenderLockup(t *testing.T) {
 	if !strings.Contains(plain, "██") {
 		t.Errorf("expected chip square ██ in NW, got: %q", plain)
 	}
-	// FIGlet "Slant" S art — five distinctive rows. Check the top and
-	// bottom rows which are unambiguous markers of this glyph.
+	// FIGlet "Slant" S art inside the card — distinctive multi-row slices.
 	for _, slice := range []string{"_____", "/ ___/", `\__ \`, "___/ /", "/____/"} {
 		if !strings.Contains(plain, slice) {
 			t.Errorf("expected S art slice %q, got: %q", slice, plain)
 		}
 	}
-	// Wordmark + version + tagline.
-	if !strings.Contains(plain, "scribe") {
-		t.Errorf("expected 'scribe' wordmark, got: %q", plain)
+	// "cribe" FIGlet art beside the card — distinctive slices that only
+	// appear in cribe glyphs (not in the S).
+	for _, slice := range []string{"(_) /_", `___/ / __ \`, "_.___/"} {
+		if !strings.Contains(plain, slice) {
+			t.Errorf("expected cribe art slice %q, got: %q", slice, plain)
+		}
 	}
+	// Version + tagline below the lockup.
 	if !strings.Contains(plain, "v1.0.13") {
 		t.Errorf("expected version, got: %q", plain)
 	}
@@ -93,8 +96,10 @@ func TestRenderNoColor(t *testing.T) {
 			t.Errorf("expected S art slice %q in NO_COLOR mode", slice)
 		}
 	}
-	if !strings.Contains(out, "scribe") {
-		t.Error("expected wordmark even with NO_COLOR")
+	for _, slice := range []string{"(_) /_", "_.___/"} {
+		if !strings.Contains(out, slice) {
+			t.Errorf("expected cribe art slice %q in NO_COLOR mode", slice)
+		}
 	}
 	if !strings.Contains(out, "v1.0.0") {
 		t.Error("expected version even with NO_COLOR")
