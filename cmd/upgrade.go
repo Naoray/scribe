@@ -10,9 +10,11 @@ import (
 	gogithub "github.com/google/go-github/v69/github"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/logo"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/upgrade"
 )
@@ -50,6 +52,14 @@ func newUpgradeCommand() *cobra.Command {
 func runUpgrade(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	factory := newCommandFactory()
+
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		width, _, _ := term.GetSize(int(os.Stdout.Fd()))
+		if width <= 0 {
+			width = 80
+		}
+		logo.Render(os.Stdout, Version, width)
+	}
 
 	// Dev builds should not attempt self-upgrade.
 	isDevBuild, _ := upgrade.NeedsUpgrade(currentVersion(), "")

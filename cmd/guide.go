@@ -8,10 +8,13 @@ import (
 
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	clienv "github.com/Naoray/scribe/internal/cli/env"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	"github.com/Naoray/scribe/internal/logo"
 	"github.com/Naoray/scribe/internal/prereq"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -132,8 +135,16 @@ func buildGuideOutput() guideOutput {
 
 // displayPrereqs shows prereq status with styled icons.
 func displayPrereqs(result prereq.Result) {
-	fmt.Println()
-	fmt.Println(guideTitleStyle.Render("Scribe Guide"))
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		width, _, _ := term.GetSize(int(os.Stdout.Fd()))
+		if width <= 0 {
+			width = 80
+		}
+		logo.Render(os.Stdout, Version, width)
+	} else {
+		fmt.Println()
+		fmt.Println(guideTitleStyle.Render("Scribe Guide"))
+	}
 	fmt.Println()
 
 	if result.GitHubAuth.OK {
