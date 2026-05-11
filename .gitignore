@@ -1,8 +1,3 @@
 agents/
 entities.json
 mempalace.yaml
-.agents/
-.claude/settings.json
-.claude/skills/
-.codex/
-.lean-ctx/
