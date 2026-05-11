@@ -55,8 +55,9 @@ func (f *syncTestFetcher) GetTree(ctx context.Context, owner, repo, ref string) 
 
 // mockProvider implements provider.Provider for tests.
 type mockProvider struct {
-	entries []manifest.Entry
-	files   []tools.SkillFile
+	entries        []manifest.Entry
+	files          []tools.SkillFile
+	fetchedSources []string
 }
 
 func (m *mockProvider) Discover(_ context.Context, repo string) (*provider.DiscoverResult, error) {
@@ -64,11 +65,46 @@ func (m *mockProvider) Discover(_ context.Context, repo string) (*provider.Disco
 }
 
 func (m *mockProvider) Fetch(_ context.Context, entry manifest.Entry) ([]provider.File, error) {
+	m.fetchedSources = append(m.fetchedSources, entry.Source)
 	out := make([]provider.File, len(m.files))
 	for i, f := range m.files {
 		out[i] = provider.File{Path: f.Path, Content: f.Content}
 	}
 	return out, nil
+}
+
+func TestRunPinnedSkillSourceOverridesManifestSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	commit := "0123456789abcdef0123456789abcdef01234567"
+	provider := &mockProvider{
+		entries: []manifest.Entry{{Name: "tdd", Source: "github:other/skills@main"}},
+		files:   []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# tdd\n")}},
+	}
+	syncer := &sync.Syncer{
+		Client:             &sync.NoopFetcher{},
+		Provider:           provider,
+		Tools:              []tools.Tool{testProjectionTool{root: filepath.Join(home, ".test-tool")}},
+		PinnedSkillSources: map[string]string{"tdd": "github:other/skills@" + commit},
+		SkillFilter:        []string{"tdd"},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+
+	if err := syncer.Run(context.Background(), "other/skills", st); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !reflect.DeepEqual(provider.fetchedSources, []string{"github:other/skills@" + commit}) {
+		t.Fatalf("fetched sources = %#v", provider.fetchedSources)
+	}
+	installed := st.Installed["tdd"]
+	if len(installed.Sources) != 1 {
+		t.Fatalf("sources = %#v", installed.Sources)
+	}
+	source := installed.Sources[0]
+	if source.Registry != "other/skills" || source.SourceRepo != "other/skills" || source.Ref != commit || source.LastSHA != commit {
+		t.Fatalf("source = %#v", source)
+	}
 }
 
 func TestRunProject_ProjectsVendoredBoostSkillWithoutClaude(t *testing.T) {

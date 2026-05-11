@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -360,6 +361,60 @@ func TestKitInstallAliasMappingPassesSkillAlias(t *testing.T) {
 	}
 }
 
+func TestKitInstallPinnedGitHubRefPassesPinnedSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	oldFactory := commandFactory
+	oldFind := findRemoteKitFn
+	oldFetch := fetchRemoteKitFn
+	oldRev := remoteKitRevFn
+	oldDeps := runKitInstallDepsFn
+	t.Cleanup(func() {
+		commandFactory = oldFactory
+		findRemoteKitFn = oldFind
+		fetchRemoteKitFn = oldFetch
+		remoteKitRevFn = oldRev
+		runKitInstallDepsFn = oldDeps
+	})
+	st := stateFixture(t, home)
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) {
+				return &config.Config{Registries: []config.RegistryConfig{
+					{Repo: "acme/skills", Enabled: true},
+					{Repo: "other/skills", Enabled: true},
+				}}, nil
+			},
+			State:  func() (*state.State, error) { return st, nil },
+			Client: func() (*gh.Client, error) { return gh.NewClient(context.Background(), ""), nil },
+		}
+	}
+	findRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, _, name string) (manifest.KitEntry, error) {
+		return manifest.KitEntry{Name: name}, nil
+	}
+	fetchRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, registryRepo string, entry manifest.KitEntry) (*kit.Kit, error) {
+		return &kit.Kit{Name: entry.Name, Skills: []string{"github:other/skills@v1.2.3:tdd"}, Source: &kit.Source{Registry: registryRepo}}, nil
+	}
+	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "abc123", nil }
+	var gotDeps map[string][]kitInstallDep
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep) error {
+		gotDeps = depsByRegistry
+		return nil
+	}
+
+	cmd := newKitInstallCommand()
+	cmd.SetArgs([]string{"acme/skills:baseline"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kit install: %v", err)
+	}
+	want := map[string][]kitInstallDep{"other/skills": {{Name: "tdd", Source: "github:other/skills@v1.2.3"}}}
+	if !reflect.DeepEqual(gotDeps, want) {
+		t.Fatalf("deps = %#v, want %#v", gotDeps, want)
+	}
+}
+
 func TestKitSyncRefreshesInstalledRegistryKit(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -415,5 +470,87 @@ func TestKitSyncRefreshesInstalledRegistryKit(t *testing.T) {
 	want := map[string][]kitInstallDep{"acme/skills": {{Name: "tdd"}}}
 	if !reflect.DeepEqual(gotDeps, want) {
 		t.Fatalf("deps = %#v, want %#v", gotDeps, want)
+	}
+}
+
+func TestKitSyncRefusesToOverwriteLocallyEditedKit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	oldFactory := commandFactory
+	oldFind := findRemoteKitFn
+	oldFetch := fetchRemoteKitFn
+	oldRev := remoteKitRevFn
+	oldDeps := runKitInstallDepsFn
+	t.Cleanup(func() {
+		commandFactory = oldFactory
+		findRemoteKitFn = oldFind
+		fetchRemoteKitFn = oldFetch
+		remoteKitRevFn = oldRev
+		runKitInstallDepsFn = oldDeps
+	})
+	st := stateFixture(t, home)
+	kitDir := filepath.Join(home, ".scribe", "kits")
+	if err := os.MkdirAll(kitDir, 0o755); err != nil {
+		t.Fatalf("mkdir kit dir: %v", err)
+	}
+	kitPath := filepath.Join(kitDir, "baseline.yaml")
+	original := []byte("name: baseline\nskills:\n  - tdd\n")
+	if err := os.WriteFile(kitPath, original, 0o644); err != nil {
+		t.Fatalf("write original kit: %v", err)
+	}
+	hash, err := hashKitFile("baseline", kitPath)
+	if err != nil {
+		t.Fatalf("hash original kit: %v", err)
+	}
+	st.Kits["baseline"] = state.InstalledKit{Name: "baseline", SourceRegistry: "acme/skills", Rev: "old", ContentHash: hash}
+	edited := []byte("name: baseline\nskills:\n  - tdd\n  - local-edit\n")
+	if err := os.WriteFile(kitPath, edited, 0o644); err != nil {
+		t.Fatalf("write edited kit: %v", err)
+	}
+
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) {
+				return &config.Config{Registries: []config.RegistryConfig{{Repo: "acme/skills", Enabled: true}}}, nil
+			},
+			State:  func() (*state.State, error) { return st, nil },
+			Client: func() (*gh.Client, error) { return gh.NewClient(context.Background(), ""), nil },
+		}
+	}
+	findRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, _, name string) (manifest.KitEntry, error) {
+		return manifest.KitEntry{Name: name}, nil
+	}
+	fetchRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, registryRepo string, entry manifest.KitEntry) (*kit.Kit, error) {
+		return &kit.Kit{Name: entry.Name, Skills: []string{"tdd", "upstream"}, Source: &kit.Source{Registry: registryRepo}}, nil
+	}
+	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "new", nil }
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, _ map[string][]kitInstallDep) error {
+		t.Fatal("dependencies should not install after local kit conflict")
+		return nil
+	}
+
+	cmd := newKitSyncCommand()
+	cmd.SetArgs([]string{"--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected local edit conflict")
+	}
+	if got := clierrors.ExitCode(err); got != clierrors.ExitConflict {
+		t.Fatalf("exit = %d, want %d; err=%v", got, clierrors.ExitConflict, err)
+	}
+	if !strings.Contains(err.Error(), "local edits") {
+		t.Fatalf("error = %v, want local edits message", err)
+	}
+	got, err := os.ReadFile(kitPath)
+	if err != nil {
+		t.Fatalf("read kit path: %v", err)
+	}
+	if string(got) != string(edited) {
+		t.Fatalf("kit file was overwritten:\n%s", got)
+	}
+	if st.Kits["baseline"].Rev != "old" {
+		t.Fatalf("state rev = %q, want old", st.Kits["baseline"].Rev)
 	}
 }

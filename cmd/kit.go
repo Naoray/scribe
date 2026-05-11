@@ -524,8 +524,9 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 }
 
 type kitInstallDep struct {
-	Name  string
-	Alias string
+	Name   string
+	Alias  string
+	Source string
 }
 
 func installableKitRefs(k *kit.Kit, registryRepo string, cfg *config.Config) (map[string][]kitInstallDep, []kitRefOutput, []string, error) {
@@ -564,10 +565,14 @@ func installableKitRefs(k *kit.Kit, registryRepo string, cfg *config.Config) (ma
 			missing = append(missing, kitRefOutput{Raw: raw, Skill: ref.Skill, Origin: origin, Registry: ref.Registry, Connected: true, Glob: true, Reason: "glob_deferred"})
 			continue
 		}
-		key := ref.Registry + ":" + ref.Skill
+		source := ""
+		if ref.Source.Host != "" {
+			source = ref.Source.String()
+		}
+		key := ref.Registry + ":" + ref.Skill + ":" + source
 		if !seen[key] {
 			seen[key] = true
-			deps[ref.Registry] = append(deps[ref.Registry], kitInstallDep{Name: ref.Skill, Alias: k.SkillAliases[raw]})
+			deps[ref.Registry] = append(deps[ref.Registry], kitInstallDep{Name: ref.Skill, Alias: k.SkillAliases[raw], Source: source})
 		}
 	}
 	for registryName := range deps {
@@ -594,18 +599,23 @@ func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry 
 		}
 		skillNames := make([]string, 0, len(deps))
 		aliases := map[string]string{}
+		pinnedSources := map[string]string{}
 		for _, dep := range deps {
 			skillNames = append(skillNames, dep.Name)
 			if dep.Alias != "" {
 				aliases[dep.Name] = dep.Alias
 			}
+			if dep.Source != "" {
+				pinnedSources[dep.Name] = dep.Source
+			}
 		}
 		bag := &workflow.Bag{
-			Args:             skillNames,
-			RepoFlag:         registryRepo,
-			Factory:          factory,
-			FilterRegistries: filterRegistries,
-			SkillAliases:     aliases,
+			Args:               skillNames,
+			RepoFlag:           registryRepo,
+			Factory:            factory,
+			FilterRegistries:   filterRegistries,
+			SkillAliases:       aliases,
+			PinnedSkillSources: pinnedSources,
 		}
 		if err := workflow.Run(cmd.Context(), workflow.InstallSteps(), bag); err != nil {
 			return handleNameConflictError(cmd, err)
@@ -708,13 +718,16 @@ func runKitSync(cmd *cobra.Command, opts *kitInstallOptions) error {
 				return err
 			}
 		}
+		kitPath := filepath.Join(scribeDir, "kits", localName+".yaml")
+		if err := ensureKitFileUnmodified(localName, kitPath, installed.ContentHash); err != nil {
+			return err
+		}
 		installedSkills := flattenKitDeps(depsByRegistry)
 		if !opts.noDeps {
 			if err := runKitInstallDepsFn(cmd, factory, depsByRegistry); err != nil {
 				return err
 			}
 		}
-		kitPath := filepath.Join(scribeDir, "kits", localName+".yaml")
 		if err := kit.Save(kitPath, k); err != nil {
 			return err
 		}
@@ -801,6 +814,26 @@ func hashKitFile(name, path string) (string, error) {
 		return "", err
 	}
 	return lockfile.HashFiles([]lockfile.File{{Path: name + ".yaml", Content: data}})
+}
+
+func ensureKitFileUnmodified(name, path, expectedHash string) error {
+	if expectedHash == "" {
+		return nil
+	}
+	currentHash, err := hashKitFile(name, path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if currentHash == expectedHash {
+		return nil
+	}
+	return clierrors.Wrap(fmt.Errorf("kit %q has local edits at %s", name, path), "KIT_LOCAL_EDIT_CONFLICT", clierrors.ExitConflict,
+		clierrors.WithResource(path),
+		clierrors.WithRemediation("Move or restore the local kit file before running `scribe kit sync` again."),
+	)
 }
 
 func remoteKitListItems(cmd *cobra.Command, opts *kitListOptions, local map[string]*kit.Kit) ([]kitListItem, error) {

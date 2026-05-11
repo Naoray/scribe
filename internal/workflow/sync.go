@@ -876,19 +876,20 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	resolved := map[string]sync.SkillStatus{}
 
 	syncer := &sync.Syncer{
-		Client:           sync.WrapGitHubClient(b.Client),
-		Provider:         b.Provider,
-		Tools:            b.Tools,
-		Executor:         &sync.ShellExecutor{},
-		TrustAll:         b.TrustAllFlag,
-		ForceBudget:      b.ForceBudget,
-		AliasName:        b.AliasName,
-		SkillAliases:     b.SkillAliases,
-		SkillFilter:      b.SkillFilter,
-		KitFilter:        b.KitFilter,
-		KitFilterEnabled: b.KitFilterEnabled,
-		ProjectRoot:      b.ProjectRoot,
-		SkipMissing:      workflowSkipMissing(b),
+		Client:             sync.WrapGitHubClient(b.Client),
+		Provider:           b.Provider,
+		Tools:              b.Tools,
+		Executor:           &sync.ShellExecutor{},
+		TrustAll:           b.TrustAllFlag,
+		ForceBudget:        b.ForceBudget,
+		AliasName:          b.AliasName,
+		SkillAliases:       b.SkillAliases,
+		PinnedSkillSources: b.PinnedSkillSources,
+		SkillFilter:        b.SkillFilter,
+		KitFilter:          b.KitFilter,
+		KitFilterEnabled:   b.KitFilterEnabled,
+		ProjectRoot:        b.ProjectRoot,
+		SkipMissing:        workflowSkipMissing(b),
 		OnRegistryFetched: func(repo string, m *manifest.Manifest) error {
 			return updateRegistryIndex(ctx, b, repo, m)
 		},
