@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/Naoray/scribe/internal/paths"
+	"github.com/Naoray/scribe/internal/source"
 )
 
 const (
@@ -26,12 +27,21 @@ const (
 
 // RegistryConfig describes a connected skill registry.
 type RegistryConfig struct {
-	Repo       string `yaml:"repo"`
-	Enabled    bool   `yaml:"enabled"`
-	Builtin    bool   `yaml:"builtin,omitempty"`
-	Type       string `yaml:"type,omitempty"`
-	Visibility string `yaml:"visibility,omitempty"`
-	Writable   bool   `yaml:"writable,omitempty"`
+	ID         string             `yaml:"id,omitempty"`
+	Repo       string             `yaml:"repo,omitempty"`
+	Enabled    bool               `yaml:"enabled"`
+	Builtin    bool               `yaml:"builtin,omitempty"`
+	Type       string             `yaml:"type,omitempty"`
+	Visibility string             `yaml:"visibility,omitempty"`
+	Writable   bool               `yaml:"writable,omitempty"`
+	Source     *source.SourceSpec `yaml:"source,omitempty"`
+}
+
+type RegistrySource struct {
+	ID       string
+	Config   RegistryConfig
+	Source   source.SourceSpec
+	Identity source.SourceIdentity
 }
 
 // ToolConfig describes an AI tool target for skill installation.
@@ -91,7 +101,9 @@ func (c *Config) TeamRepos() []string {
 	var repos []string
 	for _, r := range c.Registries {
 		if r.Enabled {
-			repos = append(repos, r.Repo)
+			if repo := r.SourceSpec().Repo; repo != "" {
+				repos = append(repos, repo)
+			}
 		}
 	}
 	return repos
@@ -101,7 +113,7 @@ func (c *Config) TeamRepos() []string {
 func (c *Config) AddRegistry(rc RegistryConfig) {
 	rc.Normalize()
 	for i := range c.Registries {
-		if strings.EqualFold(c.Registries[i].Repo, rc.Repo) {
+		if registriesMatch(c.Registries[i], rc) {
 			c.Registries[i] = rc
 			return
 		}
@@ -112,8 +124,31 @@ func (c *Config) AddRegistry(rc RegistryConfig) {
 // FindRegistry returns the RegistryConfig for a given repo, or nil if not found.
 func (c *Config) FindRegistry(repo string) *RegistryConfig {
 	for i := range c.Registries {
-		if strings.EqualFold(c.Registries[i].Repo, repo) {
+		if strings.EqualFold(c.Registries[i].SourceSpec().Repo, repo) {
 			return &c.Registries[i]
+		}
+	}
+	return nil
+}
+
+func (c *Config) FindRegistryByKeyOrRepo(input string) *RegistryConfig {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+	for i := range c.Registries {
+		rc := &c.Registries[i]
+		if strings.EqualFold(rc.ID, input) || strings.EqualFold(rc.Repo, input) {
+			return rc
+		}
+		spec := rc.SourceSpec()
+		if strings.EqualFold(spec.Repo, input) || strings.EqualFold(spec.URL, input) || strings.EqualFold(spec.ID, input) {
+			return rc
+		}
+		if canonical, ident, err := source.Canonicalize(spec); err == nil {
+			if strings.EqualFold(ident.Key, input) || strings.EqualFold(canonical.URL, input) {
+				return rc
+			}
 		}
 	}
 	return nil
@@ -126,6 +161,33 @@ func (c *Config) EnabledRegistries() []RegistryConfig {
 		if rc.Enabled {
 			enabled = append(enabled, rc)
 		}
+	}
+	return enabled
+}
+
+func (c *Config) EnabledSources() []RegistrySource {
+	var enabled []RegistrySource
+	ids := map[string]int{}
+	for _, rc := range c.Registries {
+		if !rc.Enabled {
+			continue
+		}
+		spec, ident, err := source.Canonicalize(rc.SourceSpec())
+		if err != nil {
+			continue
+		}
+		id := registrySourceID(rc, spec, ident)
+		key := strings.ToLower(id)
+		ids[key]++
+		if ids[key] > 1 {
+			id = fmt.Sprintf("%s-%d", id, ids[key])
+		}
+		enabled = append(enabled, RegistrySource{
+			ID:       id,
+			Config:   rc,
+			Source:   spec,
+			Identity: ident,
+		})
 	}
 	return enabled
 }
@@ -218,6 +280,31 @@ func (rc RegistryConfig) IsPublic() bool {
 	return rc.Visibility == RegistryVisibilityPublic
 }
 
+func (rc RegistryConfig) SourceSpec() source.SourceSpec {
+	var spec source.SourceSpec
+	if rc.Source != nil {
+		spec = *rc.Source
+	} else {
+		spec = source.SourceSpec{Type: source.SourceGitHub, Repo: rc.Repo}
+	}
+	if spec.ID == "" {
+		spec.ID = rc.ID
+	}
+	if spec.Writable == nil && rc.Writable {
+		writable := true
+		spec.Writable = &writable
+	}
+	return spec
+}
+
+func (rc RegistryConfig) Identity() source.SourceIdentity {
+	_, ident, err := source.Canonicalize(rc.SourceSpec())
+	if err != nil {
+		return source.SourceIdentity{}
+	}
+	return ident
+}
+
 // Normalize fills privacy-safe defaults for legacy or incomplete registry rows.
 func (rc *RegistryConfig) Normalize() {
 	if rc.Visibility == "" {
@@ -225,6 +312,42 @@ func (rc *RegistryConfig) Normalize() {
 		return
 	}
 	rc.Visibility = NormalizeRegistryVisibility(rc.Visibility)
+}
+
+func (c *Config) ValidateSources() error {
+	ids := map[string]struct{}{}
+	keys := map[string]struct{}{}
+	for _, rc := range c.Registries {
+		if rc.ID != "" {
+			id := strings.ToLower(rc.ID)
+			if _, ok := ids[id]; ok {
+				return fmt.Errorf("duplicate registry id %q", rc.ID)
+			}
+			ids[id] = struct{}{}
+		}
+		if rc.Source == nil && rc.Repo == "" {
+			continue
+		}
+		spec, ident, err := source.Canonicalize(rc.SourceSpec())
+		if err != nil {
+			return err
+		}
+		if spec.ID != "" {
+			id := strings.ToLower(spec.ID)
+			if _, ok := ids[id]; ok && !strings.EqualFold(spec.ID, rc.ID) {
+				return fmt.Errorf("duplicate registry id %q", spec.ID)
+			}
+			ids[id] = struct{}{}
+		}
+		if rc.Source != nil {
+			key := strings.ToLower(ident.Key)
+			if _, ok := keys[key]; ok {
+				return fmt.Errorf("duplicate registry source key %q", ident.Key)
+			}
+			keys[key] = struct{}{}
+		}
+	}
+	return nil
 }
 
 func NormalizeRegistryVisibility(visibility string) string {
@@ -270,6 +393,9 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("parse config.yaml: %w", err)
 		}
 		cfg.applyDefaults()
+		if err := cfg.ValidateSources(); err != nil {
+			return nil, fmt.Errorf("validate config.yaml: %w", err)
+		}
 		if _, err := cfg.AdoptionPaths(); err != nil {
 			return nil, err
 		}
@@ -314,6 +440,48 @@ func (c *Config) applyDefaults() {
 	for i := range c.Registries {
 		c.Registries[i].Normalize()
 	}
+}
+
+func registriesMatch(a, b RegistryConfig) bool {
+	if a.ID != "" && b.ID != "" && strings.EqualFold(a.ID, b.ID) {
+		return true
+	}
+	if a.Repo != "" && b.Repo != "" && strings.EqualFold(a.Repo, b.Repo) {
+		return true
+	}
+	_, aIdent, aErr := source.Canonicalize(a.SourceSpec())
+	_, bIdent, bErr := source.Canonicalize(b.SourceSpec())
+	return aErr == nil && bErr == nil && strings.EqualFold(aIdent.Key, bIdent.Key)
+}
+
+func registrySourceID(rc RegistryConfig, spec source.SourceSpec, ident source.SourceIdentity) string {
+	if rc.ID != "" {
+		return rc.ID
+	}
+	if spec.ID != "" {
+		return spec.ID
+	}
+	if rc.Repo != "" {
+		return slug(rc.Repo)
+	}
+	if spec.Repo != "" {
+		return slug(spec.Repo)
+	}
+	if spec.URL != "" {
+		return slug(spec.URL)
+	}
+	return slug(ident.Key)
+}
+
+func slug(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	replacer := strings.NewReplacer("://", "-", "/", "-", ":", "-", "@", "-", ".", "-", "_", "-")
+	s = replacer.Replace(s)
+	s = strings.Trim(s, "-")
+	if s == "" {
+		return "source"
+	}
+	return s
 }
 
 // migrateFromTOML converts legacy TOML fields to the new Config struct.
