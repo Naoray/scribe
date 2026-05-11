@@ -97,7 +97,7 @@ func (p *GitHubProvider) DiscoverSource(ctx context.Context, spec source.SourceS
 }
 
 func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo, scope, ref string) (*manifest.Manifest, error) {
-	raw, err := p.client.FetchFile(ctx, owner, repo, scopedPath(scope, manifest.ManifestFilename), ref)
+	raw, err := p.client.FetchFile(ctx, owner, repo, ScopedPath(scope, manifest.ManifestFilename), ref)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo, sc
 }
 
 func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo, scope, ref string) (*manifest.Manifest, error) {
-	raw, err := p.client.FetchFile(ctx, owner, repo, scopedPath(scope, manifest.LegacyManifestFilename), ref)
+	raw, err := p.client.FetchFile(ctx, owner, repo, ScopedPath(scope, manifest.LegacyManifestFilename), ref)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo, sc
 }
 
 func (p *GitHubProvider) discoverMarketplace(ctx context.Context, owner, repo, scope, ref string) ([]manifest.Entry, error) {
-	raw, err := p.client.FetchFile(ctx, owner, repo, scopedPath(scope, marketplacePath), ref)
+	raw, err := p.client.FetchFile(ctx, owner, repo, ScopedPath(scope, marketplacePath), ref)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (p *GitHubProvider) discoverMarketplace(ctx context.Context, owner, repo, s
 	}
 	if scope != "" {
 		for i := range entries {
-			entries[i].Path = scopedPath(scope, entries[i].Path)
+			entries[i].Path = ScopedPath(scope, entries[i].Path)
 		}
 	}
 	return entries, nil
@@ -244,7 +244,7 @@ func (p *GitHubProvider) FetchSource(ctx context.Context, spec source.SourceSpec
 	if skillPath == "" {
 		skillPath = entry.Name
 	}
-	skillPath = scopedPath(spec.Path, skillPath)
+	skillPath = ScopedPath(spec.Path, skillPath)
 
 	if path.Base(skillPath) == skillFileName {
 		data, err := p.client.FetchFile(ctx, owner, repoName, skillPath, ref)
@@ -284,7 +284,9 @@ func sourceRef(spec source.SourceSpec) string {
 	return "HEAD"
 }
 
-func scopedPath(scope, rel string) string {
+// ScopedPath resolves rel under scope without double-prefixing paths that
+// already include the scope.
+func ScopedPath(scope, rel string) string {
 	scope = strings.Trim(path.Clean(strings.TrimSpace(scope)), "/")
 	rel = strings.Trim(path.Clean(strings.TrimSpace(rel)), "/")
 	if scope == "." {

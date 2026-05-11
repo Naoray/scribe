@@ -10,12 +10,34 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/registry"
 	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
+
+type browseSourceProvider struct {
+	entries []manifest.Entry
+}
+
+func (p browseSourceProvider) Discover(ctx context.Context, repo string) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{Entries: p.entries, IsTeam: true}, nil
+}
+
+func (p browseSourceProvider) DiscoverSource(ctx context.Context, spec source.SourceSpec) (*provider.DiscoverResult, error) {
+	return p.Discover(ctx, spec.Repo)
+}
+
+func (p browseSourceProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]provider.File, error) {
+	return nil, nil
+}
+
+func (p browseSourceProvider) FetchSource(ctx context.Context, spec source.SourceSpec, entry manifest.Entry) ([]provider.File, error) {
+	return nil, nil
+}
 
 func TestRunBrowseWithDeps_JSONQueryFiltersResults(t *testing.T) {
 	old := discoverSourceEntriesFn
@@ -108,6 +130,48 @@ func TestRunBrowseKitsWithDeps_JSONQueryFiltersResults(t *testing.T) {
 	}
 	if len(out.Results) != 1 || out.Results[0].Name != "baseline" || !out.Results[0].InstalledLocally {
 		t.Fatalf("results = %+v, want installed baseline only", out.Results)
+	}
+}
+
+func TestLegacyRegistrySourceUsesRepoStateKey(t *testing.T) {
+	cfg := &config.Config{Registries: []config.RegistryConfig{{
+		Repo:    "acme/skills",
+		Enabled: true,
+	}}}
+	sources := cfg.EnabledSources()
+	if len(sources) != 1 {
+		t.Fatalf("EnabledSources len = %d, want 1", len(sources))
+	}
+	sourceKey := registryStateKey(sources[0])
+	if sourceKey != "acme/skills" {
+		t.Fatalf("registryStateKey = %q, want acme/skills", sourceKey)
+	}
+
+	syncer := &sync.Syncer{
+		Client: &sync.NoopFetcher{},
+		Provider: browseSourceProvider{entries: []manifest.Entry{{
+			Name:   "cleanup",
+			Source: "github:acme/skills@v1.0.0",
+		}}},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"cleanup": {
+			Sources: []state.SkillSource{{
+				Registry: "acme/skills",
+				Ref:      "v1.0.0",
+			}},
+		},
+	}}
+
+	statuses, _, err := syncer.DiffSource(context.Background(), sourceKey, sources[0].Source, st)
+	if err != nil {
+		t.Fatalf("DiffSource: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %d, want 1", len(statuses))
+	}
+	if statuses[0].Status != sync.StatusCurrent {
+		t.Fatalf("status = %s, want %s", statuses[0].Status, sync.StatusCurrent)
 	}
 }
 

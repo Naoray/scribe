@@ -278,8 +278,9 @@ func (s *Syncer) DiffSource(ctx context.Context, registryKey string, spec source
 						}
 					}
 					if len(tree) > 0 {
-						blobSHAs = resolveSkillBlobSHAs(tree, entry)
-						if resolvedSHA, found := blobSHAs[skillBlobTarget(entry)]; found {
+						blobEntry := sourceScopedSkillEntry(spec, entry)
+						blobSHAs = resolveSkillBlobSHAs(tree, blobEntry)
+						if resolvedSHA, found := blobSHAs[skillBlobTarget(blobEntry)]; found {
 							latestSHA = resolvedSHA
 						} else {
 							latestSHA = missingSkillBlobSHA

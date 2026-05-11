@@ -6,6 +6,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -41,7 +42,15 @@ func (p *diffTestProvider) Discover(ctx context.Context, repo string) (*provider
 	}, nil
 }
 
+func (p *diffTestProvider) DiscoverSource(ctx context.Context, spec source.SourceSpec) (*provider.DiscoverResult, error) {
+	return p.Discover(ctx, spec.Repo)
+}
+
 func (p *diffTestProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]tools.SkillFile, error) {
+	return nil, nil
+}
+
+func (p *diffTestProvider) FetchSource(ctx context.Context, spec source.SourceSpec, entry manifest.Entry) ([]provider.File, error) {
 	return nil, nil
 }
 
@@ -86,6 +95,56 @@ func TestDiffMarksBranchSkillOutdatedWhenSkillFileMissingFromTree(t *testing.T) 
 	}
 	if statuses[0].LatestSHA != missingSkillBlobSHA {
 		t.Fatalf("latest SHA = %q, want %q", statuses[0].LatestSHA, missingSkillBlobSHA)
+	}
+}
+
+func TestDiffSourceResolvesScopedManifestEntryBlobSHA(t *testing.T) {
+	syncer := &Syncer{
+		Client: &diffTestFetcher{
+			tree: []provider.TreeEntry{
+				{Path: "skills/nextjs/SKILL.md", Type: "blob", SHA: "nextjs-blob"},
+			},
+		},
+		Provider: &diffTestProvider{
+			entry: manifest.Entry{
+				Name:   "nextjs",
+				Path:   "nextjs",
+				Source: "github:vercel-labs/agent-skills@HEAD",
+			},
+		},
+	}
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{
+			"nextjs": {
+				Sources: []state.SkillSource{{
+					Registry: "github:vercel-labs/agent-skills:skills",
+					Ref:      "main",
+					LastSHA:  "nextjs-blob",
+				}},
+			},
+		},
+	}
+
+	statuses, _, err := syncer.DiffSource(
+		context.Background(),
+		"github:vercel-labs/agent-skills:skills",
+		source.SourceSpec{Type: source.SourceGitHub, Repo: "vercel-labs/agent-skills", Ref: "main", Path: "skills"},
+		st,
+	)
+	if err != nil {
+		t.Fatalf("DiffSource: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %d, want 1", len(statuses))
+	}
+	if statuses[0].LatestSHA != "nextjs-blob" {
+		t.Fatalf("LatestSHA = %q, want nextjs-blob", statuses[0].LatestSHA)
+	}
+	if statuses[0].LatestSHA == missingSkillBlobSHA {
+		t.Fatalf("LatestSHA used missing sentinel")
+	}
+	if statuses[0].Status != StatusCurrent {
+		t.Fatalf("Status = %s, want %s", statuses[0].Status, StatusCurrent)
 	}
 }
 

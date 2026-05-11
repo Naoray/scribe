@@ -646,7 +646,8 @@ func discoverSourceEntries(
 	var entries []browseEntry
 	var errs []error
 	for _, src := range sources {
-		statuses, _, err := syncer.DiffSource(ctx, src.Identity.Key, src.Source, st)
+		sourceKey := registryStateKey(src)
+		statuses, _, err := syncer.DiffSource(ctx, sourceKey, src.Source, st)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", src.ID, err))
 			continue
@@ -659,7 +660,7 @@ func discoverSourceEntries(
 			entries = append(entries, browseEntry{
 				Status:    s,
 				Registry:  registryDisplay(src),
-				SourceKey: src.Identity.Key,
+				SourceKey: sourceKey,
 				Source:    src.Source,
 			})
 		}
@@ -741,6 +742,13 @@ func registryDisplay(src config.RegistrySource) string {
 	}
 	if src.ID != "" {
 		return src.ID
+	}
+	return src.Identity.Key
+}
+
+func registryStateKey(src config.RegistrySource) string {
+	if src.Config.Source == nil && src.Config.Repo != "" && isLegacyGitHubSource(src.Source) {
+		return src.Config.Repo
 	}
 	return src.Identity.Key
 }
