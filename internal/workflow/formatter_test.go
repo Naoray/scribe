@@ -123,9 +123,13 @@ func TestJSONFormatter(t *testing.T) {
 		Status:    sync.StatusCurrent,
 		Installed: &state.InstalledSkill{Revision: 2},
 	})
+	fmtr.OnSkillSkipped("orchestrator-mode", sync.SkillStatus{
+		Status:    sync.StatusModified,
+		Installed: &state.InstalledSkill{Revision: 7},
+	})
 	fmtr.OnSkillSkippedByDenyList("removed", "acme/skills")
 	fmtr.OnSkillError("broken", fmt.Errorf("download failed"))
-	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1, Skipped: 2, Failed: 1})
+	fmtr.OnSyncComplete(sync.SyncCompleteMsg{Installed: 1, Skipped: 3, Failed: 1})
 
 	if err := fmtr.Flush(); err != nil {
 		t.Fatalf("Flush() error: %v", err)
@@ -157,8 +161,12 @@ func TestJSONFormatter(t *testing.T) {
 	}
 
 	skills := reg["skills"].([]any)
-	if len(skills) != 4 {
-		t.Errorf("expected 4 skills, got %d", len(skills))
+	if len(skills) != 5 {
+		t.Errorf("expected 5 skills, got %d", len(skills))
+	}
+	modified := skills[2].(map[string]any)
+	if modified["name"] != "orchestrator-mode" || modified["action"] != "skipped" || modified["status"] != "modified" {
+		t.Fatalf("modified skill payload = %#v", modified)
 	}
 
 	summary := data["summary"].(map[string]any)
