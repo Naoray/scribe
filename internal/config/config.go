@@ -297,6 +297,14 @@ func (rc RegistryConfig) SourceSpec() source.SourceSpec {
 	return spec
 }
 
+func ParseConfigSource(rc RegistryConfig) (source.SourceSpec, error) {
+	spec, _, err := source.Canonicalize(rc.SourceSpec())
+	if err != nil {
+		return source.SourceSpec{}, err
+	}
+	return spec, nil
+}
+
 func (rc RegistryConfig) Identity() source.SourceIdentity {
 	_, ident, err := source.Canonicalize(rc.SourceSpec())
 	if err != nil {

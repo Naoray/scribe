@@ -572,6 +572,13 @@ func TestRegistryConfigSourceSpecLegacyRepo(t *testing.T) {
 	if spec.Type != source.SourceGitHub || spec.Repo != "Owner/Repo" {
 		t.Fatalf("SourceSpec = %#v", spec)
 	}
+	parsed, err := config.ParseConfigSource(rc)
+	if err != nil {
+		t.Fatalf("ParseConfigSource: %v", err)
+	}
+	if parsed.URL != "https://github.com/Owner/Repo" {
+		t.Fatalf("parsed URL = %q", parsed.URL)
+	}
 	ident := rc.Identity()
 	if ident.Key != "github:owner/repo" {
 		t.Fatalf("identity key = %q", ident.Key)
