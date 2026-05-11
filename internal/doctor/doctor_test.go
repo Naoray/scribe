@@ -8,6 +8,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/snippet"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -88,6 +89,58 @@ func TestInspectManagedSkillsReportsMissingSnippetProjection(t *testing.T) {
 	}
 	if !strings.Contains(issue.Message, "scribe sync") {
 		t.Fatalf("Message = %q, want sync remediation", issue.Message)
+	}
+}
+
+func TestInspectManagedSkillsHonorsExistingOnlyAllSnippetTargets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, ".scribe.yaml"), []byte("snippets:\n  - all-rules\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "AGENTS.md"), []byte("# Agents\n"), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+	snippetDir := filepath.Join(home, ".scribe", "snippets")
+	if err := os.MkdirAll(snippetDir, 0o755); err != nil {
+		t.Fatalf("mkdir snippets: %v", err)
+	}
+	snippetContent := "---\nname: all-rules\ndescription: All rules\ntargets: all\n---\n# Rules\n"
+	if err := os.WriteFile(filepath.Join(snippetDir, "all-rules.md"), []byte(snippetContent), 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+	snippets, err := snippet.LoadProject(snippetDir, []string{"all-rules"})
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	if _, err := snippet.Project(project, snippets, []string{"claude", "codex", "cursor"}); err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	t.Chdir(project)
+
+	cfg := &config.Config{Tools: []config.ToolConfig{
+		{Name: "claude", Enabled: true},
+		{Name: "codex", Enabled: true},
+		{Name: "cursor", Enabled: true},
+	}}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+	report, err := InspectManagedSkills(cfg, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+
+	for _, issue := range report.Issues {
+		if issue.Kind == IssueSnippetProjectionDrift {
+			t.Fatalf("unexpected snippet drift issue: %+v", issue)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("CLAUDE.md should not be created by existing-only all target projection: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".cursorrules")); !os.IsNotExist(err) {
+		t.Fatalf(".cursorrules should not be created by existing-only all target projection: %v", err)
 	}
 }
 

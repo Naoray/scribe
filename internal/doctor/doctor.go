@@ -229,10 +229,9 @@ func inspectProjectSnippetDrift(cfg *config.Config) []Issue {
 		}}
 	}
 	projectRoot := filepath.Dir(projectPath)
-	active := availableToolNames(cfg)
 	var issues []Issue
 	for _, sn := range snippets {
-		for _, target := range expectedSnippetTargets(sn.Targets, active) {
+		for _, target := range expectedSnippetTargets(projectRoot, sn.Targets) {
 			path := snippet.TargetPath(projectRoot, sn.Name, target)
 			if path == "" || snippet.HasProjection(path, sn, target) {
 				continue
@@ -338,11 +337,7 @@ func topBudgetSkills(sizes map[string]int, limit int) []budget.Overflow {
 	return largest
 }
 
-func expectedSnippetTargets(targets, activeTools []string) []string {
-	active := map[string]bool{}
-	for _, tool := range activeTools {
-		active[strings.ToLower(tool)] = true
-	}
+func expectedSnippetTargets(projectRoot string, targets []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(target string) {
@@ -358,8 +353,10 @@ func expectedSnippetTargets(targets, activeTools []string) []string {
 	}
 	for _, target := range targets {
 		if strings.EqualFold(target, "all") {
-			for tool := range active {
-				add(tool)
+			for _, tool := range []string{"claude", "codex", "cursor"} {
+				if snippetTargetExists(projectRoot, tool) {
+					add(tool)
+				}
 			}
 			continue
 		}
@@ -367,6 +364,15 @@ func expectedSnippetTargets(targets, activeTools []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func snippetTargetExists(projectRoot, target string) bool {
+	path := snippet.TargetPath(projectRoot, "", target)
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func inspectMigrationBudgetOverflow(st *state.State, name string) []Issue {

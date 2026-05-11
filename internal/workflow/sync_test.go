@@ -352,7 +352,7 @@ func TestStepProjectSnippets_WritesTargetsAndState(t *testing.T) {
 		t.Fatalf("StepProjectSnippets: %v", err)
 	}
 
-	for _, rel := range []string{"CLAUDE.md", "AGENTS.md", filepath.Join(".cursor", "rules", "commit-discipline.mdc")} {
+	for _, rel := range []string{"CLAUDE.md", "AGENTS.md", ".cursorrules"} {
 		data, err := os.ReadFile(filepath.Join(projectDir, rel))
 		if err != nil {
 			t.Fatalf("read %s: %v", rel, err)
