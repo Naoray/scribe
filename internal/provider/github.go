@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strings"
 
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -46,45 +48,56 @@ func (p *GitHubProvider) warn(msg string) {
 
 // Discover probes the repo using a fallback chain and returns all discovered entries.
 func (p *GitHubProvider) Discover(ctx context.Context, repo string) (*DiscoverResult, error) {
-	normalized, err := manifest.NormalizeGitHubRepo(repo)
+	spec, err := source.ParseSourceArg(repo)
 	if err != nil {
 		return nil, err
 	}
-	owner, repoName, err := manifest.ParseOwnerRepo(normalized)
+	return p.DiscoverSource(ctx, spec)
+}
+
+// DiscoverSource probes a GitHub source using the same fallback chain as
+// Discover, scoped to SourceSpec.Path when configured.
+func (p *GitHubProvider) DiscoverSource(ctx context.Context, spec source.SourceSpec) (*DiscoverResult, error) {
+	spec, err := canonicalGitHubSource(spec)
 	if err != nil {
 		return nil, err
 	}
+	owner, repoName, err := manifest.ParseOwnerRepo(spec.Repo)
+	if err != nil {
+		return nil, err
+	}
+	ref := sourceRef(spec)
 
 	// Step 1: Try scribe.yaml.
-	m, err := p.discoverScribeYAML(ctx, owner, repoName)
+	m, err := p.discoverScribeYAML(ctx, owner, repoName, spec.Path, ref)
 	if err == nil {
 		return &DiscoverResult{Entries: m.Catalog, IsTeam: true, Manifest: m}, nil
 	}
 
 	// Step 2: Try scribe.toml (legacy).
-	m, err = p.discoverScribeTOML(ctx, owner, repoName)
+	m, err = p.discoverScribeTOML(ctx, owner, repoName, spec.Path, ref)
 	if err == nil {
-		p.warn(fmt.Sprintf("%s uses legacy scribe.toml format — consider migrating to scribe.yaml", repo))
+		p.warn(fmt.Sprintf("%s uses legacy scribe.toml format — consider migrating to scribe.yaml", spec.Repo))
 		return &DiscoverResult{Entries: m.Catalog, IsTeam: true, Manifest: m}, nil
 	}
 
 	// Step 3: Try .claude-plugin/marketplace.json.
-	entries, err := p.discoverMarketplace(ctx, owner, repoName)
+	entries, err := p.discoverMarketplace(ctx, owner, repoName, spec.Path, ref)
 	if err == nil {
 		return &DiscoverResult{Entries: entries, IsTeam: false}, nil
 	}
 
 	// Step 4: Tree scan for SKILL.md files.
-	entries, err = p.discoverTreeScan(ctx, owner, repoName)
+	entries, err = p.discoverTreeScan(ctx, owner, repoName, spec.Path, ref)
 	if err == nil && len(entries) > 0 {
 		return &DiscoverResult{Entries: entries, IsTeam: false}, nil
 	}
 
-	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml, marketplace.json, and SKILL.md files)", repo)
+	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml, marketplace.json, and SKILL.md files)", spec.Repo)
 }
 
-func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
-	raw, err := p.client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
+func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo, scope, ref string) (*manifest.Manifest, error) {
+	raw, err := p.client.FetchFile(ctx, owner, repo, ScopedPath(scope, manifest.ManifestFilename), ref)
 	if err != nil {
 		return nil, err
 	}
@@ -95,8 +108,8 @@ func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo str
 	return m, nil
 }
 
-func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
-	raw, err := p.client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
+func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo, scope, ref string) (*manifest.Manifest, error) {
+	raw, err := p.client.FetchFile(ctx, owner, repo, ScopedPath(scope, manifest.LegacyManifestFilename), ref)
 	if err != nil {
 		return nil, err
 	}
@@ -107,8 +120,8 @@ func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo str
 	return m, nil
 }
 
-func (p *GitHubProvider) discoverMarketplace(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {
-	raw, err := p.client.FetchFile(ctx, owner, repo, marketplacePath, "HEAD")
+func (p *GitHubProvider) discoverMarketplace(ctx context.Context, owner, repo, scope, ref string) ([]manifest.Entry, error) {
+	raw, err := p.client.FetchFile(ctx, owner, repo, ScopedPath(scope, marketplacePath), ref)
 	if err != nil {
 		return nil, err
 	}
@@ -119,14 +132,20 @@ func (p *GitHubProvider) discoverMarketplace(ctx context.Context, owner, repo st
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("marketplace.json has no skills")
 	}
+	if scope != "" {
+		for i := range entries {
+			entries[i].Path = ScopedPath(scope, entries[i].Path)
+		}
+	}
 	return entries, nil
 }
 
-func (p *GitHubProvider) discoverTreeScan(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {
-	tree, err := p.client.GetTree(ctx, owner, repo, "HEAD")
+func (p *GitHubProvider) discoverTreeScan(ctx context.Context, owner, repo, scope, ref string) ([]manifest.Entry, error) {
+	tree, err := p.client.GetTree(ctx, owner, repo, ref)
 	if err != nil {
 		return nil, err
 	}
+	tree = filterTreeToScope(tree, scope)
 	entries := ScanTreeForSkills(tree, owner, repo)
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("no SKILL.md files found in %s/%s", owner, repo)
@@ -137,7 +156,7 @@ func (p *GitHubProvider) discoverTreeScan(ctx context.Context, owner, repo strin
 		if path.Base(skillPath) != skillFileName {
 			skillPath = path.Join(skillPath, skillFileName)
 		}
-		data, err := p.client.FetchFile(ctx, owner, repo, skillPath, "HEAD")
+		data, err := p.client.FetchFile(ctx, owner, repo, skillPath, ref)
 		if err != nil {
 			p.warn(fmt.Sprintf("%s/%s: could not read %s frontmatter: %v", owner, repo, skillPath, err))
 			continue
@@ -204,21 +223,38 @@ func (p *GitHubProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]Fil
 	if err != nil {
 		return nil, fmt.Errorf("parse source for %s: %w", entry.Name, err)
 	}
+	spec := source.SourceSpec{Type: source.SourceGitHub, Repo: src.Owner + "/" + src.Repo, Ref: src.Ref}
+	return p.FetchSource(ctx, spec, entry)
+}
+
+// FetchSource downloads an entry from a GitHub source, resolving paths relative
+// to the source scope unless the entry already includes that scope.
+func (p *GitHubProvider) FetchSource(ctx context.Context, spec source.SourceSpec, entry manifest.Entry) ([]File, error) {
+	spec, err := canonicalGitHubSource(spec)
+	if err != nil {
+		return nil, err
+	}
+	owner, repoName, err := manifest.ParseOwnerRepo(spec.Repo)
+	if err != nil {
+		return nil, err
+	}
+	ref := sourceRef(spec)
 
 	skillPath := entry.Path
 	if skillPath == "" {
 		skillPath = entry.Name
 	}
+	skillPath = ScopedPath(spec.Path, skillPath)
 
 	if path.Base(skillPath) == skillFileName {
-		data, err := p.client.FetchFile(ctx, src.Owner, src.Repo, skillPath, src.Ref)
+		data, err := p.client.FetchFile(ctx, owner, repoName, skillPath, ref)
 		if err != nil {
 			return nil, err
 		}
 		return []File{{Path: skillFileName, Content: data}}, nil
 	}
 
-	ghFiles, err := p.client.FetchDirectory(ctx, src.Owner, src.Repo, skillPath, src.Ref)
+	ghFiles, err := p.client.FetchDirectory(ctx, owner, repoName, skillPath, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -228,4 +264,56 @@ func (p *GitHubProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]Fil
 		files[i] = File{Path: f.Path, Content: f.Content}
 	}
 	return files, nil
+}
+
+func canonicalGitHubSource(spec source.SourceSpec) (source.SourceSpec, error) {
+	spec, err := source.CanonicalSpec(spec)
+	if err != nil {
+		return source.SourceSpec{}, err
+	}
+	if spec.Type != source.SourceGitHub {
+		return source.SourceSpec{}, fmt.Errorf("unsupported source type %q for GitHub provider", spec.Type)
+	}
+	return spec, nil
+}
+
+func sourceRef(spec source.SourceSpec) string {
+	if spec.Ref != "" {
+		return spec.Ref
+	}
+	return "HEAD"
+}
+
+// ScopedPath resolves rel under scope without double-prefixing paths that
+// already include the scope.
+func ScopedPath(scope, rel string) string {
+	scope = strings.Trim(path.Clean(strings.TrimSpace(scope)), "/")
+	rel = strings.Trim(path.Clean(strings.TrimSpace(rel)), "/")
+	if scope == "." {
+		scope = ""
+	}
+	if rel == "." {
+		rel = ""
+	}
+	if scope == "" {
+		return rel
+	}
+	if rel == "" || rel == scope || strings.HasPrefix(rel, scope+"/") {
+		return rel
+	}
+	return path.Join(scope, rel)
+}
+
+func filterTreeToScope(tree []TreeEntry, scope string) []TreeEntry {
+	scope = strings.Trim(path.Clean(strings.TrimSpace(scope)), "/")
+	if scope == "" || scope == "." {
+		return tree
+	}
+	filtered := make([]TreeEntry, 0, len(tree))
+	for _, entry := range tree {
+		if entry.Path == scope || strings.HasPrefix(entry.Path, scope+"/") {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }

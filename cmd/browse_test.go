@@ -8,20 +8,44 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/registry"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
+type browseSourceProvider struct {
+	entries []manifest.Entry
+}
+
+func (p browseSourceProvider) Discover(ctx context.Context, repo string) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{Entries: p.entries, IsTeam: true}, nil
+}
+
+func (p browseSourceProvider) DiscoverSource(ctx context.Context, spec source.SourceSpec) (*provider.DiscoverResult, error) {
+	return p.Discover(ctx, spec.Repo)
+}
+
+func (p browseSourceProvider) Fetch(ctx context.Context, entry manifest.Entry) ([]provider.File, error) {
+	return nil, nil
+}
+
+func (p browseSourceProvider) FetchSource(ctx context.Context, spec source.SourceSpec, entry manifest.Entry) ([]provider.File, error) {
+	return nil, nil
+}
+
 func TestRunBrowseWithDeps_JSONQueryFiltersResults(t *testing.T) {
-	old := discoverEntriesFn
-	defer func() { discoverEntriesFn = old }()
-	discoverEntriesFn = func(context.Context, []string, *gh.Client, []tools.Tool, *state.State) ([]browseEntry, []error) {
+	old := discoverSourceEntriesFn
+	defer func() { discoverSourceEntriesFn = old }()
+	discoverSourceEntriesFn = func(context.Context, []config.RegistrySource, *gh.Client, []tools.Tool, *state.State) ([]browseEntry, []error) {
 		return []browseEntry{
-			{Registry: "acme/skills", Status: sync.SkillStatus{Name: "cleanup", Status: sync.StatusMissing}},
-			{Registry: "acme/skills", Status: sync.SkillStatus{Name: "deploy", Status: sync.StatusMissing}},
+			{Registry: "scoped", SourceKey: "github:acme/skills:skills", Source: source.SourceSpec{Type: source.SourceGitHub, Repo: "acme/skills", Path: "skills"}, Status: sync.SkillStatus{Name: "cleanup", Status: sync.StatusMissing}},
+			{Registry: "scoped", SourceKey: "github:acme/skills:skills", Source: source.SourceSpec{Type: source.SourceGitHub, Repo: "acme/skills", Path: "skills"}, Status: sync.SkillStatus{Name: "deploy", Status: sync.StatusMissing}},
 		}, nil
 	}
 
@@ -33,7 +57,11 @@ func TestRunBrowseWithDeps_JSONQueryFiltersResults(t *testing.T) {
 	os.Stdout = w
 	defer func() { os.Stdout = oldStdout }()
 
-	err = runBrowseWithDeps(context.Background(), []string{"acme/skills"}, "clean", "", nil, &state.State{Installed: map[string]state.InstalledSkill{}}, nil, nil, true, true, false)
+	err = runBrowseWithDeps(context.Background(), []config.RegistrySource{{
+		ID:       "acme/skills",
+		Source:   source.SourceSpec{Type: source.SourceGitHub, Repo: "acme/skills"},
+		Identity: source.SourceIdentity{Key: "acme/skills"},
+	}}, "clean", "", nil, &state.State{Installed: map[string]state.InstalledSkill{}}, nil, nil, true, true, false)
 	w.Close()
 	if err != nil {
 		t.Fatalf("runBrowseWithDeps() error = %v", err)
@@ -46,7 +74,9 @@ func TestRunBrowseWithDeps_JSONQueryFiltersResults(t *testing.T) {
 
 	var out struct {
 		Results []struct {
-			Name string `json:"name"`
+			Name      string            `json:"name"`
+			SourceKey string            `json:"source_key"`
+			Source    source.SourceSpec `json:"source"`
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
@@ -54,6 +84,9 @@ func TestRunBrowseWithDeps_JSONQueryFiltersResults(t *testing.T) {
 	}
 	if len(out.Results) != 1 || out.Results[0].Name != "cleanup" {
 		t.Fatalf("results = %+v, want only cleanup", out.Results)
+	}
+	if out.Results[0].SourceKey != "github:acme/skills:skills" || out.Results[0].Source.Path != "skills" {
+		t.Fatalf("source fields = %+v", out.Results[0])
 	}
 }
 
@@ -97,6 +130,48 @@ func TestRunBrowseKitsWithDeps_JSONQueryFiltersResults(t *testing.T) {
 	}
 	if len(out.Results) != 1 || out.Results[0].Name != "baseline" || !out.Results[0].InstalledLocally {
 		t.Fatalf("results = %+v, want installed baseline only", out.Results)
+	}
+}
+
+func TestLegacyRegistrySourceUsesRepoStateKey(t *testing.T) {
+	cfg := &config.Config{Registries: []config.RegistryConfig{{
+		Repo:    "acme/skills",
+		Enabled: true,
+	}}}
+	sources := cfg.EnabledSources()
+	if len(sources) != 1 {
+		t.Fatalf("EnabledSources len = %d, want 1", len(sources))
+	}
+	sourceKey := registryStateKey(sources[0])
+	if sourceKey != "acme/skills" {
+		t.Fatalf("registryStateKey = %q, want acme/skills", sourceKey)
+	}
+
+	syncer := &sync.Syncer{
+		Client: &sync.NoopFetcher{},
+		Provider: browseSourceProvider{entries: []manifest.Entry{{
+			Name:   "cleanup",
+			Source: "github:acme/skills@v1.0.0",
+		}}},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"cleanup": {
+			Sources: []state.SkillSource{{
+				Registry: "acme/skills",
+				Ref:      "v1.0.0",
+			}},
+		},
+	}}
+
+	statuses, _, err := syncer.DiffSource(context.Background(), sourceKey, sources[0].Source, st)
+	if err != nil {
+		t.Fatalf("DiffSource: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %d, want 1", len(statuses))
+	}
+	if statuses[0].Status != sync.StatusCurrent {
+		t.Fatalf("status = %s, want %s", statuses[0].Status, sync.StatusCurrent)
 	}
 }
 

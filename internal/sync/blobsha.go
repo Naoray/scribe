@@ -6,6 +6,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/source"
 )
 
 // missingSkillBlobSHA marks a successful tree lookup where the referenced
@@ -33,6 +34,15 @@ func resolveSkillBlobSHAs(tree []provider.TreeEntry, entry manifest.Entry) map[s
 		blobs[e.Path] = e.SHA
 	}
 	return blobs
+}
+
+func sourceScopedSkillEntry(spec source.SourceSpec, entry manifest.Entry) manifest.Entry {
+	if spec.Type != source.SourceGitHub || spec.Path == "" {
+		return entry
+	}
+	scoped := entry
+	scoped.Path = provider.ScopedPath(spec.Path, skillTreeBase(entry))
+	return scoped
 }
 
 func skillBlobTarget(entry manifest.Entry) string {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -266,6 +267,94 @@ func TestDiscoverTreeScanAsLastResort(t *testing.T) {
 	}
 	if !names["deploy"] || !names["lint"] {
 		t.Errorf("expected deploy and lint, got %v", names)
+	}
+}
+
+func TestDiscoverSourceTreeScopeFiltersAndUsesScopedFetch(t *testing.T) {
+	client := &stubClient{
+		treeFiles: []provider.TreeEntry{
+			{Path: "skills/nextjs/SKILL.md", Type: "blob"},
+			{Path: "skills/react/SKILL.md", Type: "blob"},
+			{Path: "templates/ignored/SKILL.md", Type: "blob"},
+		},
+		files: map[string][]byte{
+			"vercel-labs/agent-skills/skills/nextjs/SKILL.md": []byte("---\ndescription: Next.js work\n---\n# Next\n"),
+			"vercel-labs/agent-skills/skills/react/SKILL.md":  []byte("# React\n"),
+		},
+	}
+	p := provider.NewGitHubProvider(client)
+
+	result, err := p.DiscoverSource(context.Background(), source.SourceSpec{
+		Type: source.SourceGitHub,
+		Repo: "vercel-labs/agent-skills",
+		Ref:  "main",
+		Path: "skills",
+	})
+	if err != nil {
+		t.Fatalf("DiscoverSource: %v", err)
+	}
+	if result.IsTeam {
+		t.Fatal("scoped tree scan should not be team registry")
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("entries: got %d, want 2", len(result.Entries))
+	}
+	names := map[string]bool{}
+	for _, entry := range result.Entries {
+		names[entry.Name] = true
+		if entry.Source != "github:vercel-labs/agent-skills@HEAD" {
+			t.Fatalf("Source = %q", entry.Source)
+		}
+		if entry.Path == "templates/ignored" {
+			t.Fatal("unscoped tree entry leaked into results")
+		}
+	}
+	if !names["nextjs"] || !names["react"] {
+		t.Fatalf("names = %v", names)
+	}
+}
+
+func TestFetchSourceDoesNotDoublePrefixScopedPath(t *testing.T) {
+	client := &stubClient{
+		dirs: map[string][]tools.SkillFile{
+			"vercel-labs/agent-skills/skills/nextjs": {
+				{Path: "SKILL.md", Content: []byte("# Next")},
+			},
+		},
+	}
+	p := provider.NewGitHubProvider(client)
+
+	files, err := p.FetchSource(context.Background(),
+		source.SourceSpec{Type: source.SourceGitHub, Repo: "vercel-labs/agent-skills", Ref: "main", Path: "skills"},
+		manifest.Entry{Name: "nextjs", Source: "github:vercel-labs/agent-skills@HEAD", Path: "skills/nextjs"},
+	)
+	if err != nil {
+		t.Fatalf("FetchSource: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "SKILL.md" {
+		t.Fatalf("files = %#v", files)
+	}
+}
+
+func TestFetchSourceResolvesPathRelativeToScope(t *testing.T) {
+	client := &stubClient{
+		dirs: map[string][]tools.SkillFile{
+			"vercel-labs/agent-skills/skills/nextjs": {
+				{Path: "SKILL.md", Content: []byte("# Next")},
+			},
+		},
+	}
+	p := provider.NewGitHubProvider(client)
+
+	files, err := p.FetchSource(context.Background(),
+		source.SourceSpec{Type: source.SourceGitHub, Repo: "vercel-labs/agent-skills", Ref: "main", Path: "skills"},
+		manifest.Entry{Name: "nextjs", Source: "github:vercel-labs/agent-skills@HEAD", Path: "nextjs"},
+	)
+	if err != nil {
+		t.Fatalf("FetchSource: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "SKILL.md" {
+		t.Fatalf("files = %#v", files)
 	}
 }
 

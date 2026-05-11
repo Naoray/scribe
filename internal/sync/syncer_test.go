@@ -16,6 +16,7 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -58,6 +59,7 @@ type mockProvider struct {
 	entries        []manifest.Entry
 	files          []tools.SkillFile
 	fetchedSources []string
+	fetchedSpecs   []source.SourceSpec
 }
 
 func (m *mockProvider) Discover(_ context.Context, repo string) (*provider.DiscoverResult, error) {
@@ -71,6 +73,15 @@ func (m *mockProvider) Fetch(_ context.Context, entry manifest.Entry) ([]provide
 		out[i] = provider.File{Path: f.Path, Content: f.Content}
 	}
 	return out, nil
+}
+
+func (m *mockProvider) DiscoverSource(_ context.Context, spec source.SourceSpec) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{Entries: m.entries, IsTeam: true}, nil
+}
+
+func (m *mockProvider) FetchSource(_ context.Context, spec source.SourceSpec, entry manifest.Entry) ([]provider.File, error) {
+	m.fetchedSpecs = append(m.fetchedSpecs, spec)
+	return m.Fetch(context.Background(), entry)
 }
 
 func TestRunPinnedSkillSourceOverridesManifestSource(t *testing.T) {
@@ -104,6 +115,43 @@ func TestRunPinnedSkillSourceOverridesManifestSource(t *testing.T) {
 	source := installed.Sources[0]
 	if source.Registry != "other/skills" || source.SourceRepo != "other/skills" || source.Ref != commit || source.LastSHA != commit {
 		t.Fatalf("source = %#v", source)
+	}
+}
+
+func TestRunWithDiffSourceUsesSourceProviderFetch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	entry := manifest.Entry{Name: "nextjs", Source: "github:vercel-labs/agent-skills@main", Path: "nextjs"}
+	provider := &mockProvider{
+		files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# nextjs\n")}},
+	}
+	syncer := &sync.Syncer{
+		Client:   &sync.NoopFetcher{},
+		Provider: provider,
+		Tools:    []tools.Tool{testProjectionTool{root: filepath.Join(home, ".test-tool")}},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+	statuses := []sync.SkillStatus{{
+		Name:      "nextjs",
+		Status:    sync.StatusMissing,
+		Entry:     &entry,
+		LatestSHA: "sha-next",
+	}}
+	spec := source.SourceSpec{Type: source.SourceGitHub, Repo: "vercel-labs/agent-skills", Ref: "main", Path: "skills"}
+
+	if err := syncer.RunWithDiffSource(context.Background(), "github:vercel-labs/agent-skills:skills", spec, statuses, st); err != nil {
+		t.Fatalf("RunWithDiffSource: %v", err)
+	}
+	if len(provider.fetchedSpecs) != 1 {
+		t.Fatalf("fetched specs = %#v", provider.fetchedSpecs)
+	}
+	if provider.fetchedSpecs[0].Path != "skills" {
+		t.Fatalf("fetched spec path = %q, want skills", provider.fetchedSpecs[0].Path)
+	}
+	installed := st.Installed["nextjs"]
+	if len(installed.Sources) != 1 || installed.Sources[0].Registry != "github:vercel-labs/agent-skills:skills" {
+		t.Fatalf("installed sources = %#v", installed.Sources)
 	}
 }
 
