@@ -28,6 +28,7 @@ type Bag struct {
 	RepoFlag           string // --registry filter
 	RemoteFlag         bool   // --remote: show available skills from registries
 	BrowseFlag         bool   // browse mode: remote catalog UI with install-first actions
+	KitBrowseFlag      bool   // browse mode shows registry kits instead of skills
 	InitialQuery       string // initial search/filter text for TUI surfaces
 	TrustAllFlag       bool   // --trust-all: approve all package commands without prompting
 	InstallAllFlag     bool   // --all: install all available skills without prompting

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/kit"
 	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/skillmd"
@@ -27,6 +28,9 @@ const (
 	IssueMigrationBudgetOverflow     IssueKind = "migration_budget_overflow"
 	IssueProjectionDrift             IssueKind = "projection_drift"
 	IssueSnippetProjectionDrift      IssueKind = "snippet_projection_drift"
+	IssueKitOrphaned                 IssueKind = "kit_orphaned"
+	IssueKitRegistryForgotten        IssueKind = "kit_registry_forgotten"
+	IssueKitRefBroken                IssueKind = "kit_ref_broken"
 )
 
 type Issue struct {
@@ -53,7 +57,9 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 	names := managedSkillNames(st, name)
 	if len(names) == 0 {
 		if name == "" {
-			return Report{Issues: inspectProjectSnippetDrift(cfg)}, nil
+			issues := inspectProjectSnippetDrift(cfg)
+			issues = append(issues, inspectRegistryKits(cfg, st)...)
+			return Report{Issues: issues}, nil
 		}
 		return Report{}, nil
 	}
@@ -82,6 +88,7 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 	if name == "" {
 		issues = append(issues, inspectGlobalListingBudget(st)...)
 		issues = append(issues, inspectProjectSnippetDrift(cfg)...)
+		issues = append(issues, inspectRegistryKits(cfg, st)...)
 	}
 
 	sort.SliceStable(issues, func(i, j int) bool {
@@ -98,6 +105,101 @@ func InspectManagedSkills(cfg *config.Config, st *state.State, name string) (Rep
 	})
 
 	return Report{Issues: issues}, nil
+}
+
+func inspectRegistryKits(cfg *config.Config, st *state.State) []Issue {
+	if st == nil || len(st.Kits) == 0 {
+		return nil
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return []Issue{{
+			Kind:    IssueKitOrphaned,
+			Status:  "error",
+			Message: fmt.Sprintf("resolve scribe dir: %v", err),
+		}}
+	}
+	names := make([]string, 0, len(st.Kits))
+	for name := range st.Kits {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var issues []Issue
+	for _, name := range names {
+		installed := st.Kits[name]
+		sourceRegistry := installed.SourceRegistry
+		if sourceRegistry == "" {
+			sourceRegistry = installed.Source
+		}
+		kitPath := filepath.Join(scribeDir, "kits", name+".yaml")
+		loaded, err := kit.Load(kitPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				issues = append(issues, Issue{
+					Skill:   "kit:" + name,
+					Kind:    IssueKitOrphaned,
+					Status:  "error",
+					Message: fmt.Sprintf("installed kit state points to missing file %s; run `scribe kit sync` or remove stale state", kitPath),
+				})
+				continue
+			}
+			issues = append(issues, Issue{
+				Skill:   "kit:" + name,
+				Kind:    IssueKitOrphaned,
+				Status:  "error",
+				Message: fmt.Sprintf("read kit file %s: %v", kitPath, err),
+			})
+			continue
+		}
+		if sourceRegistry == "" {
+			issues = append(issues, Issue{
+				Skill:   "kit:" + name,
+				Kind:    IssueKitRegistryForgotten,
+				Status:  "warn",
+				Message: "installed kit has no source registry metadata; reinstall it from a registry",
+			})
+			continue
+		}
+		if cfg == nil || cfg.FindRegistry(sourceRegistry) == nil {
+			issues = append(issues, Issue{
+				Skill:   "kit:" + name,
+				Kind:    IssueKitRegistryForgotten,
+				Status:  "warn",
+				Message: fmt.Sprintf("source registry %s is not connected; run `scribe registry connect %s`", sourceRegistry, sourceRegistry),
+			})
+		}
+		for _, raw := range loaded.Skills {
+			ref, err := kit.ParseSkillRef(raw, sourceRegistry)
+			if err != nil {
+				issues = append(issues, Issue{
+					Skill:   "kit:" + name,
+					Kind:    IssueKitRefBroken,
+					Status:  "error",
+					Message: fmt.Sprintf("invalid ref %q: %v", raw, err),
+				})
+				continue
+			}
+			if ref.Local {
+				issues = append(issues, Issue{
+					Skill:   "kit:" + name,
+					Kind:    IssueKitRefBroken,
+					Status:  "error",
+					Message: fmt.Sprintf("registry kit contains local ref %q; replace with registry ref", raw),
+				})
+				continue
+			}
+			if ref.Registry != "" && ref.Registry != sourceRegistry && (cfg == nil || cfg.FindRegistry(ref.Registry) == nil) {
+				issues = append(issues, Issue{
+					Skill:   "kit:" + name,
+					Kind:    IssueKitRefBroken,
+					Status:  "warn",
+					Message: fmt.Sprintf("cross-registry ref %q points to forgotten registry %s; run `scribe registry connect %s`", raw, ref.Registry, ref.Registry),
+				})
+			}
+		}
+	}
+	return issues
 }
 
 func inspectProjectSnippetDrift(cfg *config.Config) []Issue {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/registry"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -22,6 +24,7 @@ import (
 )
 
 var discoverEntriesFn = discoverEntries
+var discoverKitEntriesFn = discoverKitEntries
 
 func newBrowseCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -34,6 +37,7 @@ func newBrowseCommand() *cobra.Command {
 	cmd.Flags().String("query", "", "Filter remote skills by query")
 	cmd.Flags().String("install", "", "Install a skill by exact name or owner/repo:skill")
 	cmd.Flags().String("registry", "", "Limit browse/install to one connected registry or GitHub owner/repo")
+	cmd.Flags().Bool("kits", false, "Browse registry kits instead of skills")
 	cmd.Flags().Bool("resync", false, "Overwrite local edits with the upstream version for modified skills")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	return markJSONSupported(cmd)
@@ -44,6 +48,7 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 	installRef, _ := cmd.Flags().GetString("install")
 	registryFilter, _ := cmd.Flags().GetString("registry")
 	resync, _ := cmd.Flags().GetBool("resync")
+	kits, _ := cmd.Flags().GetBool("kits")
 	yes := noInteractionFlagPassed(cmd)
 	useJSON, _ := cmd.Flags().GetBool("json")
 	useJSON = useJSON || !isatty.IsTerminal(os.Stdout.Fd())
@@ -71,7 +76,131 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if kits {
+		return runBrowseKitsWithDeps(cmd.Context(), repos, query, installRef, cfg, st, client, useJSON, yes)
+	}
+
 	return runBrowseWithDeps(cmd.Context(), repos, query, installRef, cfg, st, client, targets, useJSON, yes, resync)
+}
+
+type kitBrowseEntry struct {
+	Kit       registry.ManifestKit
+	Installed bool
+}
+
+func runBrowseKitsWithDeps(
+	ctx context.Context,
+	repos []string,
+	query string,
+	installRef string,
+	cfg *config.Config,
+	st *state.State,
+	client *gh.Client,
+	useJSON bool,
+	skipConfirm bool,
+) error {
+	if installRef != "" {
+		opts := &kitInstallOptions{json: useJSON, noInteraction: skipConfirm}
+		if !strings.Contains(installRef, ":") && len(repos) == 1 {
+			installRef = repos[0] + ":" + installRef
+		}
+		return runKitInstall(newKitInstallCommand(), installRef, opts)
+	}
+
+	if !useJSON {
+		bag := &workflow.Bag{
+			JSONFlag:         false,
+			RemoteFlag:       true,
+			BrowseFlag:       true,
+			KitBrowseFlag:    true,
+			InitialQuery:     query,
+			LazyGitHub:       false,
+			Factory:          newCommandFactory(),
+			Config:           cfg,
+			State:            st,
+			Client:           client,
+			FilterRegistries: func(_ string, _ []string) ([]string, error) { return repos, nil },
+		}
+		m := newListModel(ctx, bag)
+		prog := tea.NewProgram(m, tea.WithContext(ctx))
+		_, err := prog.Run()
+		if errors.Is(err, tea.ErrInterrupted) {
+			os.Exit(130)
+		}
+		if err != nil {
+			return fmt.Errorf("TUI error: %w", err)
+		}
+		return nil
+	}
+
+	entries, errs := discoverKitEntriesFn(ctx, repos, client, st)
+	for _, e := range errs {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", e)
+	}
+	if query != "" {
+		entries = filterKitEntries(entries, query)
+	}
+	return emitBrowseKitsJSON(entries)
+}
+
+func discoverKitEntries(ctx context.Context, repos []string, client registry.FileFetcher, st *state.State) ([]kitBrowseEntry, []error) {
+	var entries []kitBrowseEntry
+	var errs []error
+	for _, repo := range repos {
+		kits, err := registry.ListKits(ctx, client, repo)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", repo, err))
+			continue
+		}
+		for _, remote := range kits {
+			installed := false
+			if st != nil {
+				if local, ok := st.Kits[remote.Name]; ok {
+					source := local.SourceRegistry
+					if source == "" {
+						source = local.Source
+					}
+					installed = source == repo
+				}
+			}
+			entries = append(entries, kitBrowseEntry{Kit: remote, Installed: installed})
+		}
+	}
+	return entries, errs
+}
+
+func filterKitEntries(entries []kitBrowseEntry, query string) []kitBrowseEntry {
+	q := strings.ToLower(query)
+	var out []kitBrowseEntry
+	for _, e := range entries {
+		if strings.Contains(strings.ToLower(e.Kit.Name), q) || strings.Contains(strings.ToLower(e.Kit.Description), q) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func emitBrowseKitsJSON(entries []kitBrowseEntry) error {
+	type row struct {
+		Name             string `json:"name"`
+		Registry         string `json:"registry"`
+		Path             string `json:"path"`
+		Description      string `json:"description,omitempty"`
+		Author           string `json:"author,omitempty"`
+		InstalledLocally bool   `json:"installed_locally"`
+	}
+	rows := make([]row, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, row{
+			Name:             e.Kit.Name,
+			Registry:         e.Kit.Registry,
+			Path:             e.Kit.Path,
+			Description:      e.Kit.Description,
+			Author:           e.Kit.Author,
+			InstalledLocally: e.Installed,
+		})
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"results": rows})
 }
 
 func browseRepos(registryFilter string, connected []string) ([]string, error) {

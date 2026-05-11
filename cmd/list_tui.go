@@ -135,6 +135,10 @@ func (m listModel) isBrowseMode() bool {
 	return m.bag != nil && m.bag.BrowseFlag
 }
 
+func (m listModel) isBrowseKitsMode() bool {
+	return m.bag != nil && m.bag.BrowseFlag && m.bag.KitBrowseFlag
+}
+
 func (m listModel) Init() tea.Cmd {
 	return tea.Batch(
 		tea.RequestWindowSize,
