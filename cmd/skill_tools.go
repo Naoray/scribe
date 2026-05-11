@@ -71,7 +71,8 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 		}
 	}
 
-	currentTools := append([]string(nil), installed.Tools...)
+	projectRoot := activeProjectRootForSkill(installed)
+	currentTools := currentSkillToolsForScope(installed, availableNames, projectRoot)
 	currentSet := setOf(currentTools)
 	desiredSet := setOf(desired)
 
@@ -92,7 +93,6 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 		return skillEditResult{}, fmt.Errorf("canonical store for %q missing: %w", name, err)
 	}
 
-	projectRoot := resolveCurrentProjectRoot()
 	existingManagedPaths := installed.ManagedPaths
 	if len(existingManagedPaths) == 0 {
 		existingManagedPaths = installed.Paths
@@ -141,10 +141,15 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 	}
 	sort.Strings(newPaths)
 
-	installed.Tools = desired
-	installed.ToolsMode = mode
 	if projectRoot != "" {
-		installed.Projections = mergeSkillToolProjection(installed.Projections, projectRoot, desired)
+		if mode == state.ToolsModeInherit {
+			installed.Projections = removeSkillToolProjection(installed.Projections, projectRoot)
+		} else {
+			installed.Projections = mergeSkillToolProjection(installed.Projections, projectRoot, desired)
+		}
+	} else {
+		installed.Tools = desired
+		installed.ToolsMode = mode
 	}
 	installed.Paths = newPaths
 	installed.ManagedPaths = append([]string(nil), newPaths...)
@@ -164,6 +169,26 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 		result.ToolsMode = "inherit"
 	}
 	return result, nil
+}
+
+func currentSkillToolsForScope(installed state.InstalledSkill, availableNames []string, projectRoot string) []string {
+	if projectRoot != "" {
+		return installed.EffectiveToolsForProject(availableNames, projectRoot)
+	}
+	return append([]string(nil), installed.Tools...)
+}
+
+func activeProjectRootForSkill(installed state.InstalledSkill) string {
+	projectRoot := resolveCurrentProjectRoot()
+	if projectRoot == "" {
+		return ""
+	}
+	for _, projection := range installed.Projections {
+		if projection.Project == projectRoot {
+			return projectRoot
+		}
+	}
+	return ""
 }
 
 func uninstallSkillProjection(tool tools.Tool, name, projectRoot string) error {
@@ -197,4 +222,15 @@ func mergeSkillToolProjection(projections []state.ProjectionEntry, projectRoot s
 		}
 	}
 	return append(out, next)
+}
+
+func removeSkillToolProjection(projections []state.ProjectionEntry, projectRoot string) []state.ProjectionEntry {
+	out := make([]state.ProjectionEntry, 0, len(projections))
+	for _, projection := range projections {
+		if projection.Project == projectRoot {
+			continue
+		}
+		out = append(out, projection)
+	}
+	return out
 }

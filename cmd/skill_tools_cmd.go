@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/state"
+	"github.com/Naoray/scribe/internal/tools"
 )
 
 func newSkillToolsCommand() *cobra.Command {
@@ -71,9 +72,15 @@ func runSkillTools(cmd *cobra.Command, args []string) error {
 		return renderSkillTools(name, installed, useJSON)
 	}
 
+	statuses, err := tools.ResolveStatuses(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve tools: %w", err)
+	}
+	projectRoot := activeProjectRootForSkill(installed)
+
 	// Compute desired mode + tool list.
 	desiredMode := installed.ToolsMode
-	current := append([]string(nil), installed.Tools...)
+	current := currentSkillToolsForScope(installed, availableToolNames(statuses), projectRoot)
 	var desired []string
 
 	switch {
