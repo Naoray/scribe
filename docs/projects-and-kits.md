@@ -103,6 +103,26 @@ mcp_servers:
 
 Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits union; the project may add or remove individual skills on top with `add:` / `remove:`. MCP servers can also be declared through kits or directly in `.scribe.yaml` with `mcp:` / `mcp_servers:`; `scribe sync` uses those names to select definitions from project `.mcp.json`. Claude gets enabled server names in `.claude/settings.json`, Codex gets selected definitions in `.codex/config.toml`, and Cursor gets selected definitions in `.cursor/mcp.json`. Existing unmanaged Codex/Cursor entries are preserved; Scribe only replaces entries it previously projected. Scribe does not start MCP server processes.
 
+Registries can publish kits by adding `kits:` entries to their registry `scribe.yaml`. Kit bodies live in the registry repo, conventionally under `kits/<name>.yaml`:
+
+```yaml
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: acme
+catalog:
+  - name: tdd
+    source: github:acme/skills@main
+kits:
+  - name: laravel-baseline
+    description: Laravel app defaults
+    path: kits/laravel-baseline.yaml
+```
+
+Omit `path` to use `kits/<name>.yaml`. Manifest validation rejects duplicate kit names, kit names that collide with skill catalog entries, and paths outside the registry repo.
+
+Use `scribe kit list --remote` to list kits from connected registries, `scribe kit list --registry <owner/repo>` to restrict discovery, and `scribe kit show <owner/repo>:<kit> --json` to inspect a remote kit body. Remote show classifies each skill ref as same-registry, cross-registry, or local and reports whether referenced registries are connected. `scribe kit install` is not part of this phase.
+
 ### Authoring kits and snippets (today)
 
 Snippet **projection** ships in v1.1.0 — `scribe sync` writes snippet bodies into project agent rules files and Cursor rules. A user-facing snippet authoring CLI is still absent; agents (or you, by hand) write snippet markdown into `~/.scribe/snippets/<name>.md` and reference it from `.scribe.yaml`. The embedded scribe skill (installed automatically the first time you run scribe in any supported agent session — Claude Code, Codex, Cursor, Gemini, or a custom tool registered via `scribe tools add`) knows the snippet schema and will scaffold one for you. **Ask your AI agent.**

@@ -514,3 +514,93 @@ func TestEntryMaintainer(t *testing.T) {
 		t.Errorf("Maintainer() = %q, want empty string", got)
 	}
 }
+
+func TestManifestKitsValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		kits    string
+		wantErr string
+	}{
+		{
+			name: "valid default path",
+			kits: `
+kits:
+  - name: laravel-baseline
+    description: Laravel conventions
+`,
+		},
+		{
+			name: "valid explicit path",
+			kits: `
+kits:
+  - name: laravel-baseline
+    path: published/kits/laravel.yaml
+`,
+		},
+		{
+			name: "duplicate kit name",
+			kits: `
+kits:
+  - name: laravel-baseline
+  - name: laravel-baseline
+`,
+			wantErr: `duplicate kit entry name "laravel-baseline"`,
+		},
+		{
+			name: "skill name collision",
+			kits: `
+kits:
+  - name: deploy
+`,
+			wantErr: `kit entry name "deploy" collides with catalog entry`,
+		},
+		{
+			name: "absolute path rejected",
+			kits: `
+kits:
+  - name: bad
+    path: /tmp/bad.yaml
+`,
+			wantErr: `kit entry "bad" path "/tmp/bad.yaml" must stay under repository root`,
+		},
+		{
+			name: "parent path rejected",
+			kits: `
+kits:
+  - name: bad
+    path: ../bad.yaml
+`,
+			wantErr: `kit entry "bad" path "../bad.yaml" must stay under repository root`,
+		},
+	}
+
+	base := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test
+catalog:
+  - name: deploy
+    source: github:owner/repo@main
+`
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := manifest.Parse([]byte(base + tt.kits))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Parse: %v", err)
+				}
+				if len(m.Kits) != 1 {
+					t.Fatalf("kits count = %d, want 1", len(m.Kits))
+				}
+				if m.Kits[0].PathOrDefault() == "" {
+					t.Fatal("PathOrDefault empty")
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
