@@ -76,10 +76,18 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve active tools: %w", err)
 	}
 
-	sourceFilter := sourceFlags.source
-	sources, err := browseSources(sourceFilter, cfg)
-	if err != nil {
-		return err
+	var sources []config.RegistrySource
+	if sourceFlags.hasTyped() && !sourceFlagsMatchConnectedSource(sourceFlags, cfg) {
+		spec, ident, display, err := sourceSpecFromFlags(sourceFlags)
+		if err != nil {
+			return err
+		}
+		sources = []config.RegistrySource{{ID: display, Source: spec, Identity: ident}}
+	} else {
+		sources, err = browseSources(sourceFlags.source, cfg)
+		if err != nil {
+			return err
+		}
 	}
 	repos := legacyReposFromSources(sources)
 
@@ -354,7 +362,8 @@ func browseInstall(
 		if err != nil {
 			return err
 		}
-		return runAddDirectInstallSourceForCommand(nil, ctx, display, ident.Key, spec, skillName, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
+		authenticated := client.IsAuthenticated() || !requiresSourceGitHubAuth(spec)
+		return runAddDirectInstallSourceForCommand(nil, ctx, display, ident.Key, spec, skillName, cfg, st, newInstallSyncer(client, targets), authenticated, useJSON, skipConfirm, resync)
 	}
 
 	var matches []browseEntry
@@ -380,7 +389,8 @@ func browseInstall(
 
 	match := matches[0]
 	if match.SourceKey != "" {
-		return runAddDirectInstallSourceForCommand(nil, ctx, match.Registry, match.SourceKey, match.Source, match.Status.Name, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
+		authenticated := client.IsAuthenticated() || !requiresSourceGitHubAuth(match.Source)
+		return runAddDirectInstallSourceForCommand(nil, ctx, match.Registry, match.SourceKey, match.Source, match.Status.Name, cfg, st, newInstallSyncer(client, targets), authenticated, useJSON, skipConfirm, resync)
 	}
 	return runAddDirectInstall(ctx, match.Registry, match.Status.Name, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
 }

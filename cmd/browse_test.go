@@ -196,6 +196,97 @@ func TestBrowseReposPrefersConnectedRegistryAlias(t *testing.T) {
 	}
 }
 
+func TestRunBrowseAcceptsTypedLocalSourceFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := writeBrowseLocalSkill(t, "deploy")
+
+	stdout, stderr, err := executeBrowseCommand(t, "browse", "--source", "local", "--path", root, "--json")
+	if err != nil {
+		t.Fatalf("browse typed local: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+
+	var out struct {
+		Results []struct {
+			Name      string            `json:"name"`
+			SourceKey string            `json:"source_key"`
+			Source    source.SourceSpec `json:"source"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("unmarshal browse json: %v\nstdout=%s", err, stdout)
+	}
+	if len(out.Results) != 1 || out.Results[0].Name != "deploy" {
+		t.Fatalf("results = %+v, want deploy", out.Results)
+	}
+	if out.Results[0].Source.Type != source.SourceLocal || out.Results[0].Source.Path != root || out.Results[0].SourceKey == "" {
+		t.Fatalf("source fields = %+v", out.Results[0])
+	}
+}
+
+func TestRunBrowseInstallLocalSourceDoesNotRequireGitHubAuth(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "")
+	root := writeBrowseLocalSkill(t, "deploy")
+
+	stdout, stderr, err := executeBrowseCommand(t, "browse", "--source", root, "--install", "deploy", "--json", "--no-interaction")
+	if err != nil {
+		if strings.Contains(err.Error(), "GH_AUTH_FAILED") || strings.Contains(stderr, "GH_AUTH_FAILED") {
+			t.Fatalf("browse install local source required GitHub auth: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+		}
+		t.Fatalf("browse install local source: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+
+	var out struct {
+		Installed []installResult `json:"installed"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("unmarshal install json: %v\nstdout=%s", err, stdout)
+	}
+	if len(out.Installed) != 1 || out.Installed[0].Name != "deploy" || out.Installed[0].Status == "error" {
+		t.Fatalf("installed = %+v, want successful deploy install", out.Installed)
+	}
+}
+
+func writeBrowseLocalSkill(t *testing.T, name string) string {
+	t.Helper()
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "skills", name)
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# "+name+"\n"), 0o644); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+	return root
+}
+
+func executeBrowseCommand(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	root := newRootCmd()
+	root.SetArgs(args)
+	var stderr bytes.Buffer
+	root.SetErr(&stderr)
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = oldStdout }()
+
+	execErr := root.Execute()
+	if closeErr := w.Close(); closeErr != nil && execErr == nil {
+		execErr = closeErr
+	}
+
+	var stdout bytes.Buffer
+	if _, err := stdout.ReadFrom(r); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	return stdout.String(), stderr.String(), execErr
+}
+
 func TestNewBrowseCommandSupportsJSON(t *testing.T) {
 	if !commandSupportsJSON(newBrowseCommand()) {
 		t.Fatal("browse should be marked JSON-supported")
