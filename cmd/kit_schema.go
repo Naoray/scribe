@@ -63,7 +63,38 @@ const kitShowOutputSchema = `{
   }
 }`
 
+const kitInstallOutputSchema = `{
+  "type": "object",
+  "required": ["name", "registry", "path", "rev"],
+  "properties": {
+    "name": {"type": "string"},
+    "registry": {"type": "string"},
+    "path": {"type": "string"},
+    "rev": {"type": "string"},
+    "skills_installed": {"type": "array", "items": {"type": "string"}},
+    "missing_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["raw", "reason"],
+        "properties": {
+          "raw": {"type": "string"},
+          "skill": {"type": "string"},
+          "origin": {"type": "string", "enum": ["same_registry", "cross_registry", "local"]},
+          "registry": {"type": "string"},
+          "connected": {"type": "boolean"},
+          "glob": {"type": "boolean"},
+          "local": {"type": "boolean"},
+          "source": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}`
+
 func init() {
 	clischema.Register("scribe kit list", kitListOutputSchema)
 	clischema.Register("scribe kit show", kitShowOutputSchema)
+	clischema.Register("scribe kit install", kitInstallOutputSchema)
 }

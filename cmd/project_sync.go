@@ -36,6 +36,7 @@ type projectSyncOptions struct {
 type projectSyncOutput struct {
 	ProjectRoot      string   `json:"project_root"`
 	KitsWritten      []string `json:"kits_written,omitempty"`
+	KitsPinned       []string `json:"kits_pinned,omitempty"`
 	SkillsVendored   []string `json:"skills_vendored,omitempty"`
 	RegistryPinned   []string `json:"registry_pinned,omitempty"`
 	BootstrapSkipped []string `json:"bootstrap_skipped,omitempty"`
@@ -100,7 +101,8 @@ func runProjectSync(cmd *cobra.Command, opts *projectSyncOptions) error {
 		return err
 	}
 	out := projectSyncOutput{ProjectRoot: projectRoot}
-	if err := syncProjectKits(projectRoot, scribeDir, pf.Kits, globalKits, opts, &out); err != nil {
+	kitPins, err := syncProjectKits(projectRoot, scribeDir, pf.Kits, globalKits, st, opts, &out)
+	if err != nil {
 		return err
 	}
 	skillNames := resolveProjectSkillNames(pf, globalKits)
@@ -112,7 +114,7 @@ func runProjectSync(cmd *cobra.Command, opts *projectSyncOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := writeProjectLock(projectRoot, lockEntries, opts, &out); err != nil {
+	if err := writeProjectLock(projectRoot, kitPins, lockEntries, opts, &out); err != nil {
 		return err
 	}
 	if opts.check && len(out.Drift) > 0 {
@@ -135,11 +137,12 @@ func runProjectSync(cmd *cobra.Command, opts *projectSyncOptions) error {
 	return nil
 }
 
-func syncProjectKits(projectRoot, scribeDir string, kitNames []string, global map[string]*kit.Kit, opts *projectSyncOptions, out *projectSyncOutput) error {
+func syncProjectKits(projectRoot, scribeDir string, kitNames []string, global map[string]*kit.Kit, st *state.State, opts *projectSyncOptions, out *projectSyncOutput) ([]lockfile.ProjectKit, error) {
+	pins := make([]lockfile.ProjectKit, 0, len(kitNames))
 	for _, name := range sortedProjectStrings(kitNames) {
 		k, ok := global[name]
 		if !ok {
-			return clierrors.Wrap(fmt.Errorf("kit %q not found", name), "PROJECT_KIT_NOT_FOUND", clierrors.ExitNotFound,
+			return nil, clierrors.Wrap(fmt.Errorf("kit %q not found", name), "PROJECT_KIT_NOT_FOUND", clierrors.ExitNotFound,
 				clierrors.WithRemediation("Create the kit locally or remove it from .scribe.yaml."),
 			)
 		}
@@ -148,13 +151,45 @@ func syncProjectKits(projectRoot, scribeDir string, kitNames []string, global ma
 		_ = k
 		changed, err := copyFileIfChanged(src, dst, opts)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if changed {
 			out.KitsWritten = append(out.KitsWritten, name)
 		}
+		if pin, ok := projectKitPinFromState(name, k, st); ok {
+			pins = append(pins, pin)
+			out.KitsPinned = append(out.KitsPinned, name)
+		}
 	}
-	return nil
+	return pins, nil
+}
+
+func projectKitPinFromState(name string, k *kit.Kit, st *state.State) (lockfile.ProjectKit, bool) {
+	if st == nil || k == nil || st.Kits == nil {
+		return lockfile.ProjectKit{}, false
+	}
+	installed, ok := st.Kits[name]
+	if !ok {
+		return lockfile.ProjectKit{}, false
+	}
+	registry := installed.SourceRegistry
+	if registry == "" && k.Source != nil {
+		registry = k.Source.Registry
+	}
+	rev := installed.Rev
+	if rev == "" && k.Source != nil {
+		rev = k.Source.Rev
+	}
+	if registry == "" || rev == "" || installed.ContentHash == "" {
+		return lockfile.ProjectKit{}, false
+	}
+	return lockfile.ProjectKit{
+		Name:           name,
+		SourceRegistry: registry,
+		CommitSHA:      rev,
+		ContentHash:    installed.ContentHash,
+		SkillsRefs:     append([]string(nil), k.Skills...),
+	}, true
 }
 
 func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendorSet map[string]bool, st *state.State, opts *projectSyncOptions, out *projectSyncOutput) ([]lockfile.ProjectEntry, error) {
@@ -334,12 +369,13 @@ func installableDir(name string, installed state.InstalledSkill) (string, error)
 	return filepath.Join(dir, name), nil
 }
 
-func writeProjectLock(projectRoot string, entries []lockfile.ProjectEntry, opts *projectSyncOptions, out *projectSyncOutput) error {
+func writeProjectLock(projectRoot string, kits []lockfile.ProjectKit, entries []lockfile.ProjectEntry, opts *projectSyncOptions, out *projectSyncOutput) error {
 	store := projectstore.Project(projectRoot)
 	lf := &lockfile.ProjectLockfile{
 		FormatVersion: lockfile.SchemaVersion,
 		Kind:          lockfile.ProjectKind,
 		GeneratedBy:   "scribe",
+		Kits:          kits,
 		Entries:       entries,
 	}
 	data, err := lf.Encode()

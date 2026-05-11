@@ -28,6 +28,7 @@ type ProjectLockfile struct {
 	Kind          string         `yaml:"kind"`
 	GeneratedAt   string         `yaml:"generated_at,omitempty"`
 	GeneratedBy   string         `yaml:"generated_by,omitempty"`
+	Kits          []ProjectKit   `yaml:"kits,omitempty"`
 	Entries       []ProjectEntry `yaml:"entries"`
 }
 
@@ -48,6 +49,14 @@ type ProjectEntry struct {
 	Update     string            `yaml:"update,omitempty" json:"update,omitempty"`
 	Installs   map[string]string `yaml:"installs,omitempty" json:"installs,omitempty"`
 	Updates    map[string]string `yaml:"updates,omitempty" json:"updates,omitempty"`
+}
+
+type ProjectKit struct {
+	Name           string   `yaml:"name" json:"name"`
+	SourceRegistry string   `yaml:"source_registry" json:"source_registry"`
+	CommitSHA      string   `yaml:"commit_sha" json:"commit_sha"`
+	ContentHash    string   `yaml:"content_hash" json:"content_hash"`
+	SkillsRefs     []string `yaml:"skills_refs,omitempty" json:"skills_refs,omitempty"`
 }
 
 type Update struct {
@@ -167,6 +176,25 @@ func (lf *ProjectLockfile) Validate() error {
 	}
 	if strings.TrimSpace(lf.Kind) != ProjectKind {
 		return fmt.Errorf("project lockfile kind is %q (expected %q)", lf.Kind, ProjectKind)
+	}
+	seenKits := make(map[string]bool, len(lf.Kits))
+	for _, kit := range lf.Kits {
+		if strings.TrimSpace(kit.Name) == "" {
+			return errors.New("project lockfile kit has empty name")
+		}
+		if seenKits[kit.Name] {
+			return fmt.Errorf("duplicate project lockfile kit %q", kit.Name)
+		}
+		seenKits[kit.Name] = true
+		if strings.TrimSpace(kit.SourceRegistry) == "" {
+			return fmt.Errorf("project lockfile kit %q missing source_registry", kit.Name)
+		}
+		if strings.TrimSpace(kit.CommitSHA) == "" {
+			return fmt.Errorf("project lockfile kit %q missing commit_sha", kit.Name)
+		}
+		if strings.TrimSpace(kit.ContentHash) == "" {
+			return fmt.Errorf("project lockfile kit %q has invalid content_hash", kit.Name)
+		}
 	}
 	seen := make(map[string]bool, len(lf.Entries))
 	for _, entry := range lf.Entries {

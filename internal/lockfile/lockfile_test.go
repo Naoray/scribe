@@ -40,6 +40,13 @@ func TestParseProjectEncodeValidate(t *testing.T) {
 format_version: 1
 kind: ProjectLock
 generated_by: scribe@test
+kits:
+  - name: baseline
+    source_registry: acme/registry
+    commit_sha: kitsha
+    content_hash: ` + hashA + `
+    skills_refs:
+      - deploy
 entries:
   - name: deploy
     source_registry: acme/registry
@@ -67,11 +74,14 @@ entries:
 	if entry.SourceRepo != "acme/skills" || entry.Path != "skills/deploy" || entry.Installs["claude"] == "" {
 		t.Fatalf("unexpected project entry: %+v", entry)
 	}
+	if len(lf.Kits) != 1 || lf.Kits[0].Name != "baseline" || lf.Kits[0].SkillsRefs[0] != "deploy" {
+		t.Fatalf("unexpected project kits: %+v", lf.Kits)
+	}
 	encoded, err := lf.Encode()
 	if err != nil {
 		t.Fatalf("Encode() error = %v", err)
 	}
-	if !strings.Contains(string(encoded), "kind: ProjectLock") || !strings.Contains(string(encoded), "source_repo: acme/skills") {
+	if !strings.Contains(string(encoded), "kind: ProjectLock") || !strings.Contains(string(encoded), "kits:") || !strings.Contains(string(encoded), "source_repo: acme/skills") {
 		t.Fatalf("encoded project lockfile missing fields: %s", encoded)
 	}
 }

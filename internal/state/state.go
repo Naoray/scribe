@@ -49,9 +49,14 @@ const (
 
 // InstalledKit indexes an installed kit definition in the local state file.
 type InstalledKit struct {
-	Source  string   `json:"source,omitempty"`
-	Version string   `json:"version,omitempty"`
-	Skills  []string `json:"skills,omitempty"`
+	Name           string    `json:"name,omitempty"`
+	SourceRegistry string    `json:"source_registry,omitempty"`
+	Rev            string    `json:"rev,omitempty"`
+	ContentHash    string    `json:"content_hash,omitempty"`
+	InstalledAt    time.Time `json:"installed_at,omitempty"`
+	Source         string    `json:"source,omitempty"`
+	Version        string    `json:"version,omitempty"`
+	Skills         []string  `json:"skills,omitempty"`
 }
 
 // InstalledSnippet indexes an installed snippet definition in the local state file.

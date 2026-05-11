@@ -72,6 +72,13 @@ func TestProjectSyncVendorsProjectSkillAndPinsRegistrySkill(t *testing.T) {
 
 	st := stateFixture(t, home)
 	st.Installed["review"] = state.InstalledSkill{Origin: state.OriginProject}
+	st.Kits["core"] = state.InstalledKit{
+		Name:           "core",
+		SourceRegistry: "acme/skills",
+		Rev:            "kitsha",
+		ContentHash:    "kithash",
+		Skills:         []string{"deploy"},
+	}
 	st.Installed["deploy"] = state.InstalledSkill{
 		InstalledHash: "hash",
 		Sources: []state.SkillSource{{
@@ -117,6 +124,9 @@ func TestProjectSyncVendorsProjectSkillAndPinsRegistrySkill(t *testing.T) {
 	}
 	if entry.SourceRegistry != "acme/skills" || entry.SourceRepo != "acme/source" || entry.Path != "skills/deploy" {
 		t.Fatalf("entry = %+v", entry)
+	}
+	if len(lf.Kits) != 1 || lf.Kits[0].Name != "core" || lf.Kits[0].CommitSHA != "kitsha" || lf.Kits[0].SkillsRefs[0] != "deploy" {
+		t.Fatalf("kit pins = %+v", lf.Kits)
 	}
 }
 
@@ -260,6 +270,9 @@ func stateFixture(t *testing.T, home string) *state.State {
 	}
 	if st.Installed == nil {
 		st.Installed = map[string]state.InstalledSkill{}
+	}
+	if st.Kits == nil {
+		st.Kits = map[string]state.InstalledKit{}
 	}
 	return st
 }
