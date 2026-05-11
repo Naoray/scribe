@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/registry"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -53,6 +54,49 @@ func TestRunBrowseWithDeps_JSONQueryFiltersResults(t *testing.T) {
 	}
 	if len(out.Results) != 1 || out.Results[0].Name != "cleanup" {
 		t.Fatalf("results = %+v, want only cleanup", out.Results)
+	}
+}
+
+func TestRunBrowseKitsWithDeps_JSONQueryFiltersResults(t *testing.T) {
+	old := discoverKitEntriesFn
+	defer func() { discoverKitEntriesFn = old }()
+	discoverKitEntriesFn = func(context.Context, []string, registry.FileFetcher, *state.State) ([]kitBrowseEntry, []error) {
+		return []kitBrowseEntry{
+			{Kit: registry.ManifestKit{Registry: "acme/skills", Name: "baseline", Path: "kits/baseline.yaml", Description: "Laravel baseline"}, Installed: true},
+			{Kit: registry.ManifestKit{Registry: "acme/skills", Name: "ops", Path: "kits/ops.yaml", Description: "Ops kit"}},
+		}, nil
+	}
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = oldStdout }()
+
+	err = runBrowseKitsWithDeps(context.Background(), []string{"acme/skills"}, "base", "", nil, &state.State{Kits: map[string]state.InstalledKit{}}, nil, true, true)
+	w.Close()
+	if err != nil {
+		t.Fatalf("runBrowseKitsWithDeps() error = %v", err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	var out struct {
+		Results []struct {
+			Name             string `json:"name"`
+			Registry         string `json:"registry"`
+			InstalledLocally bool   `json:"installed_locally"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal browse kits json: %v", err)
+	}
+	if len(out.Results) != 1 || out.Results[0].Name != "baseline" || !out.Results[0].InstalledLocally {
+		t.Fatalf("results = %+v, want installed baseline only", out.Results)
 	}
 }
 

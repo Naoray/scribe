@@ -50,7 +50,9 @@ func tickSpinnerCmd() tea.Cmd {
 func (m listModel) viewLoading() string {
 	frame := spinnerFrames[m.spinnerFrame]
 	msg := "Loading skills..."
-	if m.isBrowseMode() {
+	if m.isBrowseKitsMode() {
+		msg = "Loading registry kits..."
+	} else if m.isBrowseMode() {
 		msg = "Loading registry skills..."
 	}
 	return "\n  " + ltSpinnerStyle.Render(frame) + "  " + ltDimStyle.Render(msg) + "\n"
@@ -87,7 +89,9 @@ func (m listModel) viewListFull() string {
 	if m.commandMode {
 		b.WriteString(ltDimStyle.Render("Command mode · enter run · esc cancel · backspace delete") + "\n")
 	}
-	if m.isBrowseMode() {
+	if m.isBrowseKitsMode() {
+		b.WriteString(ltDimStyle.Render("↑↓ navigate · /search · enter install · q quit") + "\n")
+	} else if m.isBrowseMode() {
 		b.WriteString(ltDimStyle.Render("↑↓ navigate · /search · enter detail · q quit") + "\n")
 	} else {
 		b.WriteString(ltDimStyle.Render("↑↓ navigate · /search · :commands · enter detail · q quit") + "\n")
@@ -152,7 +156,9 @@ func (m listModel) viewSplit() string {
 	case m.substate == listSubstateTools:
 		b.WriteString(ltDimStyle.Render("↑↓ choose · enter toggle/save · esc cancel") + "\n")
 	case m.focus == focusList:
-		if m.isBrowseMode() {
+		if m.isBrowseKitsMode() {
+			b.WriteString(ltDimStyle.Render("↑↓ browse kits · →/enter install · esc close · q quit") + "\n")
+		} else if m.isBrowseMode() {
 			b.WriteString(ltDimStyle.Render("↑↓ browse skills · →/enter install · esc close · q quit") + "\n")
 		} else {
 			b.WriteString(ltDimStyle.Render("↑↓ browse skills · →/enter actions · esc close · q quit") + "\n")
@@ -179,6 +185,9 @@ func (m listModel) renderQueryLine() string {
 	if m.searchMode || m.search != "" {
 		return "/ " + m.search
 	}
+	if m.isBrowseKitsMode() {
+		return ltDimStyle.Render("/ search kits...")
+	}
 	if m.isBrowseMode() {
 		return ltDimStyle.Render("/ search registries...")
 	}
@@ -187,9 +196,15 @@ func (m listModel) renderQueryLine() string {
 
 func (m listModel) renderHeader() string {
 	var b strings.Builder
-	total := ltCountStyle.Render(fmt.Sprintf("%d skills", len(m.rows)))
+	unit := "skills"
+	if m.isBrowseKitsMode() {
+		unit = "kits"
+	}
+	total := ltCountStyle.Render(fmt.Sprintf("%d %s", len(m.rows), unit))
 	title := "Installed Skills"
-	if m.isBrowseMode() {
+	if m.isBrowseKitsMode() {
+		title = "Browse Kits"
+	} else if m.isBrowseMode() {
 		title = "Browse Skills"
 	}
 	b.WriteString(ltHeaderStyle.Render(title) + "  " + total + "\n")
@@ -232,7 +247,11 @@ func wrapText(s string, width int) string {
 
 func (m listModel) renderRows(b *strings.Builder, contentHeight, maxWidth int, compact bool) {
 	if len(m.filtered) == 0 {
-		b.WriteString(ltDimStyle.Render("  (no skills match)") + "\n")
+		label := "skills"
+		if m.isBrowseKitsMode() {
+			label = "kits"
+		}
+		b.WriteString(ltDimStyle.Render("  (no "+label+" match)") + "\n")
 		return
 	}
 
@@ -441,7 +460,11 @@ func (m listModel) renderSummary() string {
 		}
 	}
 	if !hasStatus {
-		return ltDimStyle.Render(fmt.Sprintf("%d skills total", len(m.rows)))
+		unit := "skills"
+		if m.isBrowseKitsMode() {
+			unit = "kits"
+		}
+		return ltDimStyle.Render(fmt.Sprintf("%d %s total", len(m.rows), unit))
 	}
 	order := []sync.Status{sync.StatusCurrent, sync.StatusModified, sync.StatusOutdated, sync.StatusConflicted, sync.StatusMissing, sync.StatusExtra}
 	var parts []string

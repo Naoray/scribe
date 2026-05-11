@@ -351,6 +351,75 @@ description: Keep daily notes and summaries.
 	}
 }
 
+func TestInspectManagedSkillsReportsRegistryKitIssues(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+
+	kitsDir := filepath.Join(home, ".scribe", "kits")
+	if err := os.MkdirAll(kitsDir, 0o755); err != nil {
+		t.Fatalf("mkdir kits: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(kitsDir, "baseline.yaml"), []byte("name: baseline\nskills:\n  - other/skills:debugging\n"), 0o644); err != nil {
+		t.Fatalf("write kit: %v", err)
+	}
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{},
+		Kits: map[string]state.InstalledKit{
+			"baseline": {Name: "baseline", SourceRegistry: "acme/skills"},
+			"missing":  {Name: "missing", SourceRegistry: "acme/skills"},
+		},
+	}
+	cfg := &config.Config{Registries: []config.RegistryConfig{{Repo: "acme/skills", Enabled: true}}}
+
+	report, err := InspectManagedSkills(cfg, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+
+	if !hasIssue(report, "kit:baseline", IssueKitRefBroken) {
+		t.Fatalf("missing cross-registry ref issue: %+v", report.Issues)
+	}
+	if !hasIssue(report, "kit:missing", IssueKitOrphaned) {
+		t.Fatalf("missing orphaned kit issue: %+v", report.Issues)
+	}
+}
+
+func TestInspectManagedSkillsReportsForgottenKitRegistry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+
+	kitsDir := filepath.Join(home, ".scribe", "kits")
+	if err := os.MkdirAll(kitsDir, 0o755); err != nil {
+		t.Fatalf("mkdir kits: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(kitsDir, "baseline.yaml"), []byte("name: baseline\nskills:\n  - tdd\n"), 0o644); err != nil {
+		t.Fatalf("write kit: %v", err)
+	}
+	st := &state.State{
+		Installed: map[string]state.InstalledSkill{},
+		Kits:      map[string]state.InstalledKit{"baseline": {Name: "baseline", SourceRegistry: "acme/skills"}},
+	}
+
+	report, err := InspectManagedSkills(&config.Config{}, st, "")
+	if err != nil {
+		t.Fatalf("InspectManagedSkills: %v", err)
+	}
+	if !hasIssue(report, "kit:baseline", IssueKitRegistryForgotten) {
+		t.Fatalf("missing forgotten registry issue: %+v", report.Issues)
+	}
+}
+
+func hasIssue(report Report, skill string, kind IssueKind) bool {
+	for _, issue := range report.Issues {
+		if issue.Skill == skill && issue.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 // TestInspectStillReportsDriftForInspectableTool guards against regressing
 // drift detection while fixing the opacity bug. A real inspectable tool with
 // a missing projection on disk must still surface as projection_drift.

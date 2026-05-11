@@ -11,6 +11,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/registry"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -40,6 +41,9 @@ type ListRow struct {
 }
 
 func BuildRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
+	if bag.KitBrowseFlag {
+		return BuildKitBrowseRows(ctx, bag)
+	}
 	localSkills, err := discovery.OnDisk(bag.State)
 	if err != nil {
 		return nil, nil, err
@@ -128,6 +132,66 @@ func BuildRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
 	}
 
 	rows = append(rows, BuildLocalRowsExcluding(localSkills, matchedLocal, bag.State)...)
+	return rows, warnings, nil
+}
+
+func BuildKitBrowseRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
+	repos := bag.Config.TeamRepos()
+	if bag.FilterRegistries != nil {
+		filtered, err := bag.FilterRegistries(bag.RepoFlag, repos)
+		if err != nil {
+			return nil, nil, err
+		}
+		repos = filtered
+	}
+
+	installed := map[string]state.InstalledKit{}
+	if bag.State != nil {
+		for name, kit := range bag.State.Kits {
+			installed[name] = kit
+		}
+	}
+
+	var rows []ListRow
+	var warnings []string
+	for _, repo := range repos {
+		kits, err := registry.ListKits(ctx, bag.Client, repo)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: %v", repo, err))
+			continue
+		}
+		for _, remote := range kits {
+			status := sync.StatusMissing
+			if local, ok := installed[remote.Name]; ok {
+				source := local.SourceRegistry
+				if source == "" {
+					source = local.Source
+				}
+				if source == repo {
+					status = sync.StatusCurrent
+				}
+			}
+			rows = append(rows, ListRow{
+				Name:      remote.Name,
+				Group:     repo,
+				Status:    status,
+				HasStatus: true,
+				Version:   remote.Path,
+				Author:    remote.Author,
+				Entry: &manifest.Entry{
+					Name:        remote.Name,
+					Description: remote.Description,
+					Author:      remote.Author,
+				},
+			})
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Group != rows[j].Group {
+			return rows[i].Group < rows[j].Group
+		}
+		return rows[i].Name < rows[j].Name
+	})
 	return rows, warnings, nil
 }
 

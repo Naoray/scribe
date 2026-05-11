@@ -122,6 +122,10 @@ func (m listModel) runInstall(row listRow) tea.Cmd {
 	ctx := m.ctx
 	bag := m.bag
 	return func() tea.Msg {
+		if bag != nil && bag.KitBrowseFlag {
+			err := runKitInstall(newKitInstallCommand(), row.Group+":"+row.Name, &kitInstallOptions{noInteraction: true})
+			return commandDoneMsg{err: err}
+		}
 		if err := listEnsureRemoteDepsFn(ctx, bag); err != nil {
 			return commandDoneMsg{err: err}
 		}

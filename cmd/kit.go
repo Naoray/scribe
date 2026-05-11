@@ -51,6 +51,11 @@ type kitInstallOptions struct {
 	json          bool
 }
 
+type kitPushOptions struct {
+	registry string
+	json     bool
+}
+
 type kitCreateOutput struct {
 	Name            string `json:"name"`
 	Path            string `json:"path"`
@@ -91,6 +96,14 @@ type kitInstallOutput struct {
 	SkillsInstalled   []string       `json:"skills_installed,omitempty"`
 	MissingRefs       []kitRefOutput `json:"missing_refs,omitempty"`
 	MissingRegistries []string       `json:"missing_registries,omitempty"`
+}
+
+type kitPushOutput struct {
+	Name      string `json:"name"`
+	Registry  string `json:"registry"`
+	Path      string `json:"path"`
+	CommitSHA string `json:"commit_sha"`
+	CommitURL string `json:"commit_url"`
 }
 
 type kitSourceOutput struct {
@@ -158,6 +171,7 @@ func newKitCommand() *cobra.Command {
 	cmd.AddCommand(newKitShowCommand())
 	cmd.AddCommand(newKitInstallCommand())
 	cmd.AddCommand(newKitSyncCommand())
+	cmd.AddCommand(newKitPushCommand())
 	return cmd
 }
 
@@ -243,6 +257,22 @@ func newKitSyncCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.noDeps, "no-deps", false, "Refresh kit bodies without installing referenced skills")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
+	return markJSONSupported(cmd)
+}
+
+func newKitPushCommand() *cobra.Command {
+	opts := &kitPushOptions{}
+	cmd := &cobra.Command{
+		Use:   "push <name>",
+		Short: "Push a local kit to its source registry",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.json = jsonFlagPassed(cmd)
+			return runKitPush(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.registry, "registry", "", "Registry owner/repo to publish to")
+	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
 	return markJSONSupported(cmd)
 }
 
@@ -754,6 +784,122 @@ func runKitSync(cmd *cobra.Command, opts *kitInstallOptions) error {
 	}
 	for _, out := range outputs {
 		fmt.Fprintf(cmd.OutOrStdout(), "Synced kit %s from %s\n", out.Name, out.Registry)
+	}
+	return nil
+}
+
+func runKitPush(cmd *cobra.Command, name string, opts *kitPushOptions) error {
+	if opts == nil {
+		opts = &kitPushOptions{}
+	}
+	if err := validateKitName(name); err != nil {
+		return err
+	}
+	factory := commandFactory()
+	st, err := factory.State()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	client, err := factory.Client()
+	if err != nil {
+		return fmt.Errorf("load github client: %w", err)
+	}
+	if client == nil || !client.IsAuthenticated() {
+		return clierrors.Wrap(errors.New("GitHub authentication required"), "PUSH_AUTH_REQUIRED", clierrors.ExitPerm,
+			clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
+		)
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return fmt.Errorf("resolve scribe dir: %w", err)
+	}
+	kitPath := filepath.Join(scribeDir, "kits", name+".yaml")
+	body, err := os.ReadFile(kitPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return clierrors.Wrap(fmt.Errorf("kit %q not found", name), "KIT_NOT_FOUND", clierrors.ExitNotFound,
+				clierrors.WithResource(name),
+				clierrors.WithRemediation("Run `scribe kit list` to see local kits."),
+			)
+		}
+		return fmt.Errorf("read kit: %w", err)
+	}
+	k, err := kit.Parse(body)
+	if err != nil {
+		return err
+	}
+	if k.Name == "" {
+		k.Name = name
+	} else if k.Name != name {
+		return clierrors.Wrap(fmt.Errorf("kit file name %q does not match requested kit %q", k.Name, name), "KIT_NAME_MISMATCH", clierrors.ExitValid,
+			clierrors.WithResource(kitPath),
+		)
+	}
+	registryRepo := opts.registry
+	expectedHash := ""
+	if installed, ok := st.Kits[name]; ok {
+		expectedHash = installed.ContentHash
+		if registryRepo == "" {
+			registryRepo = installed.SourceRegistry
+		}
+		if registryRepo == "" {
+			registryRepo = installed.Source
+		}
+	}
+	if registryRepo == "" && k.Source != nil {
+		registryRepo = k.Source.Registry
+	}
+	if registryRepo == "" {
+		return clierrors.Wrap(fmt.Errorf("kit %q has no source registry", name), "PUSH_SOURCE_MISSING", clierrors.ExitPerm,
+			clierrors.WithResource(name),
+			clierrors.WithRemediation("Run `scribe kit push "+name+" --registry <owner/repo>`."),
+		)
+	}
+	if err := validateRegistryKitRefs(k, registryRepo); err != nil {
+		return err
+	}
+	entry := manifest.KitEntry{
+		Name:        name,
+		Path:        "kits/" + name + ".yaml",
+		Description: k.Description,
+	}
+	result, err := registry.PushKit(cmd.Context(), newRegistryPusher(client), name, registryRepo, body, entry, expectedHash)
+	if err != nil {
+		return err
+	}
+	out := kitPushOutput{
+		Name:      name,
+		Registry:  registryRepo,
+		Path:      entry.PathOrDefault(),
+		CommitSHA: result.CommitSHA,
+		CommitURL: result.CommitURL,
+	}
+	if opts.json {
+		r := jsonRendererForCommand(cmd, true)
+		if err := r.Result(out); err != nil {
+			return err
+		}
+		return r.Flush()
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Pushed kit %s to %s at %s\n", out.Name, out.Registry, out.CommitSHA)
+	return nil
+}
+
+func validateRegistryKitRefs(k *kit.Kit, registryRepo string) error {
+	for _, raw := range k.Skills {
+		ref, err := kit.ParseSkillRef(raw, registryRepo)
+		if err != nil {
+			return clierrors.Wrap(err, "KIT_REF_INVALID", clierrors.ExitValid,
+				clierrors.WithResource(raw),
+				clierrors.WithRemediation("Fix the kit skills list before publishing."),
+			)
+		}
+		if ref.Local {
+			return clierrors.Wrap(fmt.Errorf("kit ref %q uses local: refs, which cannot be published", raw), "KIT_LOCAL_REF_FORBIDDEN", clierrors.ExitValid,
+				clierrors.WithResource(raw),
+				clierrors.WithRemediation("Replace local refs with registry refs before publishing."),
+			)
+		}
 	}
 	return nil
 }

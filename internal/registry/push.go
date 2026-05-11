@@ -12,7 +12,9 @@ import (
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -21,6 +23,11 @@ type GitHubPusher interface {
 	GetTree(ctx context.Context, owner, repo, ref string) ([]TreeEntry, error)
 	LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error)
 	PushFilesAtomic(ctx context.Context, owner, repo, branch string, files map[string][]byte, message, expectedHead string) (CommitResult, error)
+}
+
+type KitPusher interface {
+	GitHubPusher
+	FetchFile(ctx context.Context, owner, repo, path, ref string) ([]byte, error)
 }
 
 // TreeEntry is a Git tree entry used for conflict checks.
@@ -41,7 +48,7 @@ type githubPusher struct {
 }
 
 // NewGitHubPusher adapts the shared GitHub client to the push interface.
-func NewGitHubPusher(client *gh.Client) GitHubPusher {
+func NewGitHubPusher(client *gh.Client) KitPusher {
 	return githubPusher{client: client}
 }
 
@@ -55,6 +62,10 @@ func (p githubPusher) GetTree(ctx context.Context, owner, repo, ref string) ([]T
 		out[i] = TreeEntry{Path: entry.Path, Type: entry.Type, SHA: entry.SHA}
 	}
 	return out, nil
+}
+
+func (p githubPusher) FetchFile(ctx context.Context, owner, repo, path, ref string) ([]byte, error) {
+	return p.client.FetchFile(ctx, owner, repo, path, ref)
 }
 
 func (p githubPusher) LatestCommitSHA(ctx context.Context, owner, repo, branch string) (string, error) {
@@ -75,6 +86,72 @@ type PushResult struct {
 	Registry  string
 	CommitSHA string
 	CommitURL string
+}
+
+// PushKit publishes one local kit YAML file and updates the registry manifest.
+func PushKit(ctx context.Context, client KitPusher, kitName, registryRepo string, body []byte, entry manifest.KitEntry, expectedContentHash string) (PushResult, error) {
+	owner, repo, err := manifest.ParseOwnerRepo(registryRepo)
+	if err != nil {
+		return PushResult{}, clierrors.Wrap(err, "PUSH_INVALID_REGISTRY", clierrors.ExitConflict,
+			clierrors.WithRemediation("install or create the kit with a valid registry source"),
+		)
+	}
+	pathName := strings.Trim(strings.TrimSpace(entry.Path), "/")
+	if pathName == "" {
+		pathName = "kits/" + kitName + ".yaml"
+	}
+	entry.Path = pathName
+	if entry.Name == "" {
+		entry.Name = kitName
+	}
+
+	headSHA, err := client.LatestCommitSHA(ctx, owner, repo, "main")
+	if err != nil {
+		return PushResult{}, err
+	}
+	m, _, err := manifest.FetchWithFallback(ctx, client, owner, repo, migrate.Convert)
+	if err != nil {
+		return PushResult{}, fmt.Errorf("fetch manifest: %w", err)
+	}
+	if expectedContentHash != "" {
+		if remote, err := client.FetchFile(ctx, owner, repo, pathName, "HEAD"); err == nil {
+			remoteHash := hashKitBody(kitName, remote)
+			if remoteHash != expectedContentHash {
+				return PushResult{}, clierrors.Wrap(errors.New("remote kit has changed since it was installed"), "PUSH_CONFLICT", clierrors.ExitConflict,
+					clierrors.WithResource(kitName),
+					clierrors.WithRemediation("run `scribe kit sync` and reapply your local edits before pushing"),
+				)
+			}
+		}
+	}
+	upsertManifestKit(m, entry)
+	encoded, err := m.Encode()
+	if err != nil {
+		return PushResult{}, fmt.Errorf("encode manifest: %w", err)
+	}
+	commit, err := client.PushFilesAtomic(ctx, owner, repo, "main", map[string][]byte{
+		pathName:                  body,
+		manifest.ManifestFilename: encoded,
+	}, fmt.Sprintf("Update %s kit", kitName), headSHA)
+	if err != nil {
+		return PushResult{}, err
+	}
+	return PushResult{Skill: kitName, Registry: registryRepo, CommitSHA: commit.SHA, CommitURL: commit.URL}, nil
+}
+
+func upsertManifestKit(m *manifest.Manifest, entry manifest.KitEntry) {
+	for i := range m.Kits {
+		if m.Kits[i].Name == entry.Name {
+			m.Kits[i] = entry
+			return
+		}
+	}
+	m.Kits = append(m.Kits, entry)
+}
+
+func hashKitBody(name string, body []byte) string {
+	hash, _ := lockfile.HashFiles([]lockfile.File{{Path: name + ".yaml", Content: body}})
+	return hash
 }
 
 // PushSkill publishes all files in skillDir back to source in one commit.

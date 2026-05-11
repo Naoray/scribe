@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -16,8 +17,18 @@ type fakePusher struct {
 	head       string
 	err        error
 	files      map[string][]byte
+	remote     map[string][]byte
 	expected   string
 	pushCalled bool
+}
+
+func (f *fakePusher) FetchFile(_ context.Context, _, _, path, _ string) ([]byte, error) {
+	if f.remote != nil {
+		if body, ok := f.remote[path]; ok {
+			return body, nil
+		}
+	}
+	return nil, os.ErrNotExist
 }
 
 func (f *fakePusher) GetTree(context.Context, string, string, string) ([]TreeEntry, error) {
@@ -90,6 +101,59 @@ func TestPushSkillRefusesRemoteDivergence(t *testing.T) {
 	}
 	if client.pushCalled {
 		t.Fatal("push should not be called on conflict")
+	}
+}
+
+func TestPushKitUpdatesManifestAndKitBody(t *testing.T) {
+	body := []byte("name: baseline\ndescription: Base kit\nskills:\n  - tdd\n")
+	client := &fakePusher{
+		head: "head-sha",
+		remote: map[string][]byte{
+			"scribe.yaml": []byte("apiVersion: scribe/v1\nkind: Registry\nteam:\n  name: Acme\ncatalog: []\n"),
+		},
+	}
+
+	result, err := PushKit(context.Background(), client, "baseline", "acme/skills", body, manifest.KitEntry{
+		Name:        "baseline",
+		Description: "Base kit",
+	}, "")
+	if err != nil {
+		t.Fatalf("PushKit() error = %v", err)
+	}
+	if result.CommitSHA != "abc123" || result.Registry != "acme/skills" {
+		t.Fatalf("result = %+v", result)
+	}
+	if client.expected != "head-sha" {
+		t.Fatalf("expected head = %q, want head-sha", client.expected)
+	}
+	if string(client.files["kits/baseline.yaml"]) != string(body) {
+		t.Fatalf("kit body not pushed: %#v", client.files)
+	}
+	m, err := manifest.Parse(client.files["scribe.yaml"])
+	if err != nil {
+		t.Fatalf("parse pushed manifest: %v\n%s", err, client.files["scribe.yaml"])
+	}
+	if len(m.Kits) != 1 || m.Kits[0].Name != "baseline" || m.Kits[0].PathOrDefault() != "kits/baseline.yaml" {
+		t.Fatalf("manifest kits = %+v", m.Kits)
+	}
+}
+
+func TestPushKitRefusesRemoteKitDivergence(t *testing.T) {
+	body := []byte("name: baseline\nskills:\n  - tdd\n")
+	client := &fakePusher{
+		head: "head-sha",
+		remote: map[string][]byte{
+			"scribe.yaml":        []byte("apiVersion: scribe/v1\nkind: Registry\nteam:\n  name: Acme\ncatalog: []\nkits:\n  - name: baseline\n"),
+			"kits/baseline.yaml": []byte("name: baseline\nskills:\n  - changed\n"),
+		},
+	}
+
+	_, err := PushKit(context.Background(), client, "baseline", "acme/skills", body, manifest.KitEntry{Name: "baseline"}, "sha256:old")
+	if clierrors.ExitCode(err) != clierrors.ExitConflict {
+		t.Fatalf("exit = %d, want conflict; err=%v", clierrors.ExitCode(err), err)
+	}
+	if client.pushCalled {
+		t.Fatal("PushFilesAtomic called despite remote divergence")
 	}
 }
 
