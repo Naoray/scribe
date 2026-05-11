@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -215,5 +216,38 @@ func TestBrowseInstallRejectsMissingName(t *testing.T) {
 	err := browseInstall(context.Background(), "cleanup", nil, nil, nil, nil, nil, true, true, false)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("browseInstall() error = %v, want not found error", err)
+	}
+}
+
+func TestDiscoverSourceEntriesReadsLocalProvider(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "skills", "deploy")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Deploy\n"), 0o644); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+	spec, ident, err := source.Canonicalize(source.SourceSpec{Type: source.SourceLocal, Path: root})
+	if err != nil {
+		t.Fatalf("Canonicalize: %v", err)
+	}
+
+	entries, errs := discoverSourceEntries(context.Background(), []config.RegistrySource{{
+		ID:       "local-fixture",
+		Source:   spec,
+		Identity: ident,
+	}}, nil, nil, &state.State{Installed: map[string]state.InstalledSkill{}})
+	if len(errs) != 0 {
+		t.Fatalf("errs = %#v", errs)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if entries[0].Status.Name != "deploy" || entries[0].Status.Status != sync.StatusMissing {
+		t.Fatalf("entry = %#v", entries[0])
+	}
+	if entries[0].SourceKey != ident.Key || entries[0].Source.Type != source.SourceLocal {
+		t.Fatalf("source fields = %#v", entries[0])
 	}
 }

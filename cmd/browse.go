@@ -299,7 +299,7 @@ func runBrowseWithDeps(
 			Tools:            targets,
 			FilterRegistries: filterRegistries,
 		}
-		bag.Provider = provider.NewGitHubProvider(provider.WrapGitHubClient(client))
+		bag.Provider = provider.NewCompositeProvider(provider.NewGitHubProvider(provider.WrapGitHubClient(client)))
 		repos := legacyReposFromSources(sources)
 		if len(repos) == 1 {
 			bag.RepoFlag = repos[0]

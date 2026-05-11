@@ -36,7 +36,7 @@ func NewFactory() *Factory {
 		if err != nil {
 			return nil, err
 		}
-		return provider.NewGitHubProvider(provider.WrapGitHubClient(client)), nil
+		return provider.NewCompositeProvider(provider.NewGitHubProvider(provider.WrapGitHubClient(client))), nil
 	})
 
 	return f
