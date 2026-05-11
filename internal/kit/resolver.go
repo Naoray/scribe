@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -16,38 +17,17 @@ import (
 //   - expand globs against installedSkills
 //   - return a deduplicated, sorted skill name slice
 func Resolve(pf *projectfile.ProjectFile, availableKits map[string]*Kit, installedSkills []string) ([]string, error) {
-	if pf == nil {
-		pf = &projectfile.ProjectFile{}
+	resolution, err := ResolveWithDetail(context.Background(), ResolverInput{
+		Project:         pf,
+		Kits:            availableKits,
+		InstalledSkills: installedSkills,
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	patterns := make([]string, 0, len(pf.Add))
-	for _, kitName := range pf.Kits {
-		kit, ok := availableKits[kitName]
-		if !ok {
-			return nil, fmt.Errorf("kit %q not found", kitName)
-		}
-		patterns = append(patterns, kit.Skills...)
-	}
-	patterns = append(patterns, pf.Add...)
-
-	result := make(map[string]struct{})
-	for _, pattern := range patterns {
-		matches, err := expandSkillPattern(pattern, installedSkills)
-		if err != nil {
-			return nil, err
-		}
-		for _, skill := range matches {
-			result[skill] = struct{}{}
-		}
-	}
-
-	for _, skill := range pf.Remove {
-		delete(result, skill)
-	}
-
-	skills := make([]string, 0, len(result))
-	for skill := range result {
-		skills = append(skills, skill)
+	skills := make([]string, 0, len(resolution.Skills))
+	for _, skill := range resolution.Skills {
+		skills = append(skills, skill.Name)
 	}
 	sort.Strings(skills)
 	return skills, nil

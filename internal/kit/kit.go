@@ -20,6 +20,54 @@ type Kit struct {
 	Source      *Source  `yaml:"source,omitempty"`
 }
 
+type kitYAML struct {
+	Name        string     `yaml:"name"`
+	Description string     `yaml:"description,omitempty"`
+	Skills      []skillRef `yaml:"skills"`
+	MCPServers  []string   `yaml:"mcp_servers,omitempty"`
+	Source      *Source    `yaml:"source,omitempty"`
+}
+
+type skillRef string
+
+func (s *skillRef) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		*s = skillRef(value.Value)
+		return nil
+	case yaml.MappingNode:
+		var raw struct {
+			Ref string `yaml:"ref"`
+		}
+		if err := value.Decode(&raw); err != nil {
+			return err
+		}
+		if raw.Ref == "" {
+			return errors.New("skill mapping must include ref")
+		}
+		*s = skillRef(raw.Ref)
+		return nil
+	default:
+		return fmt.Errorf("skill ref must be a string or mapping, got YAML kind %d", value.Kind)
+	}
+}
+
+func (k *Kit) UnmarshalYAML(value *yaml.Node) error {
+	var raw kitYAML
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	k.Name = raw.Name
+	k.Description = raw.Description
+	k.Skills = make([]string, 0, len(raw.Skills))
+	for _, ref := range raw.Skills {
+		k.Skills = append(k.Skills, string(ref))
+	}
+	k.MCPServers = raw.MCPServers
+	k.Source = raw.Source
+	return nil
+}
+
 // Source records the registry source for a kit.
 type Source struct {
 	Registry string `yaml:"registry"`
@@ -32,6 +80,11 @@ func Load(path string) (*Kit, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read kit: %w", err)
 	}
+	return Parse(data)
+}
+
+// Parse reads a kit YAML document from bytes.
+func Parse(data []byte) (*Kit, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return &Kit{}, nil
 	}

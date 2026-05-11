@@ -14,8 +14,10 @@ import (
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/cli/fields"
 	"github.com/Naoray/scribe/internal/cli/output"
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/kit"
 	"github.com/Naoray/scribe/internal/paths"
+	"github.com/Naoray/scribe/internal/registry"
 )
 
 type kitCreateOptions struct {
@@ -25,6 +27,11 @@ type kitCreateOptions struct {
 	registry    string
 	force       bool
 	json        bool
+}
+
+type kitListOptions struct {
+	remote   bool
+	registry string
 }
 
 type kitCreateOutput struct {
@@ -39,10 +46,15 @@ type kitListOutput struct {
 }
 
 type kitListItem struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	SkillsCount int      `json:"skills_count"`
-	Skills      []string `json:"skills"`
+	Name             string   `json:"name"`
+	Description      string   `json:"description"`
+	SkillsCount      int      `json:"skills_count"`
+	Skills           []string `json:"skills,omitempty"`
+	Registry         string   `json:"registry,omitempty"`
+	Path             string   `json:"path,omitempty"`
+	Author           string   `json:"author,omitempty"`
+	Remote           bool     `json:"remote,omitempty"`
+	InstalledLocally bool     `json:"installed_locally,omitempty"`
 }
 
 type kitShowOutput struct {
@@ -50,12 +62,30 @@ type kitShowOutput struct {
 	Description string           `json:"description"`
 	Skills      []string         `json:"skills"`
 	Source      *kitSourceOutput `json:"source,omitempty"`
+	Registry    string           `json:"registry,omitempty"`
+	Refs        []kitRefOutput   `json:"refs,omitempty"`
 }
 
 type kitSourceOutput struct {
 	Registry string `json:"registry"`
 	Rev      string `json:"rev,omitempty"`
 }
+
+type kitRefOutput struct {
+	Raw       string `json:"raw"`
+	Skill     string `json:"skill"`
+	Origin    string `json:"origin"`
+	Registry  string `json:"registry,omitempty"`
+	Connected bool   `json:"connected"`
+	Glob      bool   `json:"glob,omitempty"`
+	Local     bool   `json:"local,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+var listRemoteKitsFn = registry.ListKits
+var findRemoteKitFn = registry.FindKit
+var fetchRemoteKitFn = registry.FetchKitBody
 
 var kitListFieldSet = fields.FieldSet[kitListItem]{
 	"name": func(item kitListItem) any {
@@ -69,6 +99,12 @@ var kitListFieldSet = fields.FieldSet[kitListItem]{
 	},
 	"skills": func(item kitListItem) any {
 		return item.Skills
+	},
+	"registry": func(item kitListItem) any {
+		return item.Registry
+	},
+	"path": func(item kitListItem) any {
+		return item.Path
 	},
 }
 
@@ -104,13 +140,18 @@ func newKitCreateCommand() *cobra.Command {
 }
 
 func newKitListCommand() *cobra.Command {
+	opts := &kitListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List local skill kits",
 		Args:  cobra.NoArgs,
-		RunE:  runKitList,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runKitListWithOptions(cmd, args, opts)
+		},
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
+	cmd.Flags().BoolVar(&opts.remote, "remote", false, "List kits from connected registries")
+	cmd.Flags().StringVar(&opts.registry, "registry", "", "Limit remote kits to one connected registry")
 	output.AttachFieldsFlag(cmd, kitListFieldSet)
 	return markJSONSupported(cmd)
 }
@@ -181,6 +222,13 @@ func runKitCreate(cmd *cobra.Command, name string, opts *kitCreateOptions) error
 }
 
 func runKitList(cmd *cobra.Command, args []string) error {
+	return runKitListWithOptions(cmd, args, &kitListOptions{})
+}
+
+func runKitListWithOptions(cmd *cobra.Command, args []string, opts *kitListOptions) error {
+	if opts == nil {
+		opts = &kitListOptions{}
+	}
 	scribeDir, err := paths.ScribeDir()
 	if err != nil {
 		return fmt.Errorf("resolve scribe dir: %w", err)
@@ -191,6 +239,19 @@ func runKitList(cmd *cobra.Command, args []string) error {
 	}
 
 	items := kitListItems(loaded)
+	if opts.remote || opts.registry != "" {
+		remote, err := remoteKitListItems(cmd, opts, loaded)
+		if err != nil {
+			return err
+		}
+		items = append(items, remote...)
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].Registry != items[j].Registry {
+				return items[i].Registry < items[j].Registry
+			}
+			return items[i].Name < items[j].Name
+		})
+	}
 	fieldsFlag, _ := cmd.Flags().GetString("fields")
 	projected, err := projectKitListItems(items, fieldsFlag)
 	if err != nil {
@@ -210,6 +271,9 @@ func runKitList(cmd *cobra.Command, args []string) error {
 
 func runKitShow(cmd *cobra.Command, args []string) error {
 	name := args[0]
+	if strings.Contains(name, ":") {
+		return runKitShowRemote(cmd, name)
+	}
 	scribeDir, err := paths.ScribeDir()
 	if err != nil {
 		return fmt.Errorf("resolve scribe dir: %w", err)
@@ -239,6 +303,115 @@ func runKitShow(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Description: %s\n", out.Description)
 	fmt.Fprintf(cmd.OutOrStdout(), "Skills (%d): %s\n", len(out.Skills), strings.Join(out.Skills, ", "))
 	fmt.Fprintf(cmd.OutOrStdout(), "Source: %s\n", kitSourceLabel(out.Source))
+	return nil
+}
+
+func remoteKitListItems(cmd *cobra.Command, opts *kitListOptions, local map[string]*kit.Kit) ([]kitListItem, error) {
+	factory := commandFactory()
+	cfg, err := factory.Config()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	client, err := factory.Client()
+	if err != nil {
+		return nil, fmt.Errorf("load github client: %w", err)
+	}
+	repos, err := remoteKitRepos(opts.registry, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []kitListItem
+	for _, repo := range repos {
+		kits, err := listRemoteKitsFn(cmd.Context(), client, repo)
+		if err != nil {
+			return nil, fmt.Errorf("list kits from %s: %w", repo, err)
+		}
+		for _, remote := range kits {
+			_, installed := local[remote.Name]
+			items = append(items, kitListItem{
+				Name:             remote.Name,
+				Description:      remote.Description,
+				Registry:         remote.Registry,
+				Path:             remote.Path,
+				Author:           remote.Author,
+				Remote:           true,
+				InstalledLocally: installed,
+			})
+		}
+	}
+	return items, nil
+}
+
+func remoteKitRepos(registryFilter string, cfg *config.Config) ([]string, error) {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	if registryFilter == "" {
+		return cfg.TeamRepos(), nil
+	}
+	repo, err := resolveRegistry(registryFilter, cfg.TeamRepos())
+	if err != nil {
+		return nil, clierrors.Wrap(fmt.Errorf("registry %q is not connected", registryFilter), "REGISTRY_NOT_CONNECTED", clierrors.ExitNotFound,
+			clierrors.WithResource(registryFilter),
+			clierrors.WithRemediation("Run `scribe registry connect "+registryFilter+"` first."),
+		)
+	}
+	return []string{repo}, nil
+}
+
+func runKitShowRemote(cmd *cobra.Command, ref string) error {
+	registryRepo, kitName, err := parseSkillRef(ref)
+	if err != nil {
+		return err
+	}
+	factory := commandFactory()
+	cfg, err := factory.Config()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if !registryConnected(cfg, registryRepo) {
+		return clierrors.Wrap(fmt.Errorf("registry %q is not connected", registryRepo), "REGISTRY_NOT_CONNECTED", clierrors.ExitNotFound,
+			clierrors.WithResource(registryRepo),
+			clierrors.WithRemediation("Run `scribe registry connect "+registryRepo+"` first."),
+		)
+	}
+	client, err := factory.Client()
+	if err != nil {
+		return fmt.Errorf("load github client: %w", err)
+	}
+	entry, err := findRemoteKitFn(cmd.Context(), client, registryRepo, kitName)
+	if err != nil {
+		return clierrors.Wrap(err, "KIT_NOT_FOUND", clierrors.ExitNotFound,
+			clierrors.WithResource(ref),
+			clierrors.WithRemediation("Run `scribe kit list --remote --registry "+registryRepo+"`."),
+		)
+	}
+	k, err := fetchRemoteKitFn(cmd.Context(), client, registryRepo, entry)
+	if err != nil {
+		return err
+	}
+	out := kitShowOutputFromKit(k)
+	out.Registry = registryRepo
+	out.Refs = kitRefOutputs(k.Skills, registryRepo, cfg)
+
+	if jsonFlagPassed(cmd) {
+		r := jsonRendererForCommand(cmd, true)
+		if err := r.Result(out); err != nil {
+			return err
+		}
+		return r.Flush()
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Kit: %s:%s\n", registryRepo, out.Name)
+	fmt.Fprintf(cmd.OutOrStdout(), "Description: %s\n", out.Description)
+	for _, ref := range out.Refs {
+		status := "missing"
+		if ref.Connected {
+			status = "connected"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "- %s (%s, %s)\n", ref.Raw, ref.Origin, status)
+	}
 	return nil
 }
 
@@ -339,6 +512,49 @@ func kitShowOutputFromKit(k *kit.Kit) kitShowOutput {
 		}
 	}
 	return out
+}
+
+func kitRefOutputs(rawRefs []string, defaultRegistry string, cfg *config.Config) []kitRefOutput {
+	out := make([]kitRefOutput, 0, len(rawRefs))
+	for _, raw := range rawRefs {
+		ref, err := kit.ParseSkillRef(raw, defaultRegistry)
+		if err != nil {
+			out = append(out, kitRefOutput{Raw: raw, Reason: err.Error()})
+			continue
+		}
+		origin := string(kit.OriginCrossRegistry)
+		if ref.Local {
+			origin = string(kit.OriginLocal)
+		} else if ref.Registry == defaultRegistry {
+			origin = string(kit.OriginSameRegistry)
+		}
+		connected := ref.Local || ref.Registry == defaultRegistry || registryConnected(cfg, ref.Registry)
+		item := kitRefOutput{
+			Raw:       raw,
+			Skill:     ref.Skill,
+			Origin:    origin,
+			Registry:  ref.Registry,
+			Connected: connected,
+			Glob:      ref.Glob,
+			Local:     ref.Local,
+		}
+		if ref.Source.Host != "" {
+			item.Source = ref.Source.String()
+		}
+		if !connected {
+			item.Reason = "registry_not_connected"
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func registryConnected(cfg *config.Config, repo string) bool {
+	if cfg == nil || repo == "" {
+		return false
+	}
+	rc := cfg.FindRegistry(repo)
+	return rc != nil && rc.Enabled
 }
 
 func kitSourceLabel(source *kitSourceOutput) string {

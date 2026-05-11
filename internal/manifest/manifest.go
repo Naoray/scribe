@@ -19,12 +19,13 @@ const LegacyManifestFilename = "scribe.toml"
 // Manifest represents a parsed scribe.yaml.
 // A file with team: is a registry; package: is a skill package.
 type Manifest struct {
-	APIVersion string   `yaml:"apiVersion"`
-	Kind       string   `yaml:"kind"`
-	Team       *Team    `yaml:"team,omitempty"`
-	Package    *Package `yaml:"package,omitempty"`
-	Catalog    []Entry  `yaml:"catalog"`
-	Targets    *Targets `yaml:"targets,omitempty"`
+	APIVersion string     `yaml:"apiVersion"`
+	Kind       string     `yaml:"kind"`
+	Team       *Team      `yaml:"team,omitempty"`
+	Package    *Package   `yaml:"package,omitempty"`
+	Catalog    []Entry    `yaml:"catalog"`
+	Kits       []KitEntry `yaml:"kits,omitempty"`
+	Targets    *Targets   `yaml:"targets,omitempty"`
 }
 
 type Team struct {
@@ -60,6 +61,22 @@ type Entry struct {
 	Description string            `yaml:"description,omitempty"`
 	Timeout     int               `yaml:"timeout,omitempty"`
 	Group       string            `yaml:"-"` // display-only, set by marketplace discovery
+}
+
+// KitEntry represents one registry-published kit advertised by the manifest.
+type KitEntry struct {
+	Name        string `yaml:"name"`
+	Path        string `yaml:"path,omitempty"`
+	Description string `yaml:"description,omitempty"`
+	Author      string `yaml:"author,omitempty"`
+}
+
+// PathOrDefault returns the kit body path for this entry.
+func (e KitEntry) PathOrDefault() string {
+	if strings.TrimSpace(e.Path) != "" {
+		return e.Path
+	}
+	return "kits/" + e.Name + ".yaml"
 }
 
 // InstallFor returns the install command for toolName. Per-tool commands take
@@ -102,6 +119,9 @@ func Parse(data []byte) (*Manifest, error) {
 	}
 	if m.Catalog == nil {
 		m.Catalog = []Entry{}
+	}
+	if m.Kits == nil {
+		m.Kits = []KitEntry{}
 	}
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -147,6 +167,25 @@ func (m *Manifest) Validate() error {
 		seen[e.Name] = true
 		if e.Type != "" && e.Type != EntryTypePackage {
 			return fmt.Errorf("unknown entry type %q for %q (expected \"\" or %q)", e.Type, e.Name, EntryTypePackage)
+		}
+	}
+
+	seenKits := make(map[string]bool, len(m.Kits))
+	for _, k := range m.Kits {
+		if k.Name == "" {
+			return errors.New("kit entry has empty name")
+		}
+		if seenKits[k.Name] {
+			return fmt.Errorf("duplicate kit entry name %q", k.Name)
+		}
+		if seen[k.Name] {
+			return fmt.Errorf("kit entry name %q collides with catalog entry", k.Name)
+		}
+		seenKits[k.Name] = true
+
+		kitPath := path.Clean(k.PathOrDefault())
+		if path.IsAbs(kitPath) || kitPath == "." || kitPath == ".." || strings.HasPrefix(kitPath, "../") {
+			return fmt.Errorf("kit entry %q path %q must stay under repository root", k.Name, k.PathOrDefault())
 		}
 	}
 

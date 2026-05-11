@@ -62,8 +62,8 @@ Tune individual skills, project-author new ones, and decide which AI tools each 
 | `scribe tools` | List, enable, or disable detected tools machine-wide |
 | `scribe tools add` | Register a custom tool integration (`--detect`, `--install`, `--path`, `--uninstall`) |
 | `scribe kit create <name>` | Create a local kit — a named list of skills and MCP servers scoped to a project (saved to `~/.scribe/kits/<name>.yaml`). Use `--skills`, `--mcp-servers`, and `--registry` to populate it. Reference the kit by name in a project's `.scribe.yaml` under `kits:`. |
-| `scribe kit list` | List local kits from `~/.scribe/kits/*.yaml`. Supports `--fields` and `--json` for agent-readable output. |
-| `scribe kit show <name>` | Show one local kit, including skills and source metadata. |
+| `scribe kit list` | List local kits from `~/.scribe/kits/*.yaml`. Supports `--fields` and `--json` for agent-readable output. Add `--remote` to include registry-published kits, or `--registry <owner/repo>` to restrict remote discovery to one connected registry. |
+| `scribe kit show <name>` | Show one local kit, including skills and source metadata. Use `scribe kit show <owner/repo>:<kit>` to inspect a registry-published kit without installing it. |
 | `scribe project init` | Create a committed project `.scribe.yaml` for repo-local loadouts. Use `--kits a,b` for non-interactive setup or pick from local kits interactively. |
 
 ## Conflicts and recovery

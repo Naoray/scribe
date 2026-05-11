@@ -2,11 +2,17 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Naoray/scribe/internal/app"
+	"github.com/Naoray/scribe/internal/config"
+	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/registry"
 )
 
 func TestKitListTextOutput(t *testing.T) {
@@ -106,6 +112,72 @@ skills:
 	}
 	if data.Kits[0]["skills_count"] != float64(1) {
 		t.Fatalf("skills_count = %v, want 1", data.Kits[0]["skills_count"])
+	}
+}
+
+func TestKitListRemoteJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeKitFixture(t, home, "local-kit", `name: local-kit
+skills:
+  - local-skill
+`)
+
+	oldFactory := commandFactory
+	oldList := listRemoteKitsFn
+	t.Cleanup(func() {
+		commandFactory = oldFactory
+		listRemoteKitsFn = oldList
+	})
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) {
+				return &config.Config{Registries: []config.RegistryConfig{{Repo: "acme/skills", Enabled: true}}}, nil
+			},
+			Client: func() (*gh.Client, error) {
+				return gh.NewClient(context.Background(), ""), nil
+			},
+		}
+	}
+	listRemoteKitsFn = func(_ context.Context, _ registry.FileFetcher, repo string) ([]registry.ManifestKit, error) {
+		return []registry.ManifestKit{{
+			Registry:    repo,
+			Name:        "remote-kit",
+			Path:        "kits/remote-kit.yaml",
+			Description: "Remote kit",
+			Author:      "acme",
+		}}, nil
+	}
+
+	cmd := newKitListCommand()
+	cmd.SetArgs([]string{"--remote", "--json"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute kit list --remote: %v", err)
+	}
+
+	var env testEnvelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v\n%s", err, out.String())
+	}
+	var data struct {
+		Kits []struct {
+			Name     string `json:"name"`
+			Registry string `json:"registry,omitempty"`
+			Path     string `json:"path,omitempty"`
+			Remote   bool   `json:"remote,omitempty"`
+		} `json:"kits"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if len(data.Kits) != 2 {
+		t.Fatalf("kits count = %d, want 2: %#v", len(data.Kits), data.Kits)
+	}
+	if data.Kits[1].Name != "remote-kit" || data.Kits[1].Registry != "acme/skills" || data.Kits[1].Path != "kits/remote-kit.yaml" || !data.Kits[1].Remote {
+		t.Fatalf("remote kit = %#v", data.Kits[1])
 	}
 }
 
