@@ -74,9 +74,30 @@ func sourceSpecFromFlags(v sourceFlagValues) (source.SourceSpec, source.SourceId
 	switch {
 	case v.source != "":
 		if v.repo != "" || v.url != "" {
-			return source.SourceSpec{}, source.SourceIdentity{}, "", fmt.Errorf("--source cannot be combined with --repo or --url")
+			sourceType := source.SourceType(strings.ToLower(strings.TrimSpace(v.source)))
+			switch sourceType {
+			case source.SourceGitHub, source.SourceGitLab:
+				if v.url != "" {
+					return source.SourceSpec{}, source.SourceIdentity{}, "", fmt.Errorf("--source %s requires --repo, not --url", sourceType)
+				}
+				spec = source.SourceSpec{Type: sourceType, Repo: v.repo}
+			case source.SourceGit:
+				if v.repo != "" {
+					return source.SourceSpec{}, source.SourceIdentity{}, "", fmt.Errorf("--source git requires --url, not --repo")
+				}
+				spec = source.SourceSpec{Type: sourceType, URL: v.url}
+			case source.SourceLocal:
+				return source.SourceSpec{}, source.SourceIdentity{}, "", fmt.Errorf("--source local requires --path, not --repo or --url")
+			default:
+				return source.SourceSpec{}, source.SourceIdentity{}, "", fmt.Errorf("--source cannot be combined with --repo or --url")
+			}
+		} else if strings.EqualFold(strings.TrimSpace(v.source), string(source.SourceLocal)) {
+			spec = source.SourceSpec{Type: source.SourceLocal, Path: v.path}
+		} else if sourceType := source.SourceType(strings.ToLower(strings.TrimSpace(v.source))); sourceType == source.SourceGitHub || sourceType == source.SourceGitLab || sourceType == source.SourceGit {
+			return source.SourceSpec{}, source.SourceIdentity{}, "", fmt.Errorf("--source %s requires --repo or --url", sourceType)
+		} else {
+			spec, err = source.ParseSourceArg(v.source)
 		}
-		spec, err = source.ParseSourceArg(v.source)
 	case v.repo != "":
 		if v.url != "" {
 			return source.SourceSpec{}, source.SourceIdentity{}, "", fmt.Errorf("--repo and --url cannot be used together")

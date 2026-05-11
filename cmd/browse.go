@@ -241,7 +241,11 @@ func browseSources(registryFilter string, cfg *config.Config) ([]config.Registry
 			return nil, err
 		}
 		rs := config.RegistrySource{Config: *rc, Source: spec, Identity: ident}
-		rs.ID = registryDisplay(rs)
+		if rc.ID != "" {
+			rs.ID = rc.ID
+		} else {
+			rs.ID = registryDisplay(rs)
+		}
 		return []config.RegistrySource{rs}, nil
 	}
 	spec, ident, err := sourceSpecForRegistry(registryFilter)

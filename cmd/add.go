@@ -124,7 +124,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 	configureInstallNameConflictResolver(syncer, conflictMode, aliasName)
 
-	if sourceFlags.hasTyped() {
+	if sourceFlags.hasTyped() && !sourceFlagsMatchConnectedSource(sourceFlags, cfg) {
 		if len(args) != 1 {
 			return fmt.Errorf("skill name required when using source flags")
 		}
@@ -222,6 +222,13 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return handleNameConflictError(cmd, err)
 	}
 	return nil
+}
+
+func sourceFlagsMatchConnectedSource(v sourceFlagValues, cfg *config.Config) bool {
+	if cfg == nil || v.source == "" || v.repo != "" || v.url != "" || v.ref != "" || v.path != "" || v.id != "" {
+		return false
+	}
+	return cfg.FindRegistryByKeyOrRepo(v.source) != nil
 }
 
 // parseSkillRef parses "owner/repo:skillname" into its parts.

@@ -56,6 +56,53 @@ func TestSourceSpecFromFlagsBuildsTypedGitHubSource(t *testing.T) {
 	}
 }
 
+func TestSourceSpecFromFlagsBuildsProviderTypedGitHubSource(t *testing.T) {
+	spec, ident, display, err := sourceSpecFromFlags(sourceFlagValues{
+		source: "github",
+		repo:   "vercel-labs/agent-skills",
+		ref:    "main",
+		path:   "skills",
+		id:     "vercel",
+	})
+	if err != nil {
+		t.Fatalf("sourceSpecFromFlags: %v", err)
+	}
+	if spec.Type != source.SourceGitHub || spec.Repo != "vercel-labs/agent-skills" || spec.Ref != "main" || spec.Path != "skills" || spec.ID != "vercel" {
+		t.Fatalf("spec = %#v", spec)
+	}
+	if ident.Key != "github:vercel-labs/agent-skills:skills" {
+		t.Fatalf("key = %q", ident.Key)
+	}
+	if display != "vercel" {
+		t.Fatalf("display = %q", display)
+	}
+}
+
+func TestAddSourceFlagConnectedIDIsFilterNotRawLocator(t *testing.T) {
+	cfg := &config.Config{Registries: []config.RegistryConfig{{
+		ID:      "vercel",
+		Enabled: true,
+		Source: &source.SourceSpec{
+			Type: source.SourceGitHub,
+			Repo: "vercel-labs/agent-skills",
+			Ref:  "main",
+			Path: "skills",
+		},
+	}}}
+	flags := sourceFlagValues{source: "vercel"}
+
+	if !sourceFlagsMatchConnectedSource(flags, cfg) {
+		t.Fatal("--source vercel should resolve as a connected source filter")
+	}
+	sources, err := browseSources(flags.source, cfg)
+	if err != nil {
+		t.Fatalf("browseSources: %v", err)
+	}
+	if len(sources) != 1 || sources[0].ID != "vercel" || sources[0].Source.Repo != "vercel-labs/agent-skills" || sources[0].Source.Path != "skills" {
+		t.Fatalf("sources = %#v", sources)
+	}
+}
+
 func TestParseInstallRefForCommandKeepsLegacyAndBracketSyntax(t *testing.T) {
 	spec, ident, display, skill, err := parseInstallRefForCommand("owner/repo:deploy")
 	if err != nil {
