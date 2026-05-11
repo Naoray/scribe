@@ -673,7 +673,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			s.emit(SkillSkippedMsg{Name: sk.Name})
 			summary.Skipped++
 
-		case StatusExtra:
+		case StatusExtra, StatusModified:
 			s.emit(SkillSkippedMsg{Name: sk.Name})
 			summary.Skipped++
 
