@@ -113,18 +113,13 @@ func PushKit(ctx context.Context, client KitPusher, kitName, registryRepo string
 	if err != nil {
 		return PushResult{}, fmt.Errorf("fetch manifest: %w", err)
 	}
-	if expectedContentHash != "" {
-		if remote, err := client.FetchFile(ctx, owner, repo, pathName, "HEAD"); err == nil {
-			remoteHash := hashKitBody(kitName, remote)
-			if remoteHash != expectedContentHash {
-				return PushResult{}, clierrors.Wrap(errors.New("remote kit has changed since it was installed"), "PUSH_CONFLICT", clierrors.ExitConflict,
-					clierrors.WithResource(kitName),
-					clierrors.WithRemediation("run `scribe kit sync` and reapply your local edits before pushing"),
-				)
-			}
-		}
+	if err := verifyRemoteKitBaseline(ctx, client, owner, repo, kitName, pathName, m, expectedContentHash); err != nil {
+		return PushResult{}, err
 	}
 	upsertManifestKit(m, entry)
+	if err := m.Validate(); err != nil {
+		return PushResult{}, fmt.Errorf("validate manifest: %w", err)
+	}
 	encoded, err := m.Encode()
 	if err != nil {
 		return PushResult{}, fmt.Errorf("encode manifest: %w", err)
@@ -137,6 +132,42 @@ func PushKit(ctx context.Context, client KitPusher, kitName, registryRepo string
 		return PushResult{}, err
 	}
 	return PushResult{Skill: kitName, Registry: registryRepo, CommitSHA: commit.SHA, CommitURL: commit.URL}, nil
+}
+
+func verifyRemoteKitBaseline(ctx context.Context, client KitPusher, owner, repo, kitName, pathName string, m *manifest.Manifest, expectedContentHash string) error {
+	if expectedContentHash == "" && manifestHasKit(m, kitName) {
+		return pushKitConflict(kitName, errors.New("kit has no recorded remote baseline"))
+	}
+	remote, err := client.FetchFile(ctx, owner, repo, pathName, "HEAD")
+	if err != nil {
+		if isRemoteNotFound(err) {
+			if expectedContentHash != "" {
+				return pushKitConflict(kitName, errors.New("remote kit is missing"))
+			}
+			return nil
+		}
+		return fmt.Errorf("fetch remote kit baseline: %w", err)
+	}
+	if expectedContentHash == "" {
+		return pushKitConflict(kitName, errors.New("kit has no recorded remote baseline"))
+	}
+	if remoteHash := hashKitBody(kitName, remote); remoteHash != expectedContentHash {
+		return pushKitConflict(kitName, errors.New("remote kit has changed since it was installed"))
+	}
+	return nil
+}
+
+func manifestHasKit(m *manifest.Manifest, kitName string) bool {
+	for _, kit := range m.Kits {
+		if kit.Name == kitName {
+			return true
+		}
+	}
+	return false
+}
+
+func isRemoteNotFound(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || clierrors.ExitCode(err) == clierrors.ExitNotFound
 }
 
 func upsertManifestKit(m *manifest.Manifest, entry manifest.KitEntry) {
@@ -152,6 +183,13 @@ func upsertManifestKit(m *manifest.Manifest, entry manifest.KitEntry) {
 func hashKitBody(name string, body []byte) string {
 	hash, _ := lockfile.HashFiles([]lockfile.File{{Path: name + ".yaml", Content: body}})
 	return hash
+}
+
+func pushKitConflict(kitName string, err error) error {
+	return clierrors.Wrap(err, "PUSH_CONFLICT", clierrors.ExitConflict,
+		clierrors.WithResource(kitName),
+		clierrors.WithRemediation("run `scribe kit sync` and reapply your local edits before pushing"),
+	)
 }
 
 // PushSkill publishes all files in skillDir back to source in one commit.
