@@ -10,6 +10,7 @@ import (
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/workflow"
 )
 
@@ -30,22 +31,44 @@ Examples:
 		RunE: runConnect,
 	}
 	cmd.Flags().Bool("install-all", false, "Install every discovered skill from the connected registry")
+	addSourceFlags(cmd, false)
 	return markJSONSupported(cmd)
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
-	repo, err := resolveRepo(args)
+	sourceFlags, err := readSourceFlags(cmd)
+	if err != nil {
+		return err
+	}
+	repo, err := resolveRepoWithFlags(args, sourceFlags)
 	if err != nil {
 		return err
 	}
 	installAll, _ := cmd.Flags().GetBool("install-all")
 	jsonFlag := jsonFlagPassed(cmd)
+	spec, ident, display, err := sourceSpecFromFlags(sourceFlags)
+	if err != nil {
+		return err
+	}
+	if sourceFlags.hasTyped() && installAll && (spec.Type != source.SourceGitHub || spec.Path != "" || spec.Ref != "") {
+		return fmt.Errorf("--install-all currently supports legacy GitHub owner/repo sources only")
+	}
 
 	bag := &workflow.Bag{
 		RepoArg:        repo,
 		JSONFlag:       jsonFlag,
 		InstallAllFlag: installAll,
 		Factory:        commandFactory(),
+	}
+	if sourceFlags.hasTyped() {
+		bag.SourceArg = spec
+		bag.SourceKey = ident.Key
+		bag.SourceID = spec.ID
+		if spec.Type == source.SourceGitHub {
+			bag.RepoArg = spec.Repo
+		} else {
+			bag.RepoArg = display
+		}
 	}
 	steps := workflow.ConnectSteps()
 	if installAll {
@@ -65,6 +88,29 @@ func runConnect(cmd *cobra.Command, args []string) error {
 
 // resolveRepo returns the owner/repo string from args or an interactive prompt.
 func resolveRepo(args []string) (string, error) {
+	return resolveRepoWithFlags(args, sourceFlagValues{})
+}
+
+func resolveRepoWithFlags(args []string, sourceFlags sourceFlagValues) (string, error) {
+	if sourceFlags.hasTyped() {
+		if len(args) > 0 {
+			return "", fmt.Errorf("repo argument cannot be combined with source flags")
+		}
+		spec, _, _, err := sourceSpecFromFlags(sourceFlags)
+		if err != nil {
+			return "", err
+		}
+		if spec.Type == source.SourceGitHub {
+			return spec.Repo, nil
+		}
+		if spec.Repo != "" {
+			return spec.Repo, nil
+		}
+		if spec.URL != "" {
+			return spec.URL, nil
+		}
+		return spec.Path, nil
+	}
 	if len(args) > 0 {
 		return manifest.NormalizeGitHubRepo(args[0])
 	}

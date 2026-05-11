@@ -11,6 +11,7 @@ import (
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/tools"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -37,6 +38,20 @@ func (p connectTestProvider) Discover(context.Context, string) (*provider.Discov
 }
 
 func (p connectTestProvider) Fetch(context.Context, manifest.Entry) ([]tools.SkillFile, error) {
+	return nil, errors.New("unused")
+}
+
+type connectTestSourceProvider struct {
+	connectTestProvider
+	got source.SourceSpec
+}
+
+func (p *connectTestSourceProvider) DiscoverSource(ctx context.Context, spec source.SourceSpec) (*provider.DiscoverResult, error) {
+	p.got = spec
+	return p.connectTestProvider.Discover(ctx, spec.Repo)
+}
+
+func (p *connectTestSourceProvider) FetchSource(context.Context, source.SourceSpec, manifest.Entry) ([]tools.SkillFile, error) {
 	return nil, errors.New("unused")
 }
 
@@ -143,6 +158,55 @@ func TestStepIndexPublicRegistrySkipsPrivateAndUnknown(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".scribe", "index", "registries.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("index stat error = %v, want not exist", err)
+	}
+}
+
+func TestConnectSourceSpecPersistsTypedRegistry(t *testing.T) {
+	provider := &connectTestSourceProvider{
+		connectTestProvider: connectTestProvider{
+			isTeam: true,
+			manifest: &manifest.Manifest{
+				APIVersion: "scribe/v1",
+				Kind:       "Registry",
+				Team:       &manifest.Team{Name: "Acme"},
+				Catalog:    []manifest.Entry{{Name: "deploy"}},
+			},
+		},
+	}
+	bag := &workflow.Bag{
+		Config:   &config.Config{},
+		Provider: provider,
+		RepoArg:  "acme/skills",
+		SourceArg: source.SourceSpec{
+			ID:   "team-skills",
+			Type: source.SourceGitHub,
+			Repo: "acme/skills",
+			Ref:  "v1.2.3",
+			Path: "packs",
+		},
+		SourceKey: "github:acme/skills:packs",
+		SourceID:  "team-skills",
+	}
+
+	for _, step := range []func(context.Context, *workflow.Bag) error{
+		workflow.StepFetchManifest,
+		workflow.StepValidateManifest,
+		workflow.StepInferRegistryType,
+	} {
+		if err := step(context.Background(), bag); err != nil {
+			t.Fatalf("step failed: %v", err)
+		}
+	}
+
+	if provider.got.Path != "packs" || provider.got.Ref != "v1.2.3" {
+		t.Fatalf("DiscoverSource spec = %#v", provider.got)
+	}
+	if len(bag.Config.Registries) != 1 {
+		t.Fatalf("registries len = %d", len(bag.Config.Registries))
+	}
+	got := bag.Config.Registries[0]
+	if got.ID != "team-skills" || got.Source == nil || got.Source.Path != "packs" || got.Source.Ref != "v1.2.3" {
+		t.Fatalf("registry = %#v", got)
 	}
 }
 

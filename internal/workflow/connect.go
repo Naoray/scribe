@@ -10,7 +10,9 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/registryindex"
+	"github.com/Naoray/scribe/internal/source"
 )
 
 // ConnectSteps returns the step list for the connect command.
@@ -64,8 +66,24 @@ func connectInstallAllTail() []Step {
 }
 
 func StepDedupCheck(_ context.Context, b *Bag) error {
-	for _, existing := range b.Config.TeamRepos() {
-		if strings.EqualFold(existing, b.RepoArg) {
+	targets := []string{b.RepoArg, b.SourceKey, b.SourceID}
+	for _, src := range b.Config.EnabledSources() {
+		existing := registryDisplayForWorkflow(src)
+		for _, target := range targets {
+			if target != "" && strings.EqualFold(existing, target) {
+				b.Formatter.OnConnectDuplicate(existing)
+				return errSkip
+			}
+			if target != "" && strings.EqualFold(src.Identity.Key, target) {
+				b.Formatter.OnConnectDuplicate(existing)
+				return errSkip
+			}
+			if target != "" && strings.EqualFold(src.ID, target) {
+				b.Formatter.OnConnectDuplicate(existing)
+				return errSkip
+			}
+		}
+		if b.SourceKey != "" && strings.EqualFold(src.Identity.Key, b.SourceKey) {
 			b.Formatter.OnConnectDuplicate(existing)
 			return errSkip
 		}
@@ -78,9 +96,19 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 		return fmt.Errorf("internal: Provider not set in workflow bag")
 	}
 
-	result, err := b.Provider.Discover(ctx, b.RepoArg)
+	var result *provider.DiscoverResult
+	var err error
+	if b.SourceArg.Type != "" {
+		sourceProvider, ok := b.Provider.(provider.SourceProvider)
+		if !ok {
+			return fmt.Errorf("internal: Provider does not support sources")
+		}
+		result, err = sourceProvider.DiscoverSource(ctx, b.SourceArg)
+	} else {
+		result, err = b.Provider.Discover(ctx, b.RepoArg)
+	}
 	if err != nil {
-		return fmt.Errorf("could not discover skills in %s: %w", b.RepoArg, err)
+		return fmt.Errorf("could not discover skills in %s: %w", workflowSourceDisplay(b), err)
 	}
 
 	if result.Manifest != nil {
@@ -115,26 +143,44 @@ func StepInferRegistryType(ctx context.Context, b *Bag) error {
 	visibility := registryVisibility(ctx, b)
 
 	writable := false
-	if b.Client != nil {
+	if b.Client != nil && b.RepoArg != "" {
 		owner, repo, err := manifest.ParseOwnerRepo(b.RepoArg)
 		if err == nil {
 			writable, _ = b.Client.HasPushAccess(ctx, owner, repo)
 		}
 	}
 
-	b.Config.AddRegistry(config.RegistryConfig{
-		Repo:       b.RepoArg,
-		Enabled:    true,
-		Type:       regType,
-		Visibility: visibility,
-		Writable:   writable,
-	})
+	if b.SourceArg.Type != "" {
+		spec := b.SourceArg
+		if b.SourceID != "" {
+			spec.ID = b.SourceID
+		}
+		b.Config.AddRegistry(config.RegistryConfig{
+			ID:         b.SourceID,
+			Enabled:    true,
+			Type:       regType,
+			Visibility: visibility,
+			Writable:   writable,
+			Source:     &spec,
+		})
+	} else {
+		b.Config.AddRegistry(config.RegistryConfig{
+			Repo:       b.RepoArg,
+			Enabled:    true,
+			Type:       regType,
+			Visibility: visibility,
+			Writable:   writable,
+		})
+	}
 
 	return nil
 }
 
 func registryVisibility(ctx context.Context, b *Bag) string {
 	if b.Visibility == nil {
+		return config.RegistryVisibilityUnknown
+	}
+	if b.SourceArg.Type != "" && b.SourceArg.Type != source.SourceGitHub {
 		return config.RegistryVisibilityUnknown
 	}
 	owner, repo, err := manifest.ParseOwnerRepo(b.RepoArg)
@@ -155,11 +201,14 @@ func StepSaveConfig(_ context.Context, b *Bag) error {
 	if err := b.Config.Save(); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	b.Formatter.OnConnectSaved(b.RepoArg)
+	b.Formatter.OnConnectSaved(workflowSourceDisplay(b))
 	return nil
 }
 
 func StepIndexPublicRegistry(ctx context.Context, b *Bag) error {
+	if b.SourceArg.Type != "" && (b.SourceArg.Type != source.SourceGitHub || b.SourceArg.Path != "" || b.SourceArg.Ref != "") {
+		return nil
+	}
 	return updateRegistryIndex(ctx, b, b.RepoArg, b.manifest)
 }
 
@@ -204,7 +253,7 @@ func StepShowAvailableSkills(_ context.Context, b *Bag) error {
 	if b.manifest != nil {
 		count = len(b.manifest.Catalog)
 	}
-	b.Formatter.OnConnectAvailable(b.RepoArg, count)
+	b.Formatter.OnConnectAvailable(workflowSourceDisplay(b), count)
 	return nil
 }
 
@@ -214,7 +263,7 @@ func StepConnectSyncError(ctx context.Context, b *Bag) error {
 	// This step wraps SyncSkills with error recovery for connect.
 	err := StepSyncSkills(ctx, b)
 	if err != nil {
-		b.Formatter.OnConnectSyncWarning(b.RepoArg, err)
+		b.Formatter.OnConnectSyncWarning(workflowSourceDisplay(b), err)
 		if !isatty.IsTerminal(os.Stdout.Fd()) {
 			return fmt.Errorf("sync failed: %w", err)
 		}
@@ -224,4 +273,36 @@ func StepConnectSyncError(ctx context.Context, b *Bag) error {
 		return nil
 	}
 	return nil
+}
+
+func workflowSourceDisplay(b *Bag) string {
+	if b.SourceID != "" {
+		return b.SourceID
+	}
+	if b.SourceArg.Type != "" {
+		if b.SourceKey != "" {
+			return b.SourceKey
+		}
+		if b.SourceArg.Repo != "" {
+			return b.SourceArg.Repo
+		}
+		if b.SourceArg.URL != "" {
+			return b.SourceArg.URL
+		}
+		return b.SourceArg.Path
+	}
+	return b.RepoArg
+}
+
+func registryDisplayForWorkflow(src config.RegistrySource) string {
+	if src.ID != "" {
+		return src.ID
+	}
+	if src.Config.Repo != "" {
+		return src.Config.Repo
+	}
+	if src.Identity.Key != "" {
+		return src.Identity.Key
+	}
+	return src.Source.Repo
 }

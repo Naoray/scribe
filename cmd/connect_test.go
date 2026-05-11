@@ -69,6 +69,23 @@ func TestResolveRepoWithGitHubURL(t *testing.T) {
 	}
 }
 
+func TestResolveRepoWithTypedSourceFlags(t *testing.T) {
+	repo, err := resolveRepoWithFlags(nil, sourceFlagValues{repo: "acme/skills", ref: "v1.2.3", path: "packs"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo != "acme/skills" {
+		t.Errorf("got %q", repo)
+	}
+}
+
+func TestResolveRepoRejectsArgWithTypedSourceFlags(t *testing.T) {
+	_, err := resolveRepoWithFlags([]string{"acme/skills"}, sourceFlagValues{repo: "other/skills"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 func TestResolveRepoNoArgNonTTY(t *testing.T) {
 	// When stdin is not a TTY (like in tests), resolveRepo with no args should error.
 	_, err := resolveRepo([]string{})
