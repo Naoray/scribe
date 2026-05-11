@@ -215,16 +215,16 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			if path == "" {
 				continue
 			}
-			if e.isOtherProjectProjection(path, name, skill, byName) {
-				newManaged[path] = true
-				continue
-			}
 			toolName := inferToolName(path, byName, name, e.ProjectRoot)
 			if _, err := os.Lstat(path); err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
 					continue
 				}
 				return summary, actions, err
+			}
+			if e.isOtherProjectProjection(path, name, skill, byName) {
+				newManaged[path] = true
+				continue
 			}
 			// A stale projection is safe to remove whenever it resolves
 			// back into the canonical store — that guarantees it was Scribe
