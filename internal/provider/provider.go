@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/tools"
 )
 
@@ -29,4 +30,11 @@ type Provider interface {
 	// Fetch downloads all files for a single catalog entry.
 	// Returns skill files ready to be written to the canonical store.
 	Fetch(ctx context.Context, entry manifest.Entry) ([]File, error)
+}
+
+// SourceProvider is the transitional SourceSpec-aware provider API.
+// Provider remains stable so existing tests and callers can keep using repo strings.
+type SourceProvider interface {
+	DiscoverSource(ctx context.Context, spec source.SourceSpec) (*DiscoverResult, error)
+	FetchSource(ctx context.Context, spec source.SourceSpec, entry manifest.Entry) ([]File, error)
 }
