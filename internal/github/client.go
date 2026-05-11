@@ -461,6 +461,22 @@ func (c *Client) RepositoryIsPrivate(ctx context.Context, owner, repo string) (b
 	return r.GetPrivate(), nil
 }
 
+// RepositoryDefaultBranch returns a repository's default branch.
+func (c *Client) RepositoryDefaultBranch(ctx context.Context, owner, repo string) (string, error) {
+	if c == nil || c.gh == nil {
+		return "", errors.New("github client is not initialized")
+	}
+	r, _, err := c.gh.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", wrapErr(err, fmt.Sprintf("registry metadata %s/%s", owner, repo))
+	}
+	branch := r.GetDefaultBranch()
+	if branch == "" {
+		branch = "main"
+	}
+	return branch, nil
+}
+
 // LatestRelease fetches the latest published release for a repository.
 func (c *Client) LatestRelease(ctx context.Context, owner, repo string) (*github.RepositoryRelease, error) {
 	release, _, err := c.gh.Repositories.GetLatestRelease(ctx, owner, repo)

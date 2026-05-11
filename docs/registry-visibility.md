@@ -17,3 +17,17 @@ Only `public` registries are eligible for future public discovery features. `pri
 - `github` -> `unknown`
 
 Scribe does not phone home about registries in this phase. Visibility is local plumbing only.
+
+## Local Public Registry Index
+
+Scribe keeps a local-only cache of public registries at `~/.scribe/index/registries.json`. `scribe registry connect` and successful `scribe sync` runs update this file for registries whose stored visibility is `public`.
+
+The index stores public repo identity and manifest metadata:
+- repo and source repo
+- visibility
+- default branch and current head SHA
+- manifest presence, kind, and team name
+- skill and kit counts
+- last fetched timestamp
+
+`private` and `unknown` registries are skipped. If the file is missing, Scribe treats it as an empty index. If the file is corrupt, commands that read or update it report the parse error and tell the user to remove the file or reconnect public registries to rebuild.

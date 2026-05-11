@@ -21,6 +21,7 @@ func newRegistryCommand() *cobra.Command {
 	cmd.AddCommand(newRegistryDisableCommand())
 	cmd.AddCommand(newRegistryForgetCommand())
 	cmd.AddCommand(newRegistryResyncCommand())
+	cmd.AddCommand(newRegistryIndexCommand())
 	cmd.AddCommand(newRegistryAddCommand())
 	cmd.AddCommand(newRegistryCreateCommand())
 	cmd.AddCommand(newRegistryMigrateCommand())

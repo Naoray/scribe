@@ -2,7 +2,10 @@ package workflow_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -13,10 +16,18 @@ import (
 )
 
 type connectTestProvider struct {
-	isTeam bool
+	isTeam   bool
+	manifest *manifest.Manifest
 }
 
 func (p connectTestProvider) Discover(context.Context, string) (*provider.DiscoverResult, error) {
+	if p.manifest != nil {
+		return &provider.DiscoverResult{
+			IsTeam:   p.isTeam,
+			Entries:  p.manifest.Catalog,
+			Manifest: p.manifest,
+		}, nil
+	}
 	return &provider.DiscoverResult{
 		IsTeam: p.isTeam,
 		Entries: []manifest.Entry{
@@ -38,11 +49,100 @@ func (c connectVisibilityClient) RepositoryIsPrivate(context.Context, string, st
 	return c.private, c.err
 }
 
+type connectIndexClient struct{}
+
+func (connectIndexClient) RepositoryDefaultBranch(context.Context, string, string) (string, error) {
+	return "main", nil
+}
+
+func (connectIndexClient) LatestCommitSHA(context.Context, string, string, string) (string, error) {
+	return "abc123", nil
+}
+
 func TestConnectSteps_EndsWithShowAvailable(t *testing.T) {
 	steps := workflow.ConnectSteps()
 	last := steps[len(steps)-1]
 	if last.Name != "ShowAvailable" {
 		t.Errorf("expected last step ShowAvailable, got %s (connect must not auto-install)", last.Name)
+	}
+}
+
+func TestStepIndexPublicRegistryWritesLocalIndex(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	bag := &workflow.Bag{
+		Config: &config.Config{},
+		Provider: connectTestProvider{
+			isTeam: true,
+			manifest: &manifest.Manifest{
+				APIVersion: "scribe/v1",
+				Kind:       "Registry",
+				Team:       &manifest.Team{Name: "Acme"},
+				Catalog:    []manifest.Entry{{Name: "deploy"}, {Name: "review"}},
+				Kits:       []manifest.KitEntry{{Name: "ops"}},
+			},
+		},
+		Visibility:    connectVisibilityClient{private: false},
+		RegistryIndex: connectIndexClient{},
+		RepoArg:       "acme/skills",
+	}
+
+	for _, step := range []func(context.Context, *workflow.Bag) error{
+		workflow.StepFetchManifest,
+		workflow.StepValidateManifest,
+		workflow.StepInferRegistryType,
+		workflow.StepIndexPublicRegistry,
+	} {
+		if err := step(context.Background(), bag); err != nil {
+			t.Fatalf("step failed: %v", err)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".scribe", "index", "registries.json"))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	var idx struct {
+		Registries []struct {
+			Repo       string `json:"repo"`
+			HeadSHA    string `json:"head_sha"`
+			SkillCount int    `json:"skill_count"`
+			KitCount   int    `json:"kit_count"`
+		} `json:"registries"`
+	}
+	if err := json.Unmarshal(data, &idx); err != nil {
+		t.Fatalf("unmarshal index: %v", err)
+	}
+	if len(idx.Registries) != 1 || idx.Registries[0].Repo != "acme/skills" {
+		t.Fatalf("registries = %#v", idx.Registries)
+	}
+	if idx.Registries[0].HeadSHA != "abc123" || idx.Registries[0].SkillCount != 2 || idx.Registries[0].KitCount != 1 {
+		t.Fatalf("registry = %#v", idx.Registries[0])
+	}
+}
+
+func TestStepIndexPublicRegistrySkipsPrivateAndUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	for _, visibility := range []string{config.RegistryVisibilityPrivate, config.RegistryVisibilityUnknown} {
+		t.Run(visibility, func(t *testing.T) {
+			bag := &workflow.Bag{
+				Config: &config.Config{Registries: []config.RegistryConfig{{
+					Repo:       "acme/skills",
+					Enabled:    true,
+					Visibility: visibility,
+				}}},
+				RepoArg: "acme/skills",
+			}
+			if err := workflow.StepIndexPublicRegistry(context.Background(), bag); err != nil {
+				t.Fatalf("StepIndexPublicRegistry: %v", err)
+			}
+		})
+	}
+	if _, err := os.Stat(filepath.Join(home, ".scribe", "index", "registries.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("index stat error = %v, want not exist", err)
 	}
 }
 

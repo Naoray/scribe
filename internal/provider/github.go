@@ -56,20 +56,20 @@ func (p *GitHubProvider) Discover(ctx context.Context, repo string) (*DiscoverRe
 	}
 
 	// Step 1: Try scribe.yaml.
-	entries, err := p.discoverScribeYAML(ctx, owner, repoName)
+	m, err := p.discoverScribeYAML(ctx, owner, repoName)
 	if err == nil {
-		return &DiscoverResult{Entries: entries, IsTeam: true}, nil
+		return &DiscoverResult{Entries: m.Catalog, IsTeam: true, Manifest: m}, nil
 	}
 
 	// Step 2: Try scribe.toml (legacy).
-	entries, err = p.discoverScribeTOML(ctx, owner, repoName)
+	m, err = p.discoverScribeTOML(ctx, owner, repoName)
 	if err == nil {
 		p.warn(fmt.Sprintf("%s uses legacy scribe.toml format — consider migrating to scribe.yaml", repo))
-		return &DiscoverResult{Entries: entries, IsTeam: true}, nil
+		return &DiscoverResult{Entries: m.Catalog, IsTeam: true, Manifest: m}, nil
 	}
 
 	// Step 3: Try .claude-plugin/marketplace.json.
-	entries, err = p.discoverMarketplace(ctx, owner, repoName)
+	entries, err := p.discoverMarketplace(ctx, owner, repoName)
 	if err == nil {
 		return &DiscoverResult{Entries: entries, IsTeam: false}, nil
 	}
@@ -83,7 +83,7 @@ func (p *GitHubProvider) Discover(ctx context.Context, repo string) (*DiscoverRe
 	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml, marketplace.json, and SKILL.md files)", repo)
 }
 
-func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {
+func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
 	raw, err := p.client.FetchFile(ctx, owner, repo, manifest.ManifestFilename, "HEAD")
 	if err != nil {
 		return nil, err
@@ -92,10 +92,10 @@ func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo str
 	if err != nil {
 		return nil, err
 	}
-	return m.Catalog, nil
+	return m, nil
 }
 
-func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {
+func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
 	raw, err := p.client.FetchFile(ctx, owner, repo, manifest.LegacyManifestFilename, "HEAD")
 	if err != nil {
 		return nil, err
@@ -104,7 +104,7 @@ func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo str
 	if err != nil {
 		return nil, err
 	}
-	return m.Catalog, nil
+	return m, nil
 }
 
 func (p *GitHubProvider) discoverMarketplace(ctx context.Context, owner, repo string) ([]manifest.Entry, error) {

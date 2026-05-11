@@ -13,8 +13,9 @@ type File = tools.SkillFile
 
 // DiscoverResult holds the output of a Discover call.
 type DiscoverResult struct {
-	Entries []manifest.Entry
-	IsTeam  bool // true if discovery found a scribe.yaml/toml with a team section
+	Entries  []manifest.Entry
+	IsTeam   bool // true if discovery found a scribe.yaml/toml with a team section
+	Manifest *manifest.Manifest
 }
 
 // Provider abstracts how skills are discovered and fetched from a repository.

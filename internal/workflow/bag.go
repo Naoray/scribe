@@ -9,6 +9,7 @@ import (
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/registryindex"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -59,6 +60,7 @@ type Bag struct {
 	State         *state.State
 	Client        *gh.Client
 	Visibility    RepositoryVisibilityClient
+	RegistryIndex registryindex.MetadataClient
 	Tools         []tools.Tool
 	ProjectRoot   string
 	TeamShareMode bool
