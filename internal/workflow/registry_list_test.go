@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/workflow"
 )
@@ -67,13 +68,16 @@ func TestPrintRegistryJSON_Shape(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := workflow.PrintRegistryJSON(&buf, []string{"Foo/bar"}, st); err != nil {
+	if err := workflow.PrintRegistryJSON(&buf, []config.RegistryConfig{
+		{Repo: "Foo/bar", Visibility: config.RegistryVisibilityPublic},
+	}, st); err != nil {
 		t.Fatalf("PrintRegistryJSON error: %v", err)
 	}
 
 	var out struct {
 		Registries []struct {
 			Registry   string `json:"registry"`
+			Visibility string `json:"visibility"`
 			SkillCount int    `json:"skill_count"`
 		} `json:"registries"`
 		LastSync *string `json:"last_sync"`
@@ -90,6 +94,9 @@ func TestPrintRegistryJSON_Shape(t *testing.T) {
 	}
 	if out.Registries[0].SkillCount != 2 {
 		t.Errorf("skill_count = %d, want 2", out.Registries[0].SkillCount)
+	}
+	if out.Registries[0].Visibility != config.RegistryVisibilityPublic {
+		t.Errorf("visibility = %q, want %q", out.Registries[0].Visibility, config.RegistryVisibilityPublic)
 	}
 	if out.LastSync == nil {
 		t.Fatal("last_sync is nil, want non-nil")
