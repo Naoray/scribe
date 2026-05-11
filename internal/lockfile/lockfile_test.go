@@ -3,6 +3,8 @@ package lockfile
 import (
 	"strings"
 	"testing"
+
+	"github.com/Naoray/scribe/internal/source"
 )
 
 const hashA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -83,6 +85,46 @@ entries:
 	}
 	if !strings.Contains(string(encoded), "kind: ProjectLock") || !strings.Contains(string(encoded), "kits:") || !strings.Contains(string(encoded), "source_repo: acme/skills") {
 		t.Fatalf("encoded project lockfile missing fields: %s", encoded)
+	}
+}
+
+func TestParseProjectStructuredSourceIdentity(t *testing.T) {
+	raw := []byte(`
+format_version: 1
+kind: ProjectLock
+entries:
+  - name: recap
+    source_registry: git:https://example.com/acme/skills.git:packs
+    source_key: git:https://example.com/acme/skills.git:packs
+    source:
+      type: git
+      url: https://example.com/acme/skills.git
+      ref: main
+      path: packs
+    resolved_rev: abc123
+    commit_sha: abc123
+    content_hash: ` + hashA + `
+`)
+	lf, err := ParseProject(raw)
+	if err != nil {
+		t.Fatalf("ParseProject() error = %v", err)
+	}
+	entry, ok := lf.Entry("recap")
+	if !ok {
+		t.Fatal("Entry(recap) not found")
+	}
+	if entry.SourceKey != "git:https://example.com/acme/skills.git:packs" || entry.ResolvedRev != "abc123" {
+		t.Fatalf("structured identity = %+v", entry.Entry)
+	}
+	if entry.Source == nil || entry.Source.Type != source.SourceGit || entry.Source.Path != "packs" {
+		t.Fatalf("source = %+v", entry.Source)
+	}
+	encoded, err := lf.Encode()
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+	if !strings.Contains(string(encoded), "source_key: git:https://example.com/acme/skills.git:packs") || !strings.Contains(string(encoded), "resolved_rev: abc123") {
+		t.Fatalf("encoded project lockfile missing structured identity: %s", encoded)
 	}
 }
 

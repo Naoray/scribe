@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Naoray/scribe/internal/paths"
+	"github.com/Naoray/scribe/internal/source"
 )
 
 // State is the contents of ~/.scribe/state.json.
@@ -74,6 +75,7 @@ type VendorState struct {
 type RemovedSkill struct {
 	Name      string    `json:"name"`
 	Registry  string    `json:"registry"`
+	SourceKey string    `json:"source_key,omitempty"`
 	RemovedAt time.Time `json:"removed_at"`
 }
 
@@ -187,12 +189,35 @@ type SkillSource struct {
 	LastSHA    string            `json:"last_sha"`
 	BlobSHAs   map[string]string `json:"blob_shas,omitempty"`
 	LastSynced time.Time         `json:"last_synced"`
+
+	SourceKey   string             `json:"source_key,omitempty"`
+	Source      *source.SourceSpec `json:"source,omitempty"`
+	ResolvedRev string             `json:"resolved_rev,omitempty"`
 }
 
 // PushRegistry returns the repository that should receive local edits.
 func (s SkillSource) PushRegistry() string {
+	if s.Source != nil {
+		switch s.Source.Type {
+		case source.SourceGitHub, source.SourceGitLab:
+			if s.Source.Repo != "" {
+				return s.Source.Repo
+			}
+		default:
+			return ""
+		}
+	}
 	if s.SourceRepo != "" {
 		return s.SourceRepo
+	}
+	return s.Registry
+}
+
+// IdentityKey returns the structured source identity when present, falling back
+// to the legacy registry key used by old state files.
+func (s SkillSource) IdentityKey() string {
+	if s.SourceKey != "" {
+		return s.SourceKey
 	}
 	return s.Registry
 }
@@ -562,13 +587,15 @@ func (s *State) RecordRemovedByUser(name string, sources []SkillSource) {
 	}
 	now := time.Now().UTC()
 	for _, src := range sources {
-		if src.Registry == "" {
+		key := src.IdentityKey()
+		if key == "" {
 			continue
 		}
 		replaced := false
 		for i := range s.RemovedByUser {
-			if s.RemovedByUser[i].Name == name && s.RemovedByUser[i].Registry == src.Registry {
+			if s.RemovedByUser[i].Name == name && removedSkillMatches(s.RemovedByUser[i], key, name) {
 				s.RemovedByUser[i].RemovedAt = now
+				s.RemovedByUser[i].SourceKey = src.SourceKey
 				replaced = true
 				break
 			}
@@ -576,7 +603,8 @@ func (s *State) RecordRemovedByUser(name string, sources []SkillSource) {
 		if !replaced {
 			s.RemovedByUser = append(s.RemovedByUser, RemovedSkill{
 				Name:      name,
-				Registry:  src.Registry,
+				Registry:  key,
+				SourceKey: src.SourceKey,
 				RemovedAt: now,
 			})
 		}
@@ -589,7 +617,7 @@ func (s *State) IsRemovedByUser(registry, name string) bool {
 		return false
 	}
 	for _, removed := range s.RemovedByUser {
-		if removed.Registry == registry && removed.Name == name {
+		if removedSkillMatches(removed, registry, name) {
 			return true
 		}
 	}
@@ -606,7 +634,7 @@ func (s *State) ClearRemovedByUser(name, registry string) bool {
 	changed := false
 	for _, removed := range s.RemovedByUser {
 		matchName := removed.Name == name
-		matchRegistry := registry == "" || removed.Registry == registry
+		matchRegistry := registry == "" || removedSkillMatches(removed, registry, name)
 		if matchName && matchRegistry {
 			changed = true
 			continue
@@ -625,7 +653,7 @@ func (s *State) ClearRemovedByRegistry(registry string) bool {
 	kept := s.RemovedByUser[:0]
 	changed := false
 	for _, removed := range s.RemovedByUser {
-		if removed.Registry == registry {
+		if removedSkillMatches(removed, registry, removed.Name) {
 			changed = true
 			continue
 		}
@@ -633,6 +661,13 @@ func (s *State) ClearRemovedByRegistry(registry string) bool {
 	}
 	s.RemovedByUser = kept
 	return changed
+}
+
+func removedSkillMatches(removed RemovedSkill, key, name string) bool {
+	if key == "" || removed.Name != name {
+		return false
+	}
+	return removed.Registry == key || removed.SourceKey == key
 }
 
 func (s *State) HasMigration(name string) bool {

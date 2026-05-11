@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -77,6 +78,24 @@ func TestCompareEntrySourceLookup(t *testing.T) {
 	got := compareEntry(entry("github:a/b@v1.0.0"), inst, "", "a/b", false)
 	if got != StatusMissing {
 		t.Errorf("got %s, want %s", got, StatusMissing)
+	}
+}
+
+func TestCompareEntrySourceKeyLookup(t *testing.T) {
+	spec := source.SourceSpec{Type: source.SourceGit, URL: "https://example.com/acme/skills.git", Ref: "main", Path: "packs"}
+	inst := &state.InstalledSkill{
+		Revision: 1,
+		Sources: []state.SkillSource{{
+			Registry:  "legacy-display",
+			SourceKey: "git:https://example.com/acme/skills.git:packs",
+			Source:    &spec,
+			Ref:       "main",
+			LastSHA:   "abc123",
+		}},
+	}
+	got := compareEntry(entry("github:a/b@main"), inst, "abc123", "git:https://example.com/acme/skills.git:packs", false)
+	if got != StatusCurrent {
+		t.Errorf("got %s, want %s", got, StatusCurrent)
 	}
 }
 

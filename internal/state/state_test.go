@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -94,6 +95,103 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if skill.InstalledAt.IsZero() {
 		t.Error("expected InstalledAt to be set")
+	}
+}
+
+func TestSkillSourceStructuredIdentityRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	src := source.SourceSpec{
+		Type: source.SourceGit,
+		URL:  "https://example.com/acme/skills.git",
+		Ref:  "main",
+		Path: "packs",
+	}
+	s, _ := state.Load()
+	s.RecordInstall("recap", state.InstalledSkill{
+		Revision:      1,
+		InstalledHash: "hash",
+		Sources: []state.SkillSource{{
+			Registry:    "git:https://example.com/acme/skills.git:packs",
+			SourceKey:   "git:https://example.com/acme/skills.git:packs",
+			Source:      &src,
+			ResolvedRev: "abc123",
+			Ref:         "main",
+			LastSHA:     "abc123",
+		}},
+		Tools: []string{"claude"},
+		Paths: []string{"/tmp/recap"},
+	})
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := loaded.Installed["recap"].Sources[0]
+	if got.SourceKey != "git:https://example.com/acme/skills.git:packs" || got.ResolvedRev != "abc123" {
+		t.Fatalf("structured source identity = %+v", got)
+	}
+	if got.Source == nil || got.Source.Type != source.SourceGit || got.Source.Path != "packs" {
+		t.Fatalf("source spec = %+v", got.Source)
+	}
+}
+
+func TestSkillSourceLegacyShapeStillLoads(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".scribe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{
+  "schema_version": 6,
+  "installed": {
+    "recap": {
+      "revision": 1,
+      "installed_hash": "hash",
+      "sources": [{
+        "registry": "acme/skills",
+        "ref": "main",
+        "last_sha": "abc123",
+        "last_synced": "2026-05-11T00:00:00Z"
+      }],
+      "tools": ["claude"],
+      "paths": ["/tmp/recap"]
+    }
+  },
+  "kits": {},
+  "snippets": {},
+  "removed_by_user": []
+}`)
+	if err := os.WriteFile(filepath.Join(home, ".scribe", "state.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := state.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := loaded.Installed["recap"].Sources[0]
+	if got.Registry != "acme/skills" || got.SourceKey != "" || got.Source != nil {
+		t.Fatalf("legacy source changed on load: %+v", got)
+	}
+}
+
+func TestRemovedByUserMatchesSourceKey(t *testing.T) {
+	st := &state.State{}
+	st.RecordRemovedByUser("recap", []state.SkillSource{{
+		Registry:  "display",
+		SourceKey: "git:https://example.com/acme/skills.git:packs",
+	}})
+	if !st.IsRemovedByUser("git:https://example.com/acme/skills.git:packs", "recap") {
+		t.Fatal("IsRemovedByUser(source key) = false, want true")
+	}
+	if !st.ClearRemovedByUser("recap", "git:https://example.com/acme/skills.git:packs") {
+		t.Fatal("ClearRemovedByUser(source key) = false, want true")
+	}
+	if st.IsRemovedByUser("git:https://example.com/acme/skills.git:packs", "recap") {
+		t.Fatal("source-key removal remained after clear")
 	}
 }
 

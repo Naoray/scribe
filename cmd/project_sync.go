@@ -21,6 +21,7 @@ import (
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/skillmd"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -332,6 +333,9 @@ func projectEntryFromState(name string, installed state.InstalledSkill) (lockfil
 			CommitSHA:          src.LastSHA,
 			ContentHash:        hash,
 			InstallCommandHash: sync.CommandHash(installed.InstallCmd, installed.UpdateCmd, installed.Installs, installed.Updates),
+			SourceKey:          src.SourceKey,
+			Source:             cloneSourceSpec(src.Source),
+			ResolvedRev:        sourceResolvedRev(src),
 		},
 		SourceRepo: src.SourceRepo,
 		Path:       src.Path,
@@ -341,6 +345,21 @@ func projectEntryFromState(name string, installed state.InstalledSkill) (lockfil
 		Installs:   cloneProjectStringMap(installed.Installs),
 		Updates:    cloneProjectStringMap(installed.Updates),
 	}, nil
+}
+
+func cloneSourceSpec(src *source.SourceSpec) *source.SourceSpec {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	return &cp
+}
+
+func sourceResolvedRev(src state.SkillSource) string {
+	if src.ResolvedRev != "" {
+		return src.ResolvedRev
+	}
+	return src.LastSHA
 }
 
 func cloneProjectStringMap(in map[string]string) map[string]string {

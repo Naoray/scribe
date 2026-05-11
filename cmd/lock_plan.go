@@ -8,6 +8,7 @@ import (
 	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/source"
 	isync "github.com/Naoray/scribe/internal/sync"
 )
 
@@ -87,12 +88,23 @@ func buildLatestLockEntry(ctx context.Context, entry manifest.Entry, fetcher isy
 	if err != nil {
 		return lockfile.Entry{}, err
 	}
+	spec, ident, err := source.Canonicalize(source.SourceSpec{
+		Type: source.SourceGitHub,
+		Repo: src.Owner + "/" + src.Repo,
+		Ref:  src.Ref,
+	})
+	if err != nil {
+		return lockfile.Entry{}, err
+	}
 	return lockfile.Entry{
 		Name:               entry.Name,
 		SourceRegistry:     src.Owner + "/" + src.Repo,
 		CommitSHA:          commit,
 		ContentHash:        hash,
 		InstallCommandHash: installCommandHash(entry),
+		SourceKey:          ident.Key,
+		Source:             &spec,
+		ResolvedRev:        commit,
 	}, nil
 }
 

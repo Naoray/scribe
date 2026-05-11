@@ -6,6 +6,7 @@ import (
 	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/reconcile"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -52,6 +53,10 @@ type SkillStatus struct {
 	LatestSHA  string // resolved SHA for branch-pinned skills; empty if unavailable
 	BlobSHAs   map[string]string
 	LockEntry  *lockfile.Entry
+
+	SourceKey   string
+	Source      *source.SourceSpec
+	ResolvedRev string
 }
 
 // DisplayVersion returns the best human-readable version for this skill.

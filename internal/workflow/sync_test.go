@@ -13,6 +13,7 @@ import (
 	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/projectstore"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -88,12 +89,57 @@ func TestValidateProjectRegistriesConnectedChecksKitPins(t *testing.T) {
 			ContentHash:    "hash",
 		}},
 	}
-	err := validateProjectRegistriesConnected(lf, []string{"other/skills"})
+	connected := []config.RegistrySource{{
+		Config: config.RegistryConfig{Repo: "other/skills"},
+		Source: source.SourceSpec{
+			Type: source.SourceGitHub,
+			Repo: "other/skills",
+		},
+		Identity: source.SourceIdentity{Key: "github:other/skills"},
+	}}
+	err := validateProjectRegistriesConnected(lf, connected)
 	if err == nil {
 		t.Fatal("expected missing registry error")
 	}
 	if !strings.Contains(err.Error(), `registry "acme/skills" is not connected`) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateProjectRegistriesConnectedAcceptsStructuredSourceKey(t *testing.T) {
+	spec := source.SourceSpec{
+		Type: source.SourceGit,
+		URL:  "https://example.com/acme/skills.git",
+		Ref:  "main",
+		Path: "packs",
+	}
+	_, ident, err := source.Canonicalize(spec)
+	if err != nil {
+		t.Fatalf("Canonicalize: %v", err)
+	}
+	lf := &lockfile.ProjectLockfile{
+		FormatVersion: lockfile.SchemaVersion,
+		Kind:          lockfile.ProjectKind,
+		Entries: []lockfile.ProjectEntry{{
+			Entry: lockfile.Entry{
+				Name:           "deploy",
+				SourceRegistry: ident.Key,
+				SourceKey:      ident.Key,
+				Source:         &spec,
+				CommitSHA:      "abc123",
+				ContentHash:    "hash",
+			},
+			Path: "skills/deploy",
+		}},
+	}
+	connected := []config.RegistrySource{{
+		Config:   config.RegistryConfig{Source: &spec, Enabled: true},
+		Source:   spec,
+		Identity: ident,
+	}}
+
+	if err := validateProjectRegistriesConnected(lf, connected); err != nil {
+		t.Fatalf("validateProjectRegistriesConnected: %v", err)
 	}
 }
 

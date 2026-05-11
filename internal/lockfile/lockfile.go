@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Naoray/scribe/internal/source"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,11 +34,14 @@ type ProjectLockfile struct {
 }
 
 type Entry struct {
-	Name               string `yaml:"name" json:"name"`
-	SourceRegistry     string `yaml:"source_registry" json:"source_registry"`
-	CommitSHA          string `yaml:"commit_sha" json:"commit_sha"`
-	ContentHash        string `yaml:"content_hash" json:"content_hash"`
-	InstallCommandHash string `yaml:"install_command_hash,omitempty" json:"install_command_hash,omitempty"`
+	Name               string             `yaml:"name" json:"name"`
+	SourceRegistry     string             `yaml:"source_registry" json:"source_registry"`
+	CommitSHA          string             `yaml:"commit_sha" json:"commit_sha"`
+	ContentHash        string             `yaml:"content_hash" json:"content_hash"`
+	InstallCommandHash string             `yaml:"install_command_hash,omitempty" json:"install_command_hash,omitempty"`
+	SourceKey          string             `yaml:"source_key,omitempty" json:"source_key,omitempty"`
+	Source             *source.SourceSpec `yaml:"source,omitempty" json:"source,omitempty"`
+	ResolvedRev        string             `yaml:"resolved_rev,omitempty" json:"resolved_rev,omitempty"`
 }
 
 type ProjectEntry struct {
