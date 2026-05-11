@@ -39,6 +39,53 @@ esac
 `), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	fakeJQ := filepath.Join(binDir, "jq")
+	if err := os.WriteFile(fakeJQ, []byte(`#!/usr/bin/env bash
+set -eu
+
+json_quote() {
+  local value=${1//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '"%s"' "$value"
+}
+
+if [ "${1:-}" = "-n" ]; then
+  context=""
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--arg" ] && [ "${2:-}" = "context" ]; then
+      context=$3
+      shift 3
+    else
+      shift
+    fi
+  done
+  printf '{"hookSpecificOutput":{"additionalContext":'
+  json_quote "$context"
+  printf '}}\n'
+  exit 0
+fi
+
+filter="${2:-${1:-}}"
+case "$filter" in
+  *installed_count*)
+    printf '2 installed, 1 registries, last sync 2026-04-30T10:10:47Z\n'
+    ;;
+  *"def names:"*)
+    printf 'alpha, beta\n'
+    ;;
+  *"then length"*)
+    printf '2\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout := runHookScript(t, binDir+string(os.PathListSeparator)+os.Getenv("PATH"), []byte(`{"hook_event_name":"PostToolUseFailure"}`))
 
@@ -95,12 +142,19 @@ func TestScribeHookScriptHandlesMissingScribe(t *testing.T) {
 func runHookScript(t *testing.T, pathEnv string, stdin []byte) []byte {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx := context.Background()
+	cancel := func() {}
+	if deadline, ok := t.Deadline(); ok {
+		if time.Until(deadline) > time.Second {
+			deadline = deadline.Add(-time.Second)
+		}
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+	}
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", filepath.Join("scripts", "scribe-hook.sh"))
 	cmd.Dir = "."
-	cmd.Env = append(os.Environ(), "PATH="+pathEnv)
+	cmd.Env = envWithPath(pathEnv)
 	cmd.Stdin = bytes.NewReader(stdin)
 
 	var stdout, stderr bytes.Buffer
@@ -109,10 +163,21 @@ func runHookScript(t *testing.T, pathEnv string, stdin []byte) []byte {
 
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		t.Fatalf("hook script timed out after 5s: %v\nstderr:\n%s", ctx.Err(), stderr.String())
+		t.Fatalf("hook script timed out before test deadline: %v\nstderr:\n%s", ctx.Err(), stderr.String())
 	}
 	if err != nil {
 		t.Fatalf("hook script failed: %v\nstderr:\n%s", err, stderr.String())
 	}
 	return stdout.Bytes()
+}
+
+func envWithPath(pathEnv string) []string {
+	env := os.Environ()
+	for i, entry := range env {
+		if strings.HasPrefix(entry, "PATH=") {
+			env[i] = "PATH=" + pathEnv
+			return env
+		}
+	}
+	return append(env, "PATH="+pathEnv)
 }
