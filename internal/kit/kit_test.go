@@ -103,3 +103,22 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
 	}
 }
+
+func TestLoadParsesSkillAliasMappings(t *testing.T) {
+	got, err := Parse([]byte(`
+name: baseline
+skills:
+  - tdd
+  - ref: other/skills:tdd
+    alias: other-tdd
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if !reflect.DeepEqual(got.Skills, []string{"tdd", "other/skills:tdd"}) {
+		t.Fatalf("skills = %#v", got.Skills)
+	}
+	if got.SkillAliases["other/skills:tdd"] != "other-tdd" {
+		t.Fatalf("aliases = %#v", got.SkillAliases)
+	}
+}

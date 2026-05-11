@@ -71,7 +71,7 @@ func ResolveWithDetail(ctx context.Context, in ResolverInput) (Resolution, error
 			defaultRegistry = k.Source.Registry
 		}
 		for _, raw := range k.Skills {
-			refs = append(refs, kitRefWithRegistry{Raw: raw, DefaultRegistry: defaultRegistry, Published: k.Source != nil})
+			refs = append(refs, kitRefWithRegistry{Raw: raw, Alias: k.SkillAliases[raw], DefaultRegistry: defaultRegistry, Published: k.Source != nil})
 		}
 	}
 	for _, raw := range pf.Add {
@@ -118,12 +118,25 @@ func ResolveWithDetail(ctx context.Context, in ResolverInput) (Resolution, error
 			result.Missing = append(result.Missing, *missing)
 			continue
 		}
+		if rawRef.Alias != "" && len(matches) != 1 {
+			return Resolution{}, fmt.Errorf("alias %q for %q requires exactly one resolved skill", rawRef.Alias, rawRef.Raw)
+		}
 		for _, name := range matches {
+			localName := name
+			aliasFor := ""
+			aliased := false
+			if rawRef.Alias != "" {
+				localName = rawRef.Alias
+				aliasFor = name
+				aliased = true
+			}
 			addResolvedSkill(&result, seen, ResolvedSkill{
-				Name:     name,
+				Name:     localName,
 				Origin:   origin,
 				Registry: ref.Registry,
 				Source:   ref.Source,
+				Aliased:  aliased,
+				AliasFor: aliasFor,
 			})
 		}
 	}
@@ -143,6 +156,7 @@ func ResolveWithDetail(ctx context.Context, in ResolverInput) (Resolution, error
 
 type kitRefWithRegistry struct {
 	Raw             string
+	Alias           string
 	DefaultRegistry string
 	Published       bool
 }

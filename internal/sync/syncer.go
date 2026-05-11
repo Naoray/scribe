@@ -86,6 +86,14 @@ type Syncer struct {
 	// real directory already exists at the original tool projection path.
 	AliasName string
 
+	// SkillAliases installs named incoming skills under fixed local names.
+	// Used by registry kits to avoid same-name collisions across sources.
+	SkillAliases map[string]string
+
+	// PinnedSkillSources overrides catalog source refs for named skills during
+	// kit dependency installs.
+	PinnedSkillSources map[string]string
+
 	// OnRegistryFetched runs after a registry manifest has been fetched and
 	// applied successfully. Callers use this for local metadata caches.
 	OnRegistryFetched func(repo string, m *manifest.Manifest) error
@@ -188,7 +196,10 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 	treeCache := map[string][]provider.TreeEntry{}
 
 	for i := range m.Catalog {
-		entry := &m.Catalog[i]
+		entry := m.Catalog[i]
+		if pinned := s.PinnedSkillSources[entry.Name]; pinned != "" {
+			entry.Source = pinned
+		}
 		// Use bare name for lookup — flat storage model.
 		installedPtr := lookupInstalled(st, entry.Name)
 		locallyModified := false
@@ -218,33 +229,37 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 					}
 				}
 			case src.IsBranch():
-				key := src.Owner + "/" + src.Repo + "/" + src.Ref
-				tree, ok := treeCache[key]
-				if !ok {
-					fetched, terr := s.Client.GetTree(ctx, src.Owner, src.Repo, src.Ref)
-					if terr == nil {
-						treeCache[key] = fetched
-						tree = fetched
+				if isCommitSHA(src.Ref) {
+					latestSHA = src.Ref
+				} else {
+					key := src.Owner + "/" + src.Repo + "/" + src.Ref
+					tree, ok := treeCache[key]
+					if !ok {
+						fetched, terr := s.Client.GetTree(ctx, src.Owner, src.Repo, src.Ref)
+						if terr == nil {
+							treeCache[key] = fetched
+							tree = fetched
+						}
 					}
-				}
-				if len(tree) > 0 {
-					blobSHAs = resolveSkillBlobSHAs(tree, *entry)
-					if resolvedSHA, found := blobSHAs[skillBlobTarget(*entry)]; found {
-						latestSHA = resolvedSHA
-					} else {
-						latestSHA = missingSkillBlobSHA
+					if len(tree) > 0 {
+						blobSHAs = resolveSkillBlobSHAs(tree, entry)
+						if resolvedSHA, found := blobSHAs[skillBlobTarget(entry)]; found {
+							latestSHA = resolvedSHA
+						} else {
+							latestSHA = missingSkillBlobSHA
+						}
 					}
 				}
 			}
 		}
 
-		status := compareEntry(*entry, installedPtr, latestSHA, teamRepo, locallyModified)
+		status := compareEntry(entry, installedPtr, latestSHA, teamRepo, locallyModified)
 		statuses = append(statuses, SkillStatus{
 			Name:       entry.Name,
 			Status:     status,
 			Installed:  installedPtr,
-			Entry:      entry,
-			LoadoutRef: loadoutRef(*entry),
+			Entry:      &entry,
+			LoadoutRef: loadoutRef(entry),
 			Maintainer: entry.Maintainer(),
 			IsPackage:  entry.IsPackage(),
 			LatestSHA:  latestSHA,
@@ -871,7 +886,15 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			installName := sk.Name
-			if conflict, ok := s.firstRealDirectoryConflict(sk.Name, effectiveTools); ok {
+			aliasFor := ""
+			if alias := strings.TrimSpace(s.SkillAliases[sk.Name]); alias != "" {
+				installName = alias
+				aliasFor = sk.Name
+				if installed == nil {
+					installed = lookupInstalled(st, installName)
+				}
+			}
+			if conflict, ok := s.firstRealDirectoryConflict(installName, effectiveTools); ok {
 				resolution, err := s.resolveNameConflict(conflict, st, effectiveTools)
 				if err != nil {
 					return err
@@ -973,6 +996,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				Paths:         append([]string(nil), managedPaths...),
 				Projections:   mergeProjection(installed, s.ProjectRoot, toolNames),
 				ManagedPaths:  managedPaths,
+				AliasFor:      aliasFor,
 			})
 			// Save after each successful install — partial sync is safe.
 			if err := st.Save(); err != nil {
@@ -1886,4 +1910,17 @@ func entrySource(e *manifest.Entry) string {
 		return ""
 	}
 	return e.Source
+}
+
+func isCommitSHA(ref string) bool {
+	if len(ref) != 40 {
+		return false
+	}
+	for _, r := range ref {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
 }

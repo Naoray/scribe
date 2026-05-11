@@ -13,11 +13,12 @@ import (
 
 // Kit is a named bundle of Scribe skills.
 type Kit struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description,omitempty"`
-	Skills      []string `yaml:"skills"`
-	MCPServers  []string `yaml:"mcp_servers,omitempty"`
-	Source      *Source  `yaml:"source,omitempty"`
+	Name         string            `yaml:"name"`
+	Description  string            `yaml:"description,omitempty"`
+	Skills       []string          `yaml:"-"`
+	SkillAliases map[string]string `yaml:"-"`
+	MCPServers   []string          `yaml:"mcp_servers,omitempty"`
+	Source       *Source           `yaml:"source,omitempty"`
 }
 
 type kitYAML struct {
@@ -28,16 +29,20 @@ type kitYAML struct {
 	Source      *Source    `yaml:"source,omitempty"`
 }
 
-type skillRef string
+type skillRef struct {
+	Ref   string `yaml:"ref"`
+	Alias string `yaml:"alias,omitempty"`
+}
 
 func (s *skillRef) UnmarshalYAML(value *yaml.Node) error {
 	switch value.Kind {
 	case yaml.ScalarNode:
-		*s = skillRef(value.Value)
+		*s = skillRef{Ref: value.Value}
 		return nil
 	case yaml.MappingNode:
 		var raw struct {
-			Ref string `yaml:"ref"`
+			Ref   string `yaml:"ref"`
+			Alias string `yaml:"alias,omitempty"`
 		}
 		if err := value.Decode(&raw); err != nil {
 			return err
@@ -45,11 +50,21 @@ func (s *skillRef) UnmarshalYAML(value *yaml.Node) error {
 		if raw.Ref == "" {
 			return errors.New("skill mapping must include ref")
 		}
-		*s = skillRef(raw.Ref)
+		*s = skillRef{Ref: raw.Ref, Alias: raw.Alias}
 		return nil
 	default:
 		return fmt.Errorf("skill ref must be a string or mapping, got YAML kind %d", value.Kind)
 	}
+}
+
+func (s skillRef) MarshalYAML() (any, error) {
+	if s.Alias == "" {
+		return s.Ref, nil
+	}
+	return struct {
+		Ref   string `yaml:"ref"`
+		Alias string `yaml:"alias,omitempty"`
+	}{Ref: s.Ref, Alias: s.Alias}, nil
 }
 
 func (k *Kit) UnmarshalYAML(value *yaml.Node) error {
@@ -60,12 +75,33 @@ func (k *Kit) UnmarshalYAML(value *yaml.Node) error {
 	k.Name = raw.Name
 	k.Description = raw.Description
 	k.Skills = make([]string, 0, len(raw.Skills))
+	k.SkillAliases = nil
 	for _, ref := range raw.Skills {
-		k.Skills = append(k.Skills, string(ref))
+		k.Skills = append(k.Skills, ref.Ref)
+		if ref.Alias != "" {
+			if k.SkillAliases == nil {
+				k.SkillAliases = map[string]string{}
+			}
+			k.SkillAliases[ref.Ref] = ref.Alias
+		}
 	}
 	k.MCPServers = raw.MCPServers
 	k.Source = raw.Source
 	return nil
+}
+
+func (k Kit) MarshalYAML() (any, error) {
+	raw := kitYAML{
+		Name:        k.Name,
+		Description: k.Description,
+		Skills:      make([]skillRef, 0, len(k.Skills)),
+		MCPServers:  k.MCPServers,
+		Source:      k.Source,
+	}
+	for _, ref := range k.Skills {
+		raw.Skills = append(raw.Skills, skillRef{Ref: ref, Alias: k.SkillAliases[ref]})
+	}
+	return raw, nil
 }
 
 // Source records the registry source for a kit.

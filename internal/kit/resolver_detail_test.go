@@ -110,6 +110,31 @@ func TestResolveWithDetailCrossRegistryGlobUsesCatalog(t *testing.T) {
 	}
 }
 
+func TestResolveWithDetailAliasAvoidsNameConflict(t *testing.T) {
+	got, err := ResolveWithDetail(context.Background(), ResolverInput{
+		Project: &projectfile.ProjectFile{Kits: []string{"baseline"}},
+		Kits: map[string]*Kit{"baseline": {
+			Name:         "baseline",
+			Skills:       []string{"tdd", "other/skills:tdd"},
+			SkillAliases: map[string]string{"other/skills:tdd": "other-tdd"},
+			Source:       &Source{Registry: "acme/skills"},
+		}},
+		Registries: []config.RegistryConfig{{Repo: "acme/skills", Enabled: true}, {Repo: "other/skills", Enabled: true}},
+	})
+	if err != nil {
+		t.Fatalf("ResolveWithDetail: %v", err)
+	}
+	if joinedSkills(got.Skills) != "other-tdd:cross_registry:other/skills,tdd:same_registry:acme/skills" {
+		t.Fatalf("skills = %s", joinedSkills(got.Skills))
+	}
+	if len(got.Conflicts) != 0 {
+		t.Fatalf("conflicts = %#v", got.Conflicts)
+	}
+	if !got.Skills[0].Aliased || got.Skills[0].AliasFor != "tdd" {
+		t.Fatalf("aliased skill = %+v", got.Skills[0])
+	}
+}
+
 func joinedSkills(skills []ResolvedSkill) string {
 	parts := make([]string, 0, len(skills))
 	for _, skill := range skills {
