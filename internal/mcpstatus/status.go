@@ -167,7 +167,7 @@ func Inspect(opts InspectOptions) (Report, error) {
 }
 
 func resolveDeclarations(workDir string) (projectRoot string, manifestPath string, declarations []string, err error) {
-	manifestPath, err = projectfile.Find(workDir)
+	manifestPath, err = findProjectManifest(workDir)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -195,6 +195,47 @@ func resolveDeclarations(workDir string) (projectRoot string, manifestPath strin
 		return "", "", nil, err
 	}
 	return filepath.Dir(manifestPath), manifestPath, declarations, nil
+}
+
+func findProjectManifest(startDir string) (string, error) {
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve start dir: %w", err)
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("stat start dir: %w", err)
+	}
+	if !info.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+
+	for {
+		candidate := filepath.Join(dir, projectfile.Filename)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("stat project file: %w", err)
+		}
+
+		if isGitRoot(dir) {
+			return "", nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", nil
+		}
+		dir = parent
+	}
+}
+
+func isGitRoot(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return true
+	}
+	return false
 }
 
 type projectMCPFile struct {

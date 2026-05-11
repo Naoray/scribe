@@ -110,6 +110,24 @@ func TestInspectDoesNotWriteClientFiles(t *testing.T) {
 	}
 }
 
+func TestInspectIgnoresParentProjectFilePastGitRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	parent := t.TempDir()
+	writeFile(t, filepath.Join(parent, ".scribe.yaml"), "kits:\n  - missing-local-kit\n")
+	project := filepath.Join(parent, "repo")
+	writeFile(t, filepath.Join(project, ".git"), "gitdir: /tmp/repo.git\n")
+
+	report, err := Inspect(InspectOptions{WorkDir: project})
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if report.ManifestPath != "" {
+		t.Fatalf("manifest path = %q, want empty", report.ManifestPath)
+	}
+	assertStrings(t, report.Declarations, nil)
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
