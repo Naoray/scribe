@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/budget"
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -163,6 +165,75 @@ func TestProjectBudgetIncludesTargetedSnippets(t *testing.T) {
 	}
 	if codex.has("snippet:commit-discipline") {
 		t.Fatalf("codex budget included claude-only snippet: %#v", codex)
+	}
+}
+
+func TestEnforceCurrentBudgetReportsOverflowContributors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	wd := t.TempDir()
+	t.Chdir(wd)
+
+	writeBudgetSkill(t, home, "huge-alpha", longBudgetSkillContent("huge-alpha", 4000))
+	writeBudgetSkill(t, home, "huge-beta", longBudgetSkillContent("huge-beta", 1800))
+	writeBudgetKit(t, home, "over-budget", []string{"huge-alpha", "huge-beta"})
+	if err := os.WriteFile(filepath.Join(wd, ".scribe.yaml"), []byte("kits:\n - over-budget\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	factory := budgetTestFactory(&state.State{Installed: map[string]state.InstalledSkill{
+		"huge-alpha": {Tools: []string{"codex"}},
+		"huge-beta":  {Tools: []string{"codex"}},
+	}})
+	err := enforceCurrentBudget(factory, false)
+	if err == nil {
+		t.Fatal("enforceCurrentBudget returned nil, want budget refusal")
+	}
+	got := err.Error()
+	for _, want := range []string{
+		"Codex skill budget exceeded",
+		"estimated: 5800 / 5440 bytes",
+		"biggest contributors:",
+		"huge-alpha: 4000 bytes",
+		"huge-beta: 1800 bytes",
+		"rerun with --force",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestEnforceCurrentBudgetForceBypassesRefusal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	wd := t.TempDir()
+	t.Chdir(wd)
+
+	writeBudgetSkill(t, home, "huge-alpha", longBudgetSkillContent("huge-alpha", 4000))
+	writeBudgetSkill(t, home, "huge-beta", longBudgetSkillContent("huge-beta", 1800))
+	writeBudgetKit(t, home, "over-budget", []string{"huge-alpha", "huge-beta"})
+	if err := os.WriteFile(filepath.Join(wd, ".scribe.yaml"), []byte("kits:\n - over-budget\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	factory := budgetTestFactory(&state.State{Installed: map[string]state.InstalledSkill{
+		"huge-alpha": {Tools: []string{"codex"}},
+		"huge-beta":  {Tools: []string{"codex"}},
+	}})
+	if err := enforceCurrentBudget(factory, true); err != nil {
+		t.Fatalf("enforceCurrentBudget(force=true): %v", err)
+	}
+}
+
+func budgetTestFactory(st *state.State) *app.Factory {
+	return &app.Factory{
+		Config: func() (*config.Config, error) {
+			return &config.Config{}, nil
+		},
+		State: func() (*state.State, error) {
+			return st, nil
+		},
 	}
 }
 
