@@ -19,6 +19,7 @@ import (
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -141,8 +142,24 @@ const (
 // FetchManifest tries Provider.Discover first (if set), then falls back to
 // direct file fetch with scribe.yaml → scribe.toml fallback.
 func (s *Syncer) FetchManifest(ctx context.Context, owner, repo string) (*manifest.Manifest, error) {
+	return s.FetchManifestSource(ctx, source.SourceSpec{Type: source.SourceGitHub, Repo: owner + "/" + repo})
+}
+
+// FetchManifestSource fetches a manifest through SourceSpec-aware providers.
+// It falls back to legacy GitHub file fetch only for unscoped GitHub sources.
+func (s *Syncer) FetchManifestSource(ctx context.Context, spec source.SourceSpec) (*manifest.Manifest, error) {
+	spec, err := source.CanonicalSpec(spec)
+	if err != nil {
+		return nil, err
+	}
 	if s.Provider != nil {
-		result, err := s.Provider.Discover(ctx, owner+"/"+repo)
+		var result *provider.DiscoverResult
+		var err error
+		if sp, ok := s.Provider.(provider.SourceProvider); ok {
+			result, err = sp.DiscoverSource(ctx, spec)
+		} else {
+			result, err = s.Provider.Discover(ctx, spec.Repo)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -152,9 +169,17 @@ func (s *Syncer) FetchManifest(ctx context.Context, owner, repo string) (*manife
 			Catalog:    result.Entries,
 		}
 		if result.IsTeam {
-			m.Team = &manifest.Team{Name: owner + "/" + repo}
+			m.Team = &manifest.Team{Name: spec.Repo}
 		}
 		return m, nil
+	}
+
+	if spec.Type != source.SourceGitHub || spec.Path != "" || spec.Ref != "" {
+		return nil, fmt.Errorf("source %q requires a SourceSpec-aware provider", spec.Repo)
+	}
+	owner, repo, err := manifest.ParseOwnerRepo(spec.Repo)
+	if err != nil {
+		return nil, err
 	}
 
 	// Legacy path: direct file fetch.
@@ -172,17 +197,26 @@ func (s *Syncer) FetchManifest(ctx context.Context, owner, repo string) (*manife
 // without making any changes. Used by `scribe list`.
 // Returns the parsed manifest alongside statuses so callers can reuse it.
 func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]SkillStatus, *manifest.Manifest, error) {
-	owner, repo, err := manifest.ParseOwnerRepo(teamRepo)
+	spec, err := source.ParseSourceArg(teamRepo)
 	if err != nil {
 		return nil, nil, err
 	}
+	return s.DiffSource(ctx, teamRepo, spec, st)
+}
 
-	m, err := s.FetchManifest(ctx, owner, repo)
+// DiffSource fetches a SourceSpec-backed registry and computes status for each skill.
+// registryKey is the legacy/display identity used in state and JSON during phase 2.
+func (s *Syncer) DiffSource(ctx context.Context, registryKey string, spec source.SourceSpec, st *state.State) ([]SkillStatus, *manifest.Manifest, error) {
+	spec, err := source.CanonicalSpec(spec)
+	if err != nil {
+		return nil, nil, err
+	}
+	m, err := s.FetchManifestSource(ctx, spec)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse loadout: %w", err)
 	}
 	if len(m.Catalog) == 0 {
-		return nil, nil, fmt.Errorf("%s has no skills", teamRepo)
+		return nil, nil, fmt.Errorf("%s has no skills", registryKey)
 	}
 
 	var statuses []SkillStatus
@@ -216,6 +250,8 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		// compareEntry handles that gracefully.
 		var blobSHAs map[string]string
 		if err == nil {
+			src = sourceScopedManifestSource(spec, src)
+			entry.Source = src.String()
 			switch {
 			case entry.IsPackage():
 				key := src.Owner + "/" + src.Repo + "/" + src.Ref
@@ -253,7 +289,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 			}
 		}
 
-		status := compareEntry(entry, installedPtr, latestSHA, teamRepo, locallyModified)
+		status := compareEntry(entry, installedPtr, latestSHA, registryKey, locallyModified)
 		statuses = append(statuses, SkillStatus{
 			Name:       entry.Name,
 			Status:     status,
@@ -280,7 +316,7 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 		}
 		// Check if any source matches this registry.
 		for _, src := range skill.Sources {
-			if src.Registry == teamRepo {
+			if src.Registry == registryKey {
 				extraNames = append(extraNames, name)
 				break
 			}
@@ -303,6 +339,15 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 // Emits events throughout. Updates state incrementally — a failed skill
 // does not prevent successful skills from being recorded.
 func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) error {
+	spec, err := source.ParseSourceArg(teamRepo)
+	if err != nil {
+		return err
+	}
+	return s.RunSource(ctx, teamRepo, spec, st)
+}
+
+// RunSource executes a sync against a SourceSpec-backed registry.
+func (s *Syncer) RunSource(ctx context.Context, teamRepo string, spec source.SourceSpec, st *state.State) error {
 	if err := s.ensureProjectRoot(); err != nil {
 		return err
 	}
@@ -313,7 +358,7 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 		s.emit(SkillErrorMsg{Name: "<migration>", Err: fmt.Errorf("reclassify legacy packages: %w", err)})
 	}
 
-	statuses, m, err := s.Diff(ctx, teamRepo, st)
+	statuses, m, err := s.DiffSource(ctx, teamRepo, spec, st)
 	if err != nil {
 		return fmt.Errorf("sync %s: %w", teamRepo, err)
 	}
@@ -353,7 +398,7 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 		}
 		applyLockPins(statuses, lf)
 	}
-	if err := s.apply(ctx, teamRepo, statuses, st); err != nil {
+	if err := s.applySource(ctx, teamRepo, &spec, statuses, st); err != nil {
 		return err
 	}
 	if s.OnRegistryFetched != nil {
@@ -683,6 +728,10 @@ func applyLockPins(statuses []SkillStatus, lf *lockfile.Lockfile) {
 }
 
 func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillStatus, st *state.State) error {
+	return s.applySource(ctx, teamRepo, nil, statuses, st)
+}
+
+func (s *Syncer) applySource(ctx context.Context, teamRepo string, spec *source.SourceSpec, statuses []SkillStatus, st *state.State) error {
 	// Emit resolved status for each skill (populates list view before downloads start).
 	for _, sk := range statuses {
 		s.emit(SkillResolvedMsg{sk})
@@ -734,7 +783,17 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 			if s.Provider != nil {
 				// Use Provider.Fetch — returns []tools.SkillFile directly.
-				files, err := s.Provider.Fetch(ctx, *sk.Entry)
+				var files []tools.SkillFile
+				var err error
+				if spec != nil {
+					if sp, ok := s.Provider.(provider.SourceProvider); ok {
+						files, err = sp.FetchSource(ctx, *spec, *sk.Entry)
+					} else {
+						err = fmt.Errorf("source %q requires a SourceSpec-aware provider", teamRepo)
+					}
+				} else {
+					files, err = s.Provider.Fetch(ctx, *sk.Entry)
+				}
 				if err != nil {
 					s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
 					summary.Failed++
@@ -1230,6 +1289,14 @@ func (s *Syncer) RunWithDiff(ctx context.Context, teamRepo string, statuses []Sk
 	return s.apply(ctx, teamRepo, statuses, st)
 }
 
+// RunWithDiffSource applies a pre-computed diff using SourceSpec-aware fetch.
+func (s *Syncer) RunWithDiffSource(ctx context.Context, teamRepo string, spec source.SourceSpec, statuses []SkillStatus, st *state.State) error {
+	if err := s.ensureProjectRoot(); err != nil {
+		return err
+	}
+	return s.applySource(ctx, teamRepo, &spec, statuses, st)
+}
+
 func (s *Syncer) ensureProjectRoot() error {
 	if s.ProjectRoot != "" {
 		return nil
@@ -1695,6 +1762,20 @@ func loadoutRef(entry manifest.Entry) string {
 		return "?"
 	}
 	return src.Ref
+}
+
+func sourceScopedManifestSource(spec source.SourceSpec, src manifest.Source) manifest.Source {
+	if spec.Type != source.SourceGitHub || spec.Ref == "" || src.Ref != "HEAD" {
+		return src
+	}
+	owner, repo, err := manifest.ParseOwnerRepo(spec.Repo)
+	if err != nil {
+		return src
+	}
+	if src.Owner == owner && src.Repo == repo {
+		src.Ref = spec.Ref
+	}
+	return src
 }
 
 // lookupInstalled returns a pointer to the installed skill, or nil if not found.
