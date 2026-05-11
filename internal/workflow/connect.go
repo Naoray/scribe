@@ -10,6 +10,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/registryindex"
 )
 
 // ConnectSteps returns the step list for the connect command.
@@ -46,6 +47,7 @@ func connectBaseSteps(loadConfig bool) []Step {
 		Step{Name: "ValidateManifest", Fn: StepValidateManifest},
 		Step{Name: "InferRegistryType", Fn: StepInferRegistryType},
 		Step{Name: "SaveConfig", Fn: StepSaveConfig},
+		Step{Name: "IndexPublicRegistry", Fn: StepIndexPublicRegistry},
 	)
 	return steps
 }
@@ -81,15 +83,19 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 		return fmt.Errorf("could not discover skills in %s: %w", b.RepoArg, err)
 	}
 
-	// Build a minimal manifest from discovered entries.
-	b.manifest = &manifest.Manifest{
-		APIVersion: "scribe/v1",
-		Kind:       "Registry",
-		Catalog:    result.Entries,
-	}
-	// Only set Team if discovery found an actual team manifest (scribe.yaml/toml).
-	if result.IsTeam {
-		b.manifest.Team = &manifest.Team{Name: b.RepoArg}
+	if result.Manifest != nil {
+		b.manifest = result.Manifest
+	} else {
+		// Build a minimal manifest from discovered entries.
+		b.manifest = &manifest.Manifest{
+			APIVersion: "scribe/v1",
+			Kind:       "Registry",
+			Catalog:    result.Entries,
+		}
+		// Only set Team if discovery found an actual team manifest (scribe.yaml/toml).
+		if result.IsTeam {
+			b.manifest.Team = &manifest.Team{Name: b.RepoArg}
+		}
 	}
 	return nil
 }
@@ -150,6 +156,36 @@ func StepSaveConfig(_ context.Context, b *Bag) error {
 		return fmt.Errorf("save config: %w", err)
 	}
 	b.Formatter.OnConnectSaved(b.RepoArg)
+	return nil
+}
+
+func StepIndexPublicRegistry(ctx context.Context, b *Bag) error {
+	return updateRegistryIndex(ctx, b, b.RepoArg, b.manifest)
+}
+
+func updateRegistryIndex(ctx context.Context, b *Bag, repo string, m *manifest.Manifest) error {
+	if b == nil || b.Config == nil {
+		return nil
+	}
+	rc := b.Config.FindRegistry(repo)
+	if rc == nil {
+		return nil
+	}
+	rc.Normalize()
+	if !rc.IsPublic() {
+		return nil
+	}
+	path, err := registryindex.Path()
+	if err != nil {
+		return err
+	}
+	entry, err := registryindex.BuildEntry(ctx, *rc, m, b.RegistryIndex)
+	if err != nil {
+		return fmt.Errorf("update registry index for %s: %w", repo, err)
+	}
+	if err := registryindex.Upsert(path, entry); err != nil {
+		return fmt.Errorf("update registry index for %s: %w", repo, err)
+	}
 	return nil
 }
 

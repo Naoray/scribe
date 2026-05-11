@@ -86,6 +86,10 @@ type Syncer struct {
 	// real directory already exists at the original tool projection path.
 	AliasName string
 
+	// OnRegistryFetched runs after a registry manifest has been fetched and
+	// applied successfully. Callers use this for local metadata caches.
+	OnRegistryFetched func(repo string, m *manifest.Manifest) error
+
 	// NameConflictResolver is called when a real directory already exists at
 	// the incoming skill name. Nil means non-interactive conflict.
 	NameConflictResolver func(NameConflict) (NameConflictResolution, error)
@@ -294,7 +298,7 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 		s.emit(SkillErrorMsg{Name: "<migration>", Err: fmt.Errorf("reclassify legacy packages: %w", err)})
 	}
 
-	statuses, _, err := s.Diff(ctx, teamRepo, st)
+	statuses, m, err := s.Diff(ctx, teamRepo, st)
 	if err != nil {
 		return fmt.Errorf("sync %s: %w", teamRepo, err)
 	}
@@ -334,7 +338,15 @@ func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) erro
 		}
 		applyLockPins(statuses, lf)
 	}
-	return s.apply(ctx, teamRepo, statuses, st)
+	if err := s.apply(ctx, teamRepo, statuses, st); err != nil {
+		return err
+	}
+	if s.OnRegistryFetched != nil {
+		if err := s.OnRegistryFetched(teamRepo, m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Syncer) RunProject(ctx context.Context, st *state.State, lf *lockfile.ProjectLockfile) error {

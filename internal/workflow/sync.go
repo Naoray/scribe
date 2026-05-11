@@ -23,6 +23,7 @@ import (
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/kit"
 	"github.com/Naoray/scribe/internal/lockfile"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/paths"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/projectstore"
@@ -711,6 +712,9 @@ func StepLoadConfig(ctx context.Context, b *Bag) error {
 	if b.Visibility == nil {
 		b.Visibility = b.Client
 	}
+	if b.RegistryIndex == nil {
+		b.RegistryIndex = b.Client
+	}
 
 	return nil
 }
@@ -884,6 +888,9 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		KitFilterEnabled: b.KitFilterEnabled,
 		ProjectRoot:      b.ProjectRoot,
 		SkipMissing:      workflowSkipMissing(b),
+		OnRegistryFetched: func(repo string, m *manifest.Manifest) error {
+			return updateRegistryIndex(ctx, b, repo, m)
+		},
 		Emit: func(msg any) {
 			switch m := msg.(type) {
 			case sync.SkillResolvedMsg:

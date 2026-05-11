@@ -2,6 +2,7 @@
 
 ### Added
 - Add `visibility` to registry config as a foundation for future opt-in registry discovery; no telemetry is added.
+- Add a local public registry index at `~/.scribe/index/registries.json`, updated by connect/sync and readable with `scribe registry index --json`.
 
 ## v1.3.0 — 2026-05-09
 

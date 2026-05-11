@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/Naoray/scribe/internal/registryindex"
 )
 
 func newRegistryForgetCommand() *cobra.Command {
@@ -63,6 +66,15 @@ func forgetRegistry(repo string) error {
 	cfg.Registries = kept
 	st.ClearRegistryFailure(resolved)
 	st.ClearRemovedByRegistry(resolved)
+	if path, err := registryindex.Path(); err == nil {
+		if _, statErr := os.Stat(path); statErr == nil {
+			if err := registryindex.Remove(path, resolved); err != nil {
+				return err
+			}
+		} else if !os.IsNotExist(statErr) {
+			return statErr
+		}
+	}
 
 	if err := cfg.Save(); err != nil {
 		return err

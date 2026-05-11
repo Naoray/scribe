@@ -43,6 +43,7 @@ Connect, create, share, and audit the skill registries this machine pulls from. 
 | `scribe registry create` | Scaffold a new registry repo on GitHub interactively |
 | `scribe registry add [name]` | Share a local skill into a connected registry |
 | `scribe registry list` | Show connected registries with skill counts |
+| `scribe registry index` | Show the local cache of public registries under `~/.scribe/index/registries.json` |
 | `scribe registry enable <repo>` / `disable <repo>` | Toggle a connected registry without forgetting it |
 | `scribe registry forget <repo>` | Disconnect a registry (does not remove already-installed skills) |
 | `scribe registry resync <repo>` | Force-fetch a registry's catalog from upstream |
