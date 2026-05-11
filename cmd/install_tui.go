@@ -292,6 +292,8 @@ func renderStatusBadge(s sync.Status) string {
 		return installInstalledStyle.Render("(installed)")
 	case sync.StatusOutdated:
 		return installOutdatedStyle.Render("(update available)")
+	case sync.StatusModified:
+		return installOutdatedStyle.Render("(modified)")
 	}
 	return ""
 }

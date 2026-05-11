@@ -311,6 +311,142 @@ func TestRunWithDiff_DoesNotOverwriteTargetReadme(t *testing.T) {
 	}
 }
 
+func TestRunWithDiff_ModifiedSkillSkipsByDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(home, ".scribe", "skills", "recap")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("local edit\n"), 0o644); err != nil {
+		t.Fatalf("write local skill: %v", err)
+	}
+
+	var events []any
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("upstream\n")}},
+		},
+		Emit: func(msg any) { events = append(events, msg) },
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"recap": {
+			Revision:      1,
+			InstalledHash: sync.ComputeFileHash([]byte("base\n")),
+		},
+	}}
+	statuses := []sync.SkillStatus{{
+		Name:   "recap",
+		Status: sync.StatusModified,
+		Entry:  &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read local skill: %v", err)
+	}
+	if string(got) != "local edit\n" {
+		t.Fatalf("SKILL.md = %q, want local edit preserved", got)
+	}
+	if !hasSkillSkipped(events, "recap") {
+		t.Fatalf("modified skill should emit skipped event, got %#v", events)
+	}
+	if hasSkillInstalled(events, "recap") {
+		t.Fatalf("modified skill should not install without explicit resync, got %#v", events)
+	}
+}
+
+func TestRunWithDiff_ModifiedSkillPreferTheirsOverwrites(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(home, ".scribe", "skills", "recap")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("local edit\n"), 0o644); err != nil {
+		t.Fatalf("write local skill: %v", err)
+	}
+
+	var events []any
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("upstream\n")}},
+		},
+		ModifiedStrategy: sync.ModifiedStrategyPreferTheirs,
+		Emit:             func(msg any) { events = append(events, msg) },
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"recap": {
+			Revision:      1,
+			InstalledHash: sync.ComputeFileHash([]byte("base\n")),
+		},
+	}}
+	statuses := []sync.SkillStatus{{
+		Name:      "recap",
+		Status:    sync.StatusModified,
+		Entry:     &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+		LatestSHA: "abc1234",
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read local skill: %v", err)
+	}
+	if string(got) != "upstream\n" {
+		t.Fatalf("SKILL.md = %q, want upstream overwrite", got)
+	}
+	installed := st.Installed["recap"]
+	if installed.InstalledHash != sync.ComputeFileHash([]byte("upstream\n")) {
+		t.Fatalf("InstalledHash = %q, want upstream hash", installed.InstalledHash)
+	}
+	if installed.Revision != 2 {
+		t.Fatalf("Revision = %d, want 2", installed.Revision)
+	}
+	if !hasUpdatedSkillInstalled(events, "recap") {
+		t.Fatalf("explicit resync should emit updated install event, got %#v", events)
+	}
+}
+
+func hasSkillSkipped(events []any, name string) bool {
+	for _, event := range events {
+		msg, ok := event.(sync.SkillSkippedMsg)
+		if ok && msg.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSkillInstalled(events []any, name string) bool {
+	for _, event := range events {
+		msg, ok := event.(sync.SkillInstalledMsg)
+		if ok && msg.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasUpdatedSkillInstalled(events []any, name string) bool {
+	for _, event := range events {
+		msg, ok := event.(sync.SkillInstalledMsg)
+		if ok && msg.Name == name && msg.Updated {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRunWithDiff_SkipsRemovedByUser(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

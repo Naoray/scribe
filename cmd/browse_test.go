@@ -32,7 +32,7 @@ func TestRunBrowseWithDeps_JSONQueryFiltersResults(t *testing.T) {
 	os.Stdout = w
 	defer func() { os.Stdout = oldStdout }()
 
-	err = runBrowseWithDeps(context.Background(), []string{"acme/skills"}, "clean", "", nil, &state.State{Installed: map[string]state.InstalledSkill{}}, nil, nil, true, true)
+	err = runBrowseWithDeps(context.Background(), []string{"acme/skills"}, "clean", "", nil, &state.State{Installed: map[string]state.InstalledSkill{}}, nil, nil, true, true, false)
 	w.Close()
 	if err != nil {
 		t.Fatalf("runBrowseWithDeps() error = %v", err)
@@ -60,14 +60,14 @@ func TestBrowseInstallRejectsAmbiguousName(t *testing.T) {
 	err := browseInstall(context.Background(), "cleanup", []browseEntry{
 		{Registry: "acme/skills", Status: sync.SkillStatus{Name: "cleanup"}},
 		{Registry: "other/skills", Status: sync.SkillStatus{Name: "cleanup"}},
-	}, nil, nil, nil, nil, true, true)
+	}, nil, nil, nil, nil, true, true, false)
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("browseInstall() error = %v, want ambiguous error", err)
 	}
 }
 
 func TestBrowseInstallRejectsMissingName(t *testing.T) {
-	err := browseInstall(context.Background(), "cleanup", nil, nil, nil, nil, nil, true, true)
+	err := browseInstall(context.Background(), "cleanup", nil, nil, nil, nil, nil, true, true, false)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("browseInstall() error = %v, want not found error", err)
 	}

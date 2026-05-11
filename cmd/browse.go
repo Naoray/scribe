@@ -33,6 +33,7 @@ func newBrowseCommand() *cobra.Command {
 	cmd.Flags().String("query", "", "Filter remote skills by query")
 	cmd.Flags().String("install", "", "Install a skill by exact name or owner/repo:skill")
 	cmd.Flags().String("registry", "", "Limit browse/install to one connected registry")
+	cmd.Flags().Bool("resync", false, "Overwrite local edits with the upstream version for modified skills")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	return cmd
 }
@@ -41,6 +42,7 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 	query, _ := cmd.Flags().GetString("query")
 	installRef, _ := cmd.Flags().GetString("install")
 	registryFilter, _ := cmd.Flags().GetString("registry")
+	resync, _ := cmd.Flags().GetBool("resync")
 	yes := noInteractionFlagPassed(cmd)
 	useJSON, _ := cmd.Flags().GetBool("json")
 	useJSON = useJSON || !isatty.IsTerminal(os.Stdout.Fd())
@@ -75,7 +77,7 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 		repos = []string{repo}
 	}
 
-	return runBrowseWithDeps(cmd.Context(), repos, query, installRef, cfg, st, client, targets, useJSON, yes)
+	return runBrowseWithDeps(cmd.Context(), repos, query, installRef, cfg, st, client, targets, useJSON, yes, resync)
 }
 
 func runBrowseWithDeps(
@@ -89,6 +91,7 @@ func runBrowseWithDeps(
 	targets []tools.Tool,
 	useJSON bool,
 	skipConfirm bool,
+	resync bool,
 ) error {
 	if installRef == "" && !useJSON {
 		bag := &workflow.Bag{
@@ -130,7 +133,7 @@ func runBrowseWithDeps(
 	}
 
 	if installRef != "" {
-		return browseInstall(ctx, installRef, entries, cfg, st, client, targets, useJSON, skipConfirm)
+		return browseInstall(ctx, installRef, entries, cfg, st, client, targets, useJSON, skipConfirm, resync)
 	}
 
 	entries = filterBrowseEntries(entries)
@@ -151,13 +154,14 @@ func browseInstall(
 	targets []tools.Tool,
 	useJSON bool,
 	skipConfirm bool,
+	resync bool,
 ) error {
 	if strings.Contains(installRef, ":") {
 		registryRepo, skillName, err := parseSkillRef(installRef)
 		if err != nil {
 			return err
 		}
-		return runAddDirectInstall(ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm)
+		return runAddDirectInstall(ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
 	}
 
 	var matches []browseEntry
@@ -178,7 +182,7 @@ func browseInstall(
 	}
 
 	match := matches[0]
-	return runAddDirectInstall(ctx, match.Registry, match.Status.Name, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm)
+	return runAddDirectInstall(ctx, match.Registry, match.Status.Name, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
 }
 
 func filterBrowseEntries(entries []browseEntry) []browseEntry {

@@ -185,6 +185,44 @@ func TestActionsForRow(t *testing.T) {
 		}
 	})
 
+	t.Run("modified managed row exposes update action", func(t *testing.T) {
+		row := listRow{
+			Name:      "orchestrator-mode",
+			Managed:   true,
+			HasStatus: true,
+			Status:    sync.StatusModified,
+			Entry:     &manifest.Entry{Name: "orchestrator-mode"},
+			Local:     &discovery.Skill{Name: "orchestrator-mode", LocalPath: "/home/user/.scribe/skills/orchestrator-mode"},
+		}
+		updateAction := findAction(testActionsForRow(row, false), "update")
+		if updateAction.key != "update" {
+			t.Fatalf("update action missing: %+v", updateAction)
+		}
+		if updateAction.disabled {
+			t.Fatalf("update action disabled: %+v", updateAction)
+		}
+	})
+
+	t.Run("browse mode labels modified rows as resync", func(t *testing.T) {
+		row := listRow{
+			Name:      "orchestrator-mode",
+			HasStatus: true,
+			Status:    sync.StatusModified,
+			Entry:     &manifest.Entry{Name: "orchestrator-mode"},
+			Local:     &discovery.Skill{Name: "orchestrator-mode", LocalPath: "/home/user/.scribe/skills/orchestrator-mode"},
+		}
+		actions := testActionsForRow(row, true)
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d", len(actions))
+		}
+		if actions[0].key != "update" || actions[0].label != "resync from registry" {
+			t.Fatalf("action = %+v, want resync update action", actions[0])
+		}
+		if actions[0].disabled {
+			t.Fatalf("resync action disabled: %+v", actions[0])
+		}
+	})
+
 	t.Run("unmanaged local row offers adopt action", func(t *testing.T) {
 		row := listRow{
 			Name:    "bare-skill",
