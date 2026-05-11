@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
@@ -337,6 +338,7 @@ func TestSkillTools_DisableUpdatesProjectLocalProjection(t *testing.T) {
 
 	home := os.Getenv("HOME")
 	projectRoot := t.TempDir()
+	otherProjectRoot := t.TempDir()
 	t.Chdir(projectRoot)
 	if err := os.WriteFile(filepath.Join(projectRoot, ".scribe.yaml"), []byte("add:\n  - commit\n"), 0o644); err != nil {
 		t.Fatalf("write project file: %v", err)
@@ -367,6 +369,9 @@ func TestSkillTools_DisableUpdatesProjectLocalProjection(t *testing.T) {
 	skill.Projections = []state.ProjectionEntry{{
 		Project: projectRoot,
 		Tools:   []string{"claude", "codex"},
+	}, {
+		Project: otherProjectRoot,
+		Tools:   []string{"claude", "codex"},
 	}}
 	skill.ManagedPaths = paths
 	skill.Paths = append([]string(nil), paths...)
@@ -386,11 +391,11 @@ func TestSkillTools_DisableUpdatesProjectLocalProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := st.Installed["commit"]
-	if got.ToolsMode != state.ToolsModePinned {
-		t.Fatalf("ToolsMode = %q, want pinned", got.ToolsMode)
+	if got.ToolsMode != state.ToolsModeInherit {
+		t.Fatalf("ToolsMode = %q, want inherit preserved for project-local edit", got.ToolsMode)
 	}
-	if !reflect.DeepEqual(got.Tools, []string{"claude"}) {
-		t.Fatalf("Tools = %v, want [claude]", got.Tools)
+	if !reflect.DeepEqual(got.Tools, []string{"claude", "codex"}) {
+		t.Fatalf("Tools = %v, want global tools preserved", got.Tools)
 	}
 	projectCodexPath := filepath.Join(projectRoot, ".agents", "skills", "commit")
 	if _, err := os.Lstat(projectCodexPath); !os.IsNotExist(err) {
@@ -399,8 +404,15 @@ func TestSkillTools_DisableUpdatesProjectLocalProjection(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(projectRoot, ".claude", "skills", "commit")); err != nil {
 		t.Fatalf("project claude projection missing: %v", err)
 	}
-	if len(got.Projections) != 1 || got.Projections[0].Project != projectRoot || !reflect.DeepEqual(got.Projections[0].Tools, []string{"claude"}) {
-		t.Fatalf("Projections = %#v, want project-local claude only", got.Projections)
+	assertProjectionTools(t, got.Projections, projectRoot, []string{"claude"})
+	assertProjectionTools(t, got.Projections, otherProjectRoot, []string{"claude", "codex"})
+
+	otherProjectSkill := got
+	if !skillNames(budgetSkillsForAgent(resolvedBudgetSet{
+		ProjectRoot: otherProjectRoot,
+		Skills:      []budget.Skill{{Name: "commit", Content: []byte("# commit")}},
+	}, &state.State{Installed: map[string]state.InstalledSkill{"commit": otherProjectSkill}}, "codex")).has("commit") {
+		t.Fatal("codex budget should still include commit for another project-local codex projection")
 	}
 
 	set, err := resolveBudgetSet(st)
@@ -413,6 +425,20 @@ func TestSkillTools_DisableUpdatesProjectLocalProjection(t *testing.T) {
 	if !skillNames(budgetSkillsForAgent(set, st, "claude")).has("commit") {
 		t.Fatal("claude budget should include commit after project-local disable")
 	}
+}
+
+func assertProjectionTools(t *testing.T, projections []state.ProjectionEntry, projectRoot string, want []string) {
+	t.Helper()
+	for _, projection := range projections {
+		if projection.Project != projectRoot {
+			continue
+		}
+		if !reflect.DeepEqual(projection.Tools, want) {
+			t.Fatalf("projection %q tools = %v, want %v", projectRoot, projection.Tools, want)
+		}
+		return
+	}
+	t.Fatalf("projection %q missing from %#v", projectRoot, projections)
 }
 
 func TestSkillTools_DisableLastTool_ReturnsError(t *testing.T) {
