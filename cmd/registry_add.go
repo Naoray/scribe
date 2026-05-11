@@ -81,10 +81,6 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("authentication required — run `gh auth login` or set GITHUB_TOKEN")
 	}
 
-	targetStatuses, err := tools.ResolveStatuses(cfg)
-	if err != nil {
-		return fmt.Errorf("resolve tools: %w", err)
-	}
 	targets, err := tools.ResolveActive(cfg)
 	if err != nil {
 		return fmt.Errorf("resolve active tools: %w", err)
@@ -106,7 +102,7 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 
 	// Package ref fast path — doesn't need local/remote discovery.
 	if len(args) == 1 && strings.Contains(args[0], "/") {
-		return runRegistryAddPackageRef(ctx, args[0], installFlags, adder, targetRepo, st, client, targets, targetStatuses, useJSON, isTTY)
+		return runRegistryAddPackageRef(ctx, args[0], installFlags, adder, targetRepo, st, client, targets, useJSON, isTTY)
 	}
 
 	// Discover candidates.
@@ -166,7 +162,6 @@ func runRegistryAddPackageRef(
 	st *state.State,
 	client *gh.Client,
 	targets []tools.Tool,
-	knownTargets []tools.Status,
 	useJSON bool,
 	isTTY bool,
 ) error {
@@ -184,7 +179,7 @@ func runRegistryAddPackageRef(
 	}
 
 	// Gather install commands.
-	installs, perr := collectInstallCommands(packageRepo, installFlags, knownTargets, isTTY)
+	installs, perr := collectInstallCommands(packageRepo, installFlags, targets, isTTY)
 	if perr != nil {
 		return perr
 	}
@@ -221,12 +216,13 @@ func isPackageManifestMissingErr(err error) bool {
 
 // collectInstallCommands returns a map of tool name → install command,
 // either from --install flags or by prompting the user.
-func collectInstallCommands(packageRepo string, flags []string, knownTargets []tools.Status, isTTY bool) (map[string]string, error) {
+func collectInstallCommands(packageRepo string, flags []string, targets []tools.Tool, isTTY bool) (map[string]string, error) {
 	// Parse --install flags first — they always win.
 	installs := map[string]string{}
 	validTools := map[string]bool{}
-	for _, t := range knownTargets {
-		validTools[t.Name] = true
+	targetNames := toolTargetNames(targets)
+	for _, name := range targetNames {
+		validTools[name] = true
 	}
 
 	for _, raw := range flags {
@@ -240,7 +236,7 @@ func collectInstallCommands(packageRepo string, flags []string, knownTargets []t
 			return nil, fmt.Errorf("invalid --install value %q: tool and command must be non-empty", raw)
 		}
 		if !validTools[tool] {
-			return nil, fmt.Errorf("unknown tool %q in --install — expected one of: %s", tool, strings.Join(toolNames(knownTargets), ", "))
+			return nil, fmt.Errorf("unknown tool %q in --install — expected one of: %s", tool, strings.Join(targetNames, ", "))
 		}
 		installs[tool] = cmd
 	}
@@ -259,10 +255,10 @@ func collectInstallCommands(packageRepo string, flags []string, knownTargets []t
 	fmt.Println("Enter the install command for each tool (leave blank to skip):")
 	fmt.Println()
 
-	for _, t := range knownTargets {
+	for _, name := range targetNames {
 		var value string
 		prompt := huh.NewInput().
-			Title(fmt.Sprintf("Install command for %s", t.Name)).
+			Title(fmt.Sprintf("Install command for %s", name)).
 			Placeholder("e.g. /plugin install superpowers").
 			Value(&value)
 		if err := prompt.Run(); err != nil {
@@ -270,18 +266,24 @@ func collectInstallCommands(packageRepo string, flags []string, knownTargets []t
 		}
 		value = strings.TrimSpace(value)
 		if value != "" {
-			installs[t.Name] = value
+			installs[name] = value
 		}
 	}
 	return installs, nil
 }
 
-func toolNames(targets []tools.Status) []string {
+func toolTargetNames(targets []tools.Tool) []string {
 	names := make([]string, 0, len(targets))
 	for _, t := range targets {
-		names = append(names, t.Name)
+		names = append(names, t.Name())
 	}
 	return names
+}
+
+var fetchRegistryManifestForPackageRef = fetchRegistryManifest
+
+var pushRegistryFilesForPackageRef = func(ctx context.Context, client *gh.Client, owner, repo string, files map[string]string, message string) error {
+	return client.PushFiles(ctx, owner, repo, files, message)
 }
 
 // pushBarePackageRef appends a package-type catalog entry for packageRepo to
@@ -297,7 +299,7 @@ func pushBarePackageRef(ctx context.Context, adder *add.Adder, targetRepo, packa
 		return fmt.Errorf("parse package repo %q: %w", packageRepo, err)
 	}
 
-	m, err := fetchRegistryManifest(ctx, adder.Client, targetOwner, targetRepoName)
+	m, err := fetchRegistryManifestForPackageRef(ctx, adder.Client, targetOwner, targetRepoName)
 	if err != nil {
 		return fmt.Errorf("fetch manifest: %w", err)
 	}
@@ -322,7 +324,7 @@ func pushBarePackageRef(ctx context.Context, adder *add.Adder, targetRepo, packa
 	}
 
 	msg := fmt.Sprintf("add package: %s", entry.Name)
-	if err := adder.Client.PushFiles(ctx, targetOwner, targetRepoName, map[string]string{
+	if err := pushRegistryFilesForPackageRef(ctx, adder.Client, targetOwner, targetRepoName, map[string]string{
 		manifest.ManifestFilename: string(encoded),
 	}, msg); err != nil {
 		return err
