@@ -66,6 +66,7 @@ Examples:
   scribe add react                    # search "react"
   scribe add antfu/skills:nuxt        # direct install
   scribe add antfu/skills:nuxt --no-interaction  # non-interactive
+  scribe add antfu/skills:nuxt --resync  # overwrite local edits from upstream
   scribe add react --json             # machine-readable search`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runAdd,
@@ -74,6 +75,7 @@ Examples:
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
 	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
+	cmd.Flags().Bool("resync", false, "Overwrite local edits with the upstream version for modified skills")
 	cmd.Flags().String("alias", "", "Install incoming skill under this name when a local directory conflicts")
 	return markJSONSupported(cmd)
 }
@@ -83,6 +85,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	jsonFlag := jsonFlagPassed(cmd)
 	registryFilter, _ := cmd.Flags().GetString("registry")
 	forceBudget, _ := cmd.Flags().GetBool("force")
+	resync, _ := cmd.Flags().GetBool("resync")
 	aliasName, _ := cmd.Flags().GetString("alias")
 
 	isTTY := isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
@@ -128,8 +131,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			)
 		}
 		syncer := newInstallSyncerWithOptions(client, targets, forceBudget, aliasName)
+		if resync {
+			syncer.ModifiedStrategy = sync.ModifiedStrategyPreferTheirs
+		}
 		configureInstallNameConflictResolver(syncer, conflictMode, aliasName)
-		if err := runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, syncer, true, useJSON, skipConfirm); err != nil {
+		if err := runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, syncer, true, useJSON, skipConfirm, resync); err != nil {
 			return handleNameConflictError(cmd, err)
 		}
 		return nil
@@ -242,8 +248,13 @@ func runAddDirectInstall(
 	authenticated bool,
 	useJSON bool,
 	skipConfirm bool,
+	resyncOpt ...bool,
 ) error {
-	return runAddDirectInstallForCommand(nil, ctx, registryRepo, skillName, cfg, st, syncer, authenticated, useJSON, skipConfirm)
+	resync := len(resyncOpt) > 0 && resyncOpt[0]
+	if resync {
+		syncer.ModifiedStrategy = sync.ModifiedStrategyPreferTheirs
+	}
+	return runAddDirectInstallForCommand(nil, ctx, registryRepo, skillName, cfg, st, syncer, authenticated, useJSON, skipConfirm, resync)
 }
 
 func runAddDirectInstallForCommand(
@@ -256,6 +267,7 @@ func runAddDirectInstallForCommand(
 	authenticated bool,
 	useJSON bool,
 	skipConfirm bool,
+	resync bool,
 ) error {
 	if !authenticated {
 		return clierrors.Wrap(
@@ -302,6 +314,15 @@ func runAddDirectInstallForCommand(
 		fmt.Printf("%s is already installed (current).\n", skillName)
 		return nil
 	}
+	if target.Status == sync.StatusModified && !resync {
+		if useJSON {
+			return emitInstallJSON([]installResult{{
+				Name: target.Name, Registry: registryRepo, Status: "modified",
+			}}, nil, cmd)
+		}
+		fmt.Printf("%s has local edits. Run with --resync to overwrite them from upstream.\n", skillName)
+		return nil
+	}
 
 	// Confirmation.
 	if !skipConfirm && !useJSON {
@@ -309,6 +330,9 @@ func runAddDirectInstallForCommand(
 		title := fmt.Sprintf("Install %s from %s?", skillName, registryRepo)
 		if target.Status == sync.StatusOutdated {
 			title = fmt.Sprintf("Update %s from %s?", skillName, registryRepo)
+		}
+		if target.Status == sync.StatusModified && resync {
+			title = fmt.Sprintf("Resync %s from %s and overwrite local edits?", skillName, registryRepo)
 		}
 		if err := huh.NewConfirm().Title(title).Value(&confirm).Run(); err != nil {
 			return err
@@ -363,6 +387,8 @@ func installSelected(
 				marker = "already current — skip"
 			case sync.StatusOutdated:
 				marker = "update"
+			case sync.StatusModified:
+				marker = "modified — skip unless resyncing from registry"
 			}
 			fmt.Printf("  • %s  (%s)  [%s]\n", e.Status.Name, e.Registry, marker)
 		}

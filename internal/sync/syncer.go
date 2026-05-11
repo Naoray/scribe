@@ -673,9 +673,17 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			s.emit(SkillSkippedMsg{Name: sk.Name})
 			summary.Skipped++
 
-		case StatusExtra, StatusModified:
+		case StatusExtra:
 			s.emit(SkillSkippedMsg{Name: sk.Name})
 			summary.Skipped++
+
+		case StatusModified:
+			if s.ModifiedStrategy != ModifiedStrategyPreferTheirs {
+				s.emit(SkillSkippedMsg{Name: sk.Name})
+				summary.Skipped++
+				continue
+			}
+			fallthrough
 
 		case StatusMissing, StatusOutdated:
 			if st.IsRemovedByUser(teamRepo, sk.Name) {
@@ -826,7 +834,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			// Snapshot current version before overwrite (no-op for new installs).
-			if installed != nil && sk.Status == StatusOutdated {
+			if installed != nil && isSkillUpdateStatus(sk.Status) {
 				storeDir, sdErr := tools.StoreDir()
 				if sdErr == nil {
 					skillDir := filepath.Join(storeDir, sk.Name)
@@ -960,16 +968,16 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			// Enforce version retention after successful write.
-			if sk.Status == StatusOutdated {
+			if isSkillUpdateStatus(sk.Status) {
 				_ = EnforceRetention(canonicalDir, DefaultMaxVersions)
 			}
 
 			s.emit(SkillInstalledMsg{
 				Name:     installName,
-				Updated:  sk.Status == StatusOutdated,
+				Updated:  isSkillUpdateStatus(sk.Status),
 				Revision: nextRevision(installed),
 			})
-			if sk.Status == StatusOutdated {
+			if isSkillUpdateStatus(sk.Status) {
 				summary.Updated++
 			} else {
 				summary.Installed++
@@ -985,6 +993,10 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 
 	s.emit(summary)
 	return nil
+}
+
+func isSkillUpdateStatus(status Status) bool {
+	return status == StatusOutdated || status == StatusModified
 }
 
 func (s *Syncer) needsProjectProjection(name string, st *state.State) bool {
@@ -1534,7 +1546,7 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, teamRepo stri
 		s.emit(PackageInstalledMsg{Name: sk.Name})
 		summary.Installed++
 
-	case StatusOutdated:
+	case StatusOutdated, StatusModified:
 		hasUpdate := false
 		for _, c := range cmds {
 			if c.updateCmd != "" {

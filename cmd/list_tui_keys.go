@@ -27,18 +27,24 @@ type actionItem struct {
 func (m listModel) actionsForRow(row listRow) []actionItem {
 	if m.isBrowseMode() {
 		canInstall := row.Entry != nil && row.Status != sync.StatusCurrent
+		label := "install"
+		key := "install"
+		if row.Status == sync.StatusModified {
+			label = "resync from registry"
+			key = "update"
+		}
 		reason := "already installed"
 		if row.Entry == nil {
 			reason = "source unknown"
 		}
 		return []actionItem{
-			{label: "install", key: "install", disabled: !canInstall, reason: reason, style: ltUpdateStyle},
+			{label: label, key: key, disabled: !canInstall, reason: reason, style: ltUpdateStyle},
 		}
 	}
 	hasLocal := row.Local != nil && row.Local.LocalPath != ""
 	hasRepair := row.Managed && hasLocal
 	canAdopt := hasLocal && !row.Managed
-	canUpdate := row.HasStatus && row.Status == sync.StatusOutdated && row.Entry != nil
+	canUpdate := row.HasStatus && (row.Status == sync.StatusOutdated || row.Status == sync.StatusModified) && row.Entry != nil
 	updateReason := "up to date"
 	if !row.HasStatus {
 		updateReason = "no registry"
@@ -734,7 +740,11 @@ func (m listModel) executeAction(key string) (tea.Model, tea.Cmd) {
 		m.viewYours.SetContent(diffYours)
 		m.viewIncoming.SetContent("")
 		if m.updateHasMods {
-			m.statusMsg = "Local edits detected. Choose: [r]egistry version, keep [l]ocal version, or [m]erge with upstream."
+			if row.Status == sync.StatusModified {
+				m.statusMsg = "Local edits detected. Choose [r]egistry to overwrite from upstream or keep [l]ocal."
+			} else {
+				m.statusMsg = "Local edits detected. Choose: [r]egistry version, keep [l]ocal version, or [m]erge with upstream."
+			}
 			return m, tea.Batch(tickSpinnerCmd(), fetchUpstreamForDiffCmd(m.ctx, m.bag, row, requestID))
 		}
 		m.statusMsg = "No local edits detected. Update will replace the local copy with the registry version."
