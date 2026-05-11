@@ -72,6 +72,7 @@ const kitInstallOutputSchema = `{
     "path": {"type": "string"},
     "rev": {"type": "string"},
     "skills_installed": {"type": "array", "items": {"type": "string"}},
+    "missing_registries": {"type": "array", "items": {"type": "string"}},
     "missing_refs": {
       "type": "array",
       "items": {
@@ -93,8 +94,20 @@ const kitInstallOutputSchema = `{
   }
 }`
 
+const kitSyncOutputSchema = `{
+  "type": "object",
+  "required": ["kits"],
+  "properties": {
+    "kits": {
+      "type": "array",
+      "items": ` + kitInstallOutputSchema + `
+    }
+  }
+}`
+
 func init() {
 	clischema.Register("scribe kit list", kitListOutputSchema)
 	clischema.Register("scribe kit show", kitShowOutputSchema)
 	clischema.Register("scribe kit install", kitInstallOutputSchema)
+	clischema.Register("scribe kit sync", kitSyncOutputSchema)
 }
