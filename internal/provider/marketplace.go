@@ -26,14 +26,16 @@ type marketplacePlugin struct {
 // ParseMarketplace parses a marketplace.json byte slice and returns catalog entries.
 // Each plugin's skills are flattened into individual entries with Group set to the plugin name.
 func ParseMarketplace(data []byte, owner, repo string) ([]manifest.Entry, error) {
+	return parseMarketplaceWithSource(data, owner, fmt.Sprintf("github:%s/%s@HEAD", owner, repo))
+}
+
+func parseMarketplaceWithSource(data []byte, owner, source string) ([]manifest.Entry, error) {
 	var mf marketplaceFile
 	if err := json.Unmarshal(data, &mf); err != nil {
 		return nil, fmt.Errorf("parse marketplace.json: %w", err)
 	}
 
 	var entries []manifest.Entry
-	source := fmt.Sprintf("github:%s/%s@HEAD", owner, repo)
-
 	for _, plugin := range mf.Plugins {
 		// Resolve the plugin source path (strip leading "./").
 		pluginDir := strings.TrimPrefix(plugin.Source, "./")

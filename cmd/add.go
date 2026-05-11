@@ -132,7 +132,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := runAddDirectInstallSourceForCommand(cmd, ctx, display, ident.Key, spec, args[0], cfg, st, syncer, client.IsAuthenticated(), useJSON, skipConfirm, resync); err != nil {
+		authenticated := client.IsAuthenticated() || !requiresSourceGitHubAuth(spec)
+		if err := runAddDirectInstallSourceForCommand(cmd, ctx, display, ident.Key, spec, args[0], cfg, st, syncer, authenticated, useJSON, skipConfirm, resync); err != nil {
 			return handleNameConflictError(cmd, err)
 		}
 		return nil
@@ -144,7 +145,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := runAddDirectInstallSourceForCommand(cmd, ctx, display, ident.Key, spec, skillName, cfg, st, syncer, client.IsAuthenticated(), useJSON, skipConfirm, resync); err != nil {
+		authenticated := client.IsAuthenticated() || !requiresSourceGitHubAuth(spec)
+		if err := runAddDirectInstallSourceForCommand(cmd, ctx, display, ident.Key, spec, skillName, cfg, st, syncer, authenticated, useJSON, skipConfirm, resync); err != nil {
 			return handleNameConflictError(cmd, err)
 		}
 		return nil
@@ -154,7 +156,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if len(cfg.EnabledSources()) == 0 {
 		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
 	}
-	if !client.IsAuthenticated() {
+	if requiresGitHubAuth(cfg.EnabledSources()) && !client.IsAuthenticated() {
 		return clierrors.Wrap(
 			fmt.Errorf("authentication required"),
 			"GH_AUTH_FAILED",
@@ -435,6 +437,19 @@ func isLegacyGitHubSource(spec source.SourceSpec) bool {
 	return spec.Type == source.SourceGitHub && spec.Path == "" && spec.Ref == ""
 }
 
+func requiresSourceGitHubAuth(spec source.SourceSpec) bool {
+	return spec.Type == source.SourceGitHub
+}
+
+func requiresGitHubAuth(sources []config.RegistrySource) bool {
+	for _, src := range sources {
+		if requiresSourceGitHubAuth(src.Source) {
+			return true
+		}
+	}
+	return false
+}
+
 // installSelected installs the user-selected entries from the browser. Each
 // entry may belong to a different registry; auto-connects as needed.
 func installSelected(
@@ -548,7 +563,7 @@ func newInstallSyncer(client *gh.Client, targets []tools.Tool, forceBudgetOpt ..
 func newInstallSyncerWithOptions(client *gh.Client, targets []tools.Tool, forceBudget bool, aliasName string) *sync.Syncer {
 	return &sync.Syncer{
 		Client:      sync.WrapGitHubClient(client),
-		Provider:    provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
+		Provider:    provider.NewCompositeProvider(provider.NewGitHubProvider(provider.WrapGitHubClient(client))),
 		Tools:       targets,
 		Executor:    &sync.ShellExecutor{},
 		ProjectRoot: resolveCurrentProjectRoot(),
@@ -628,7 +643,7 @@ func discoverEntries(
 ) ([]browseEntry, []error) {
 	syncer := &sync.Syncer{
 		Client:   sync.WrapGitHubClient(client),
-		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
+		Provider: provider.NewCompositeProvider(provider.NewGitHubProvider(provider.WrapGitHubClient(client))),
 		Tools:    targets,
 	}
 
@@ -660,7 +675,7 @@ func discoverSourceEntries(
 ) ([]browseEntry, []error) {
 	syncer := &sync.Syncer{
 		Client:   sync.WrapGitHubClient(client),
-		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
+		Provider: provider.NewCompositeProvider(provider.NewGitHubProvider(provider.WrapGitHubClient(client))),
 		Tools:    targets,
 	}
 

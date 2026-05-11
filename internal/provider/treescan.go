@@ -17,8 +17,10 @@ var treeScanSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 // catalog entries for each. The skill name is derived from the parent directory.
 // A root-level SKILL.md uses the repo name.
 func ScanTreeForSkills(tree []TreeEntry, owner, repo string) []manifest.Entry {
-	source := fmt.Sprintf("github:%s/%s@HEAD", owner, repo)
+	return scanTreeForSkillsWithSource(tree, owner, repo, fmt.Sprintf("github:%s/%s@HEAD", owner, repo))
+}
 
+func scanTreeForSkillsWithSource(tree []TreeEntry, owner, repo, source string) []manifest.Entry {
 	var entries []manifest.Entry
 	for _, entry := range tree {
 		if entry.Type != "blob" {
