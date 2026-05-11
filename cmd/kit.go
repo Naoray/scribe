@@ -46,6 +46,7 @@ type kitListOptions struct {
 
 type kitInstallOptions struct {
 	alias         string
+	forceBudget   bool
 	noDeps        bool
 	noInteraction bool
 	json          bool
@@ -236,6 +237,7 @@ func newKitInstallCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.alias, "alias", "", "Install incoming kit under this local name")
+	cmd.Flags().BoolVar(&opts.forceBudget, "force", false, "Project skills even when an agent budget is exceeded")
 	cmd.Flags().BoolVar(&opts.noDeps, "no-deps", false, "Install kit body without installing referenced skills")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
@@ -254,6 +256,7 @@ func newKitSyncCommand() *cobra.Command {
 			return runKitSync(cmd, opts)
 		},
 	}
+	cmd.Flags().BoolVar(&opts.forceBudget, "force", false, "Project skills even when an agent budget is exceeded")
 	cmd.Flags().BoolVar(&opts.noDeps, "no-deps", false, "Refresh kit bodies without installing referenced skills")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
@@ -501,7 +504,7 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 	}
 	installedSkills := flattenKitDeps(depsByRegistry)
 	if !opts.noDeps {
-		if err := runKitInstallDepsFn(cmd, factory, depsByRegistry); err != nil {
+		if err := runKitInstallDepsFn(cmd, factory, depsByRegistry, opts.forceBudget); err != nil {
 			return err
 		}
 	}
@@ -616,7 +619,7 @@ func installableKitRefs(k *kit.Kit, registryRepo string, cfg *config.Config) (ma
 	return deps, missing, missingRegistries, nil
 }
 
-func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry map[string][]kitInstallDep) error {
+func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry map[string][]kitInstallDep, forceBudget bool) error {
 	registries := make([]string, 0, len(depsByRegistry))
 	for registryRepo := range depsByRegistry {
 		registries = append(registries, registryRepo)
@@ -642,6 +645,7 @@ func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry 
 		bag := &workflow.Bag{
 			Args:               skillNames,
 			RepoFlag:           registryRepo,
+			ForceBudget:        forceBudget,
 			Factory:            factory,
 			FilterRegistries:   filterRegistries,
 			SkillAliases:       aliases,
@@ -754,7 +758,7 @@ func runKitSync(cmd *cobra.Command, opts *kitInstallOptions) error {
 		}
 		installedSkills := flattenKitDeps(depsByRegistry)
 		if !opts.noDeps {
-			if err := runKitInstallDepsFn(cmd, factory, depsByRegistry); err != nil {
+			if err := runKitInstallDepsFn(cmd, factory, depsByRegistry, opts.forceBudget); err != nil {
 				return err
 			}
 		}

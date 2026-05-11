@@ -61,22 +61,7 @@ func CheckBudget(skills []Skill, agent string) Result {
 }
 
 func CheckProjectionBudget(skills []Skill, agent string) Result {
-	estimator := EstimateDescriptionBytes
-	if strings.EqualFold(agent, "codex") {
-		estimator = EstimateCodexProjectionDescriptionBytes
-	}
-	return checkBudget(skills, agent, estimator)
-}
-
-func EstimateCodexProjectionDescriptionBytes(skill Skill) int {
-	description, body := splitSkill(skill.Content)
-	description = shortenDescription(strings.TrimSpace(description))
-	firstParagraph := shortenDescription(extractFirstParagraph(body))
-	used := len([]byte(description)) + len([]byte(firstParagraph))
-	if description != "" && firstParagraph != "" {
-		used += len("\n\n")
-	}
-	return used
+	return checkBudget(skills, agent, EstimateDescriptionBytes)
 }
 
 func checkBudget(skills []Skill, agent string, estimate func(Skill) int) Result {
@@ -96,49 +81,31 @@ func checkBudget(skills []Skill, agent string, estimate func(Skill) int) Result 
 		return ordered[i].Name < ordered[j].Name
 	})
 
+	contributions := make([]Overflow, 0, len(ordered))
 	for _, skill := range ordered {
 		size := estimate(skill)
-		before := result.Used
-		result.Used += size
-		if result.Used >= limit {
-			overflow := result.Used - limit
-			if before > limit {
-				overflow = size
-			}
-			result.Overflow = append(result.Overflow, Overflow{
-				Skill: skill.Name,
-				Bytes: overflow,
-			})
+		if size > 0 {
+			contributions = append(contributions, Overflow{Skill: skill.Name, Bytes: size})
 		}
+		result.Used += size
 	}
 
 	switch {
 	case result.Used >= limit:
 		result.Status = StatusRefuse
+		sort.SliceStable(contributions, func(i, j int) bool {
+			if contributions[i].Bytes == contributions[j].Bytes {
+				return contributions[i].Skill < contributions[j].Skill
+			}
+			return contributions[i].Bytes > contributions[j].Bytes
+		})
+		result.Overflow = contributions
 	case float64(result.Used) >= float64(limit)*warnRatio:
 		result.Status = StatusWarn
 	default:
 		result.Status = StatusSilent
 	}
 	return result
-}
-
-func shortenDescription(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	if idx := strings.IndexAny(s, ".!"); idx > 0 && idx < 80 {
-		return s[:idx+1]
-	}
-	if len(s) <= 80 {
-		return s
-	}
-	cut := strings.LastIndex(s[:80], " ")
-	if cut > 40 {
-		return s[:cut] + "..."
-	}
-	return s[:80] + "..."
 }
 
 func FormatResult(result Result) string {
@@ -153,9 +120,9 @@ func FormatOverflow(result Result) string {
 	fmt.Fprintf(&b, "%s skill budget exceeded\n", title(result.Agent))
 	fmt.Fprintf(&b, "estimated: %d / %d bytes (%d%%)\n", result.Used, result.Limit, result.Percent())
 	if len(result.Overflow) > 0 {
-		b.WriteString("overflow caused by:\n")
+		b.WriteString("biggest contributors:\n")
 		for _, item := range result.Overflow {
-			fmt.Fprintf(&b, "  %s adds %d bytes over budget\n", item.Skill, item.Bytes)
+			fmt.Fprintf(&b, "  %s: %d bytes\n", item.Skill, item.Bytes)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

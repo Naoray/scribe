@@ -92,7 +92,7 @@ func TestBudgetSkillsForProjectionUsesCurrentProjectToolsOverGlobalPin(t *testin
 	}
 }
 
-func TestCheckBudgetBeforeProjectionUsesShortCodexDescriptionsForProjectScope(t *testing.T) {
+func TestCheckBudgetBeforeProjectionRefusesRawCodexDescriptionsForProjectScope(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -142,8 +142,11 @@ func TestCheckBudgetBeforeProjectionUsesShortCodexDescriptionsForProjectScope(t 
 
 	syncer := &Syncer{ProjectRoot: projectRoot}
 	err = syncer.checkBudgetBeforeProjection(st, "incoming", []tools.SkillFile{{Path: "SKILL.md", Content: incoming}}, []tools.Tool{tools.CodexTool{}})
-	if err != nil {
-		t.Fatalf("checkBudgetBeforeProjection: %v", err)
+	if err == nil {
+		t.Fatal("expected budget refusal")
+	}
+	if !strings.Contains(err.Error(), "Codex skill budget exceeded") {
+		t.Fatalf("error = %v, want Codex budget refusal", err)
 	}
 }
 
