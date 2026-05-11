@@ -127,7 +127,7 @@ func budgetSkillsForAgent(set resolvedBudgetSet, st *state.State, agent string) 
 	skills := make([]budget.Skill, 0, len(set.Skills))
 	for _, skill := range set.Skills {
 		installed, ok := st.Installed[skill.Name]
-		if ok && installed.ToolsMode == state.ToolsModePinned && !containsBudgetTool(installed.Tools, agent) {
+		if ok && !budgetSkillTargetsAgent(installed, set.ProjectRoot, agent) {
 			continue
 		}
 		skills = append(skills, skill)
@@ -139,6 +139,21 @@ func budgetSkillsForAgent(set resolvedBudgetSet, st *state.State, agent string) 
 		skills = append(skills, budget.Skill{Name: "snippet:" + sn.Name, Content: snippet.ContentForBudget(sn)})
 	}
 	return skills
+}
+
+func budgetSkillTargetsAgent(installed state.InstalledSkill, projectRoot, agent string) bool {
+	if projectRoot != "" {
+		for _, projection := range installed.Projections {
+			if projection.Project != projectRoot {
+				continue
+			}
+			return containsBudgetTool(projection.Tools, agent) && !containsBudgetTool(projection.ExcludedTools, agent)
+		}
+	}
+	if installed.ToolsMode == state.ToolsModePinned {
+		return containsBudgetTool(installed.Tools, agent)
+	}
+	return true
 }
 
 func containsBudgetTool(tools []string, agent string) bool {

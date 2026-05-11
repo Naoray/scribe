@@ -118,7 +118,12 @@ func runSkillEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("skill %q is a package — per-skill tool pinning does not apply", name)
 	}
 
-	currentTools := append([]string(nil), installed.Tools...)
+	statuses, err := tools.ResolveStatuses(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve tools: %w", err)
+	}
+	projectRoot := activeProjectRootForSkill(installed)
+	currentTools := currentSkillToolsForScope(installed, availableToolNames(statuses), projectRoot)
 
 	// Compute desired tool list + mode.
 	var desired []string

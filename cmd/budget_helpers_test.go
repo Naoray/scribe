@@ -45,6 +45,43 @@ func TestBudgetSkillsForAgentExcludesPinnedSkillWithoutAgent(t *testing.T) {
 	}
 }
 
+func TestBudgetSkillsForAgentUsesProjectProjectionOverGlobalPin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	wd := t.TempDir()
+	t.Chdir(wd)
+
+	writeBudgetSkill(t, home, "project-codex", "project codex")
+	if err := os.WriteFile(filepath.Join(wd, ".scribe.yaml"), []byte("add:\n  - project-codex\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"project-codex": {
+			ToolsMode: state.ToolsModePinned,
+			Tools:     []string{"claude"},
+			Projections: []state.ProjectionEntry{{
+				Project: wd,
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+
+	set, err := resolveBudgetSet(st)
+	if err != nil {
+		t.Fatalf("resolveBudgetSet: %v", err)
+	}
+
+	codex := skillNames(budgetSkillsForAgent(set, st, "codex"))
+	claude := skillNames(budgetSkillsForAgent(set, st, "claude"))
+	if !codex.has("project-codex") {
+		t.Fatal("codex budget should include current project projection despite global claude pin")
+	}
+	if claude.has("project-codex") {
+		t.Fatal("claude budget should not include current project codex-only projection")
+	}
+}
+
 func TestProjectLocalBudgetUsesShortCodexDescriptions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
