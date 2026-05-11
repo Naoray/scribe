@@ -449,15 +449,36 @@ func (s *Syncer) RunProject(ctx context.Context, st *state.State, lf *lockfile.P
 		}
 		statuses = filtered
 	}
+	type projectSourceGroup struct {
+		registry string
+		spec     *source.SourceSpec
+	}
 	byRegistry := map[string][]SkillStatus{}
+	groups := map[string]projectSourceGroup{}
 	for _, status := range statuses {
 		registry := ""
 		if status.LockEntry != nil {
 			registry = status.LockEntry.SourceRegistry
 		}
+		if status.SourceKey != "" {
+			registry = status.SourceKey
+		}
 		byRegistry[registry] = append(byRegistry[registry], status)
+		if _, ok := groups[registry]; !ok {
+			groups[registry] = projectSourceGroup{
+				registry: registry,
+				spec:     cloneSourceSpecPtrValue(status.Source),
+			}
+		}
 	}
 	for registry, group := range byRegistry {
+		sourceGroup := groups[registry]
+		if sourceGroup.spec != nil {
+			if err := s.applySource(ctx, sourceGroup.registry, sourceGroup.spec, group, st); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := s.apply(ctx, registry, group, st); err != nil {
 			return err
 		}
@@ -542,6 +563,35 @@ func (s *Syncer) projectLockStatuses(lf *lockfile.ProjectLockfile, st *state.Sta
 }
 
 func manifestEntryFromProjectEntry(pin lockfile.ProjectEntry) (manifest.Entry, error) {
+	if pin.Source != nil {
+		entry := manifest.Entry{
+			Name:     pin.Name,
+			Path:     pin.Path,
+			Type:     pin.Type,
+			Install:  pin.Install,
+			Update:   pin.Update,
+			Installs: pin.Installs,
+			Updates:  pin.Updates,
+		}
+		spec, _, err := source.Canonicalize(*pin.Source)
+		if err != nil {
+			return manifest.Entry{}, err
+		}
+		if spec.Type == source.SourceGitHub {
+			ref := pin.CommitSHA
+			if ref == "" {
+				ref = spec.Ref
+			}
+			parts := strings.SplitN(spec.Repo, "/", 2)
+			entry.Source = manifest.Source{
+				Host:  "github",
+				Owner: parts[0],
+				Repo:  parts[1],
+				Ref:   ref,
+			}.String()
+		}
+		return entry, nil
+	}
 	repo := pin.SourceRepo
 	if repo == "" {
 		repo = pin.SourceRegistry

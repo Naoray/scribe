@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/BurntSushi/toml"
@@ -30,6 +31,7 @@ import (
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/snippet"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -977,7 +979,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		if err != nil {
 			return err
 		}
-		if err := validateProjectRegistriesConnected(projectLock, b.Config.TeamRepos()); err != nil {
+		if err := validateProjectRegistriesConnected(projectLock, b.Config.EnabledSources()); err != nil {
 			return err
 		}
 		clear(resolved)
@@ -1013,18 +1015,21 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 	return nil
 }
 
-func validateProjectRegistriesConnected(lf *lockfile.ProjectLockfile, connected []string) error {
+func validateProjectRegistriesConnected(lf *lockfile.ProjectLockfile, connected []config.RegistrySource) error {
 	if lf == nil {
 		return nil
 	}
 	set := map[string]bool{}
-	for _, repo := range connected {
-		set[repo] = true
+	for _, src := range connected {
+		for _, key := range connectedSourceKeys(src) {
+			set[key] = true
+		}
 	}
 	for _, entry := range lf.Entries {
-		if !set[entry.SourceRegistry] {
-			return clierrors.Wrap(fmt.Errorf("registry %q is not connected", entry.SourceRegistry), "PROJECT_REGISTRY_NOT_CONNECTED", clierrors.ExitPerm,
-				clierrors.WithRemediation("Run `scribe registry connect "+entry.SourceRegistry+"` before `scribe sync`."),
+		key := projectEntryConnectedKey(entry)
+		if !set[key] {
+			return clierrors.Wrap(fmt.Errorf("registry %q is not connected", key), "PROJECT_REGISTRY_NOT_CONNECTED", clierrors.ExitPerm,
+				clierrors.WithRemediation("Run `scribe registry connect "+key+"` before `scribe sync`."),
 			)
 		}
 	}
@@ -1036,6 +1041,36 @@ func validateProjectRegistriesConnected(lf *lockfile.ProjectLockfile, connected 
 		}
 	}
 	return nil
+}
+
+func connectedSourceKeys(src config.RegistrySource) []string {
+	keys := []string{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			keys = append(keys, value)
+		}
+	}
+	add(src.Config.Repo)
+	add(src.Config.ID)
+	add(src.ID)
+	add(src.Identity.Key)
+	add(src.Source.Repo)
+	add(src.Source.URL)
+	add(src.Source.Path)
+	return keys
+}
+
+func projectEntryConnectedKey(entry lockfile.ProjectEntry) string {
+	if entry.Source != nil {
+		if _, ident, err := source.Canonicalize(*entry.Source); err == nil && ident.Key != "" {
+			return ident.Key
+		}
+	}
+	if strings.TrimSpace(entry.SourceKey) != "" {
+		return entry.SourceKey
+	}
+	return entry.SourceRegistry
 }
 
 func workflowSkipMissing(b *Bag) bool {

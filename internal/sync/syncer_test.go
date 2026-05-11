@@ -237,6 +237,67 @@ func TestRunProject_FetchesPinnedRegistryEntry(t *testing.T) {
 	}
 }
 
+func TestRunProject_ConsumesStructuredNonOwnerLockSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+	files := []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# deploy\n")}}
+	contentHash, err := sync.HashInstallableFiles(files)
+	if err != nil {
+		t.Fatalf("HashInstallableFiles: %v", err)
+	}
+	spec := source.SourceSpec{
+		Type: source.SourceGit,
+		URL:  "https://example.com/acme/skills.git",
+		Ref:  "main",
+		Path: "packs",
+	}
+	_, ident, err := source.Canonicalize(spec)
+	if err != nil {
+		t.Fatalf("Canonicalize: %v", err)
+	}
+	prov := &mockProvider{files: files}
+	syncer := &sync.Syncer{
+		Provider:    prov,
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot: projectRoot,
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+	lf := &lockfile.ProjectLockfile{
+		FormatVersion: lockfile.SchemaVersion,
+		Kind:          lockfile.ProjectKind,
+		Entries: []lockfile.ProjectEntry{{
+			Entry: lockfile.Entry{
+				Name:           "deploy",
+				SourceRegistry: ident.Key,
+				SourceKey:      ident.Key,
+				Source:         &spec,
+				CommitSHA:      "abc123",
+				ContentHash:    contentHash,
+			},
+			Path: "skills/deploy",
+			Type: "skill",
+		}},
+	}
+
+	if err := syncer.RunProject(context.Background(), st, lf); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+	if len(prov.fetchedSpecs) != 1 {
+		t.Fatalf("fetched specs = %#v", prov.fetchedSpecs)
+	}
+	if prov.fetchedSpecs[0].URL != "https://example.com/acme/skills.git" || prov.fetchedSpecs[0].Path != "packs" {
+		t.Fatalf("fetched spec = %#v", prov.fetchedSpecs[0])
+	}
+	installed := st.Installed["deploy"]
+	if len(installed.Sources) != 1 || installed.Sources[0].SourceKey != ident.Key || installed.Sources[0].Source == nil {
+		t.Fatalf("Sources = %#v", installed.Sources)
+	}
+	if _, err := os.Lstat(filepath.Join(projectRoot, ".claude", "skills", "deploy")); err != nil {
+		t.Fatalf("Claude projection missing: %v", err)
+	}
+}
+
 func TestRunProject_KitFilterLimitsLockfilePins(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
