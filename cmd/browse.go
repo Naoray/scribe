@@ -17,6 +17,7 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/registry"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -24,6 +25,7 @@ import (
 )
 
 var discoverEntriesFn = discoverEntries
+var discoverSourceEntriesFn = discoverSourceEntries
 var discoverKitEntriesFn = discoverKitEntries
 
 func newBrowseCommand() *cobra.Command {
@@ -71,16 +73,17 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve active tools: %w", err)
 	}
 
-	repos, err := browseRepos(registryFilter, cfg.TeamRepos())
+	sources, err := browseSources(registryFilter, cfg)
 	if err != nil {
 		return err
 	}
+	repos := legacyReposFromSources(sources)
 
 	if kits {
 		return runBrowseKitsWithDeps(cmd.Context(), repos, query, installRef, cfg, st, client, useJSON, yes)
 	}
 
-	return runBrowseWithDeps(cmd.Context(), repos, query, installRef, cfg, st, client, targets, useJSON, yes, resync)
+	return runBrowseWithDeps(cmd.Context(), sources, query, installRef, cfg, st, client, targets, useJSON, yes, resync)
 }
 
 type kitBrowseEntry struct {
@@ -220,9 +223,43 @@ func browseRepos(registryFilter string, connected []string) ([]string, error) {
 	return []string{repo}, nil
 }
 
+func browseSources(registryFilter string, cfg *config.Config) ([]config.RegistrySource, error) {
+	connected := cfg.EnabledSources()
+	if registryFilter == "" {
+		if len(connected) == 0 {
+			return nil, fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
+		}
+		return connected, nil
+	}
+	if rc := cfg.FindRegistryByKeyOrRepo(registryFilter); rc != nil {
+		spec, ident, err := source.Canonicalize(rc.SourceSpec())
+		if err != nil {
+			return nil, err
+		}
+		rs := config.RegistrySource{Config: *rc, Source: spec, Identity: ident}
+		rs.ID = registryDisplay(rs)
+		return []config.RegistrySource{rs}, nil
+	}
+	spec, ident, err := sourceSpecForRegistry(registryFilter)
+	if err != nil {
+		return nil, err
+	}
+	return []config.RegistrySource{{ID: registryFilter, Source: spec, Identity: ident}}, nil
+}
+
+func legacyReposFromSources(sources []config.RegistrySource) []string {
+	repos := make([]string, 0, len(sources))
+	for _, src := range sources {
+		if src.Source.Type == source.SourceGitHub && src.Source.Repo != "" {
+			repos = append(repos, src.Source.Repo)
+		}
+	}
+	return repos
+}
+
 func runBrowseWithDeps(
 	ctx context.Context,
-	repos []string,
+	sources []config.RegistrySource,
 	query string,
 	installRef string,
 	cfg *config.Config,
@@ -235,7 +272,7 @@ func runBrowseWithDeps(
 ) error {
 	if installRef == "" && !useJSON {
 		if cfg != nil {
-			for _, repo := range repos {
+			for _, repo := range legacyReposFromSources(sources) {
 				if cfg.FindRegistry(repo) == nil {
 					cfg.AddRegistry(config.RegistryConfig{Repo: repo, Enabled: true, Type: config.RegistryTypeCommunity})
 				}
@@ -255,6 +292,7 @@ func runBrowseWithDeps(
 			FilterRegistries: filterRegistries,
 		}
 		bag.Provider = provider.NewGitHubProvider(provider.WrapGitHubClient(client))
+		repos := legacyReposFromSources(sources)
 		if len(repos) == 1 {
 			bag.RepoFlag = repos[0]
 		}
@@ -270,7 +308,7 @@ func runBrowseWithDeps(
 		return nil
 	}
 
-	entries, errs := discoverEntriesFn(ctx, repos, client, targets, st)
+	entries, errs := discoverSourceEntriesFn(ctx, sources, client, targets, st)
 	for _, e := range errs {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", e)
 	}
@@ -323,12 +361,19 @@ func browseInstall(
 	if len(matches) > 1 {
 		var options []string
 		for _, match := range matches {
-			options = append(options, fmt.Sprintf("%s:%s", match.Registry, match.Status.Name))
+			sourceID := match.Registry
+			if match.SourceKey != "" {
+				sourceID = match.SourceKey
+			}
+			options = append(options, fmt.Sprintf("%s:%s", sourceID, match.Status.Name))
 		}
 		return fmt.Errorf("skill %q is ambiguous — use one of: %s", installRef, strings.Join(options, ", "))
 	}
 
 	match := matches[0]
+	if match.SourceKey != "" {
+		return runAddDirectInstallSourceForCommand(nil, ctx, match.Registry, match.SourceKey, match.Source, match.Status.Name, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
+	}
 	return runAddDirectInstall(ctx, match.Registry, match.Status.Name, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
 }
 

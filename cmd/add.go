@@ -22,6 +22,7 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -46,8 +47,10 @@ type installRunResults struct {
 
 // browseEntry pairs a SkillStatus with the registry it came from.
 type browseEntry struct {
-	Status   sync.SkillStatus
-	Registry string
+	Status    sync.SkillStatus
+	Registry  string
+	SourceKey string
+	Source    source.SourceSpec
 }
 
 func newAddCommand() *cobra.Command {
@@ -269,6 +272,27 @@ func runAddDirectInstallForCommand(
 	skipConfirm bool,
 	resync bool,
 ) error {
+	spec, ident, err := sourceSpecForRegistry(registryRepo)
+	if err != nil {
+		return err
+	}
+	return runAddDirectInstallSourceForCommand(cmd, ctx, registryRepo, ident.Key, spec, skillName, cfg, st, syncer, authenticated, useJSON, skipConfirm, resync)
+}
+
+func runAddDirectInstallSourceForCommand(
+	cmd *cobra.Command,
+	ctx context.Context,
+	registryDisplay, sourceKey string,
+	spec source.SourceSpec,
+	skillName string,
+	cfg *config.Config,
+	st *state.State,
+	syncer *sync.Syncer,
+	authenticated bool,
+	useJSON bool,
+	skipConfirm bool,
+	resync bool,
+) error {
 	if !authenticated {
 		return clierrors.Wrap(
 			fmt.Errorf("authentication required"),
@@ -278,9 +302,15 @@ func runAddDirectInstallForCommand(
 		)
 	}
 
-	statuses, _, err := syncer.Diff(ctx, registryRepo, st)
+	var statuses []sync.SkillStatus
+	var err error
+	if isLegacyGitHubSource(spec) {
+		statuses, _, err = syncer.Diff(ctx, spec.Repo, st)
+	} else {
+		statuses, _, err = syncer.DiffSource(ctx, sourceKey, spec, st)
+	}
 	if err != nil {
-		return fmt.Errorf("diff %s: %w", registryRepo, err)
+		return fmt.Errorf("diff %s: %w", registryDisplay, err)
 	}
 
 	var target *sync.SkillStatus
@@ -291,24 +321,24 @@ func runAddDirectInstallForCommand(
 		}
 	}
 	if target == nil {
-		return fmt.Errorf("skill %q not found in %s", skillName, registryRepo)
+		return fmt.Errorf("skill %q not found in %s", skillName, registryDisplay)
 	}
 
 	// Skill exists — safe to auto-connect the registry now.
-	if cfg.FindRegistry(registryRepo) == nil {
-		cfg.AddRegistry(config.RegistryConfig{Repo: registryRepo})
+	if cfg.FindRegistryByKeyOrRepo(sourceKey) == nil && cfg.FindRegistryByKeyOrRepo(registryDisplay) == nil {
+		cfg.AddRegistry(registryConfigForSource(spec))
 		if err := cfg.Save(); err != nil {
 			return fmt.Errorf("save config: %w", err)
 		}
 		if !useJSON {
-			fmt.Printf("connected %s\n", registryRepo)
+			fmt.Printf("connected %s\n", registryDisplay)
 		}
 	}
 
 	if target.Status == sync.StatusCurrent {
 		if useJSON {
 			return emitInstallJSON([]installResult{{
-				Name: target.Name, Registry: registryRepo, Status: "already-installed",
+				Name: target.Name, Registry: registryDisplay, Status: "already-installed",
 			}}, nil, cmd)
 		}
 		fmt.Printf("%s is already installed (current).\n", skillName)
@@ -317,7 +347,7 @@ func runAddDirectInstallForCommand(
 	if target.Status == sync.StatusModified && !resync {
 		if useJSON {
 			return emitInstallJSON([]installResult{{
-				Name: target.Name, Registry: registryRepo, Status: "modified",
+				Name: target.Name, Registry: registryDisplay, Status: "modified",
 			}}, nil, cmd)
 		}
 		fmt.Printf("%s has local edits. Run with --resync to overwrite them from upstream.\n", skillName)
@@ -327,12 +357,12 @@ func runAddDirectInstallForCommand(
 	// Confirmation.
 	if !skipConfirm && !useJSON {
 		var confirm bool
-		title := fmt.Sprintf("Install %s from %s?", skillName, registryRepo)
+		title := fmt.Sprintf("Install %s from %s?", skillName, registryDisplay)
 		if target.Status == sync.StatusOutdated {
-			title = fmt.Sprintf("Update %s from %s?", skillName, registryRepo)
+			title = fmt.Sprintf("Update %s from %s?", skillName, registryDisplay)
 		}
 		if target.Status == sync.StatusModified && resync {
-			title = fmt.Sprintf("Resync %s from %s and overwrite local edits?", skillName, registryRepo)
+			title = fmt.Sprintf("Resync %s from %s and overwrite local edits?", skillName, registryDisplay)
 		}
 		if err := huh.NewConfirm().Title(title).Value(&confirm).Run(); err != nil {
 			return err
@@ -342,8 +372,13 @@ func runAddDirectInstallForCommand(
 		}
 	}
 
-	results := wireInstallSyncer(syncer, registryRepo, useJSON)
-	if err := syncer.RunWithDiff(ctx, registryRepo, []sync.SkillStatus{*target}, st); err != nil {
+	results := wireInstallSyncer(syncer, registryDisplay, useJSON)
+	if isLegacyGitHubSource(spec) {
+		err = syncer.RunWithDiff(ctx, spec.Repo, []sync.SkillStatus{*target}, st)
+	} else {
+		err = syncer.RunWithDiffSource(ctx, sourceKey, spec, []sync.SkillStatus{*target}, st)
+	}
+	if err != nil {
 		return fmt.Errorf("install %s: %w", skillName, err)
 	}
 
@@ -351,6 +386,32 @@ func runAddDirectInstallForCommand(
 		return emitInstallJSON(results.Installed, results.Resolution, cmd)
 	}
 	return nil
+}
+
+func sourceSpecForRegistry(input string) (source.SourceSpec, source.SourceIdentity, error) {
+	spec, err := source.ParseSourceArg(input)
+	if err != nil {
+		return source.SourceSpec{}, source.SourceIdentity{}, err
+	}
+	spec, ident, err := source.Canonicalize(spec)
+	if err != nil {
+		return source.SourceSpec{}, source.SourceIdentity{}, err
+	}
+	if spec.Type == source.SourceGitHub && spec.Path == "" && spec.Ref == "" {
+		ident.Key = spec.Repo
+	}
+	return spec, ident, nil
+}
+
+func registryConfigForSource(spec source.SourceSpec) config.RegistryConfig {
+	if isLegacyGitHubSource(spec) {
+		return config.RegistryConfig{Repo: spec.Repo, Enabled: true, Type: config.RegistryTypeCommunity}
+	}
+	return config.RegistryConfig{ID: spec.ID, Enabled: true, Type: config.RegistryTypeCommunity, Source: &spec}
+}
+
+func isLegacyGitHubSource(spec source.SourceSpec) bool {
+	return spec.Type == source.SourceGitHub && spec.Path == "" && spec.Ref == ""
 }
 
 // installSelected installs the user-selected entries from the browser. Each
@@ -369,12 +430,18 @@ func installSelected(
 ) error {
 	// Group by registry.
 	byRegistry := map[string][]sync.SkillStatus{}
+	sourceByRegistry := map[string]source.SourceSpec{}
+	sourceKeyByRegistry := map[string]string{}
 	order := []string{}
 	for _, e := range selected {
 		if _, seen := byRegistry[e.Registry]; !seen {
 			order = append(order, e.Registry)
 		}
 		byRegistry[e.Registry] = append(byRegistry[e.Registry], e.Status)
+		if e.SourceKey != "" {
+			sourceByRegistry[e.Registry] = e.Source
+			sourceKeyByRegistry[e.Registry] = e.SourceKey
+		}
 	}
 
 	// Confirmation summary.
@@ -407,8 +474,12 @@ func installSelected(
 	var installErr error
 	for _, registryRepo := range order {
 		// Auto-connect if needed.
-		if cfg.FindRegistry(registryRepo) == nil {
-			cfg.AddRegistry(config.RegistryConfig{Repo: registryRepo})
+		if cfg.FindRegistryByKeyOrRepo(registryRepo) == nil {
+			if spec, ok := sourceByRegistry[registryRepo]; ok {
+				cfg.AddRegistry(registryConfigForSource(spec))
+			} else {
+				cfg.AddRegistry(config.RegistryConfig{Repo: registryRepo, Enabled: true, Type: config.RegistryTypeCommunity})
+			}
 			if err := cfg.Save(); err != nil {
 				return fmt.Errorf("save config: %w", err)
 			}
@@ -430,7 +501,13 @@ func installSelected(
 
 		fmt.Printf("\ninstalling from %s...\n\n", registryRepo)
 		_ = wireInstallSyncer(syncer, registryRepo, false)
-		if err := syncer.RunWithDiff(ctx, registryRepo, toInstall, st); err != nil {
+		var err error
+		if spec, ok := sourceByRegistry[registryRepo]; ok {
+			err = syncer.RunWithDiffSource(ctx, sourceKeyByRegistry[registryRepo], spec, toInstall, st)
+		} else {
+			err = syncer.RunWithDiff(ctx, registryRepo, toInstall, st)
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", err)
 			installErr = err
 		}
@@ -553,6 +630,43 @@ func discoverEntries(
 	return entries, errs
 }
 
+func discoverSourceEntries(
+	ctx context.Context,
+	sources []config.RegistrySource,
+	client *gh.Client,
+	targets []tools.Tool,
+	st *state.State,
+) ([]browseEntry, []error) {
+	syncer := &sync.Syncer{
+		Client:   sync.WrapGitHubClient(client),
+		Provider: provider.NewGitHubProvider(provider.WrapGitHubClient(client)),
+		Tools:    targets,
+	}
+
+	var entries []browseEntry
+	var errs []error
+	for _, src := range sources {
+		statuses, _, err := syncer.DiffSource(ctx, src.Identity.Key, src.Source, st)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", src.ID, err))
+			continue
+		}
+		for _, s := range statuses {
+			// Skip extras (local-only) — `add` is for installing FROM registries.
+			if s.Status == sync.StatusExtra {
+				continue
+			}
+			entries = append(entries, browseEntry{
+				Status:    s,
+				Registry:  registryDisplay(src),
+				SourceKey: src.Identity.Key,
+				Source:    src.Source,
+			})
+		}
+	}
+	return entries, errs
+}
+
 // filterEntries returns entries whose name or description contains the query
 // (case-insensitive).
 func filterEntries(entries []browseEntry, query string) []browseEntry {
@@ -590,6 +704,8 @@ func emitBrowseJSONForCommand(cmd *cobra.Command, entries []browseEntry) error {
 	type row struct {
 		Name        string `json:"name"`
 		Registry    string `json:"registry"`
+		SourceKey   string `json:"source_key,omitempty"`
+		Source      any    `json:"source,omitempty"`
 		Status      string `json:"status"`
 		Version     string `json:"version,omitempty"`
 		Description string `json:"description,omitempty"`
@@ -604,6 +720,8 @@ func emitBrowseJSONForCommand(cmd *cobra.Command, entries []browseEntry) error {
 		rows = append(rows, row{
 			Name:        e.Status.Name,
 			Registry:    e.Registry,
+			SourceKey:   e.SourceKey,
+			Source:      jsonSource(e.Source),
 			Status:      e.Status.Status.String(),
 			Version:     e.Status.DisplayVersion(),
 			Description: desc,
@@ -615,6 +733,23 @@ func emitBrowseJSONForCommand(cmd *cobra.Command, entries []browseEntry) error {
 		return json.NewEncoder(os.Stdout).Encode(payload)
 	}
 	return renderMutatorEnvelope(cmd, payload, envelope.StatusOK)
+}
+
+func registryDisplay(src config.RegistrySource) string {
+	if src.Config.Repo != "" {
+		return src.Config.Repo
+	}
+	if src.ID != "" {
+		return src.ID
+	}
+	return src.Identity.Key
+}
+
+func jsonSource(spec source.SourceSpec) any {
+	if spec.Type == "" {
+		return nil
+	}
+	return spec
 }
 
 // emitInstallJSON emits per-skill install results as JSON.

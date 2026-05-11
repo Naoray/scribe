@@ -339,15 +339,15 @@ func (s *Syncer) DiffSource(ctx context.Context, registryKey string, spec source
 // Emits events throughout. Updates state incrementally — a failed skill
 // does not prevent successful skills from being recorded.
 func (s *Syncer) Run(ctx context.Context, teamRepo string, st *state.State) error {
-	spec, err := source.ParseSourceArg(teamRepo)
-	if err != nil {
-		return err
-	}
-	return s.RunSource(ctx, teamRepo, spec, st)
+	return s.run(ctx, teamRepo, nil, st)
 }
 
 // RunSource executes a sync against a SourceSpec-backed registry.
 func (s *Syncer) RunSource(ctx context.Context, teamRepo string, spec source.SourceSpec, st *state.State) error {
+	return s.run(ctx, teamRepo, &spec, st)
+}
+
+func (s *Syncer) run(ctx context.Context, teamRepo string, spec *source.SourceSpec, st *state.State) error {
 	if err := s.ensureProjectRoot(); err != nil {
 		return err
 	}
@@ -358,7 +358,14 @@ func (s *Syncer) RunSource(ctx context.Context, teamRepo string, spec source.Sou
 		s.emit(SkillErrorMsg{Name: "<migration>", Err: fmt.Errorf("reclassify legacy packages: %w", err)})
 	}
 
-	statuses, m, err := s.DiffSource(ctx, teamRepo, spec, st)
+	var statuses []SkillStatus
+	var m *manifest.Manifest
+	var err error
+	if spec != nil {
+		statuses, m, err = s.DiffSource(ctx, teamRepo, *spec, st)
+	} else {
+		statuses, m, err = s.Diff(ctx, teamRepo, st)
+	}
 	if err != nil {
 		return fmt.Errorf("sync %s: %w", teamRepo, err)
 	}
@@ -398,7 +405,7 @@ func (s *Syncer) RunSource(ctx context.Context, teamRepo string, spec source.Sou
 		}
 		applyLockPins(statuses, lf)
 	}
-	if err := s.applySource(ctx, teamRepo, &spec, statuses, st); err != nil {
+	if err := s.applySource(ctx, teamRepo, spec, statuses, st); err != nil {
 		return err
 	}
 	if s.OnRegistryFetched != nil {
