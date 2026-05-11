@@ -55,7 +55,7 @@ func TestSchemaCommandAll(t *testing.T) {
 	if _, ok := got["scribe list"]; !ok {
 		t.Fatalf("--all missing scribe list; keys=%v", got)
 	}
-	for _, command := range []string{"scribe sync", "scribe add", "scribe adopt", "scribe registry connect"} {
+	for _, command := range []string{"scribe sync", "scribe add", "scribe adopt", "scribe registry connect", "scribe mcp list"} {
 		s, ok := got[command]
 		if !ok {
 			t.Fatalf("--all missing %s; keys=%v", command, got)
