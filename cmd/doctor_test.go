@@ -64,7 +64,7 @@ func TestDoctorTextRendersGlobalListingBudgetIssue(t *testing.T) {
 		},
 	}}}
 	var out bytes.Buffer
-	if err := writeDoctorText(&out, "", report); err != nil {
+	if err := writeDoctorText(&out, "", report, false); err != nil {
 		t.Fatalf("writeDoctorText: %v", err)
 	}
 	got := out.String()
@@ -448,7 +448,7 @@ func TestDoctorTextIncludesGroupedTool(t *testing.T) {
 			Status:  "warn",
 			Message: "missing managed projection",
 		}},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("writeDoctorText: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestDoctorTextShowsErrorStatus(t *testing.T) {
 			Status:  "error",
 			Message: "read canonical SKILL.md: denied",
 		}},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("writeDoctorText: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestDoctorTextFoldsMigrationBudgetRows(t *testing.T) {
 	}}
 
 	var buf bytes.Buffer
-	if err := writeDoctorText(&buf, "", report); err != nil {
+	if err := writeDoctorText(&buf, "", report, false); err != nil {
 		t.Fatalf("writeDoctorText: %v", err)
 	}
 	got := buf.String()
@@ -554,20 +554,52 @@ func TestDoctorTextSummarizesProjectionDrift(t *testing.T) {
 			Status:  "warn",
 			Message: "unexpected managed projection cursor at " + cursorPath + "; missing managed projection for claude at " + claudePath,
 		}},
-	})
+	}, false)
+	if err != nil {
+		t.Fatalf("writeDoctorText: %v", err)
+	}
+	got := buf.String()
+
+	if !strings.Contains(got, "cursor") || !strings.Contains(got, "1 unexpected") {
+		t.Fatalf("expected compact unexpected projection count, got:\n%s", got)
+	}
+	if !strings.Contains(got, "claude") || !strings.Contains(got, "1 missing") {
+		t.Fatalf("expected compact missing projection count, got:\n%s", got)
+	}
+	if strings.Contains(got, cursorPath) || strings.Contains(got, claudePath) {
+		t.Fatalf("expected default output to omit projection paths, got:\n%s", got)
+	}
+	if strings.Contains(got, "managed projection") {
+		t.Fatalf("expected managed projection noise removed, got:\n%s", got)
+	}
+}
+
+func TestDoctorTextVerboseProjectionDriftShowsPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cursorPath := filepath.Join(home, ".cursor", "rules", "deploy.mdc")
+	claudePath := filepath.Join(home, ".claude", "skills", "deploy")
+
+	var buf bytes.Buffer
+	err := writeDoctorText(&buf, "", doctor.Report{
+		Issues: []doctor.Issue{{
+			Skill:   "deploy",
+			Tool:    "cursor",
+			Kind:    doctor.IssueProjectionDrift,
+			Status:  "warn",
+			Message: "unexpected managed projection cursor at " + cursorPath + "; missing managed projection for claude at " + claudePath,
+		}},
+	}, true)
 	if err != nil {
 		t.Fatalf("writeDoctorText: %v", err)
 	}
 	got := buf.String()
 
 	if !strings.Contains(got, "unexpected projection at ~/.cursor/rules/deploy.mdc") {
-		t.Fatalf("expected compact unexpected projection detail, got:\n%s", got)
+		t.Fatalf("expected verbose unexpected projection detail, got:\n%s", got)
 	}
 	if !strings.Contains(got, "missing projection at ~/.claude/skills/deploy") {
-		t.Fatalf("expected compact missing projection detail, got:\n%s", got)
-	}
-	if strings.Contains(got, "managed projection") {
-		t.Fatalf("expected managed projection noise removed, got:\n%s", got)
+		t.Fatalf("expected verbose missing projection detail, got:\n%s", got)
 	}
 }
 
@@ -584,7 +616,7 @@ func TestDoctorTextTruncatesOnlyForTTY(t *testing.T) {
 	report := doctor.Report{Issues: issues}
 
 	var ttyBuf bytes.Buffer
-	if err := writeDoctorTextWithOptions(&ttyBuf, "", report, true); err != nil {
+	if err := writeDoctorTextWithOptions(&ttyBuf, "", report, true, false); err != nil {
 		t.Fatalf("writeDoctorTextWithOptions tty: %v", err)
 	}
 	ttyOut := stripANSI(ttyBuf.String())
@@ -596,7 +628,7 @@ func TestDoctorTextTruncatesOnlyForTTY(t *testing.T) {
 	}
 
 	var pipeBuf bytes.Buffer
-	if err := writeDoctorTextWithOptions(&pipeBuf, "", report, false); err != nil {
+	if err := writeDoctorTextWithOptions(&pipeBuf, "", report, false, false); err != nil {
 		t.Fatalf("writeDoctorTextWithOptions pipe: %v", err)
 	}
 	pipeOut := stripANSI(pipeBuf.String())
@@ -620,7 +652,7 @@ func TestDoctorTextBufferOutputIsPlainAndUntruncated(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := writeDoctorText(&buf, "", doctor.Report{Issues: issues}); err != nil {
+	if err := writeDoctorText(&buf, "", doctor.Report{Issues: issues}, false); err != nil {
 		t.Fatalf("writeDoctorText: %v", err)
 	}
 	got := buf.String()
