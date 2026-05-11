@@ -7,6 +7,42 @@ import (
 	"testing"
 )
 
+func TestLoadParsesFrontmatterAndBody(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte("---\nname: commit-discipline\ndescription: Commit rules\ntargets: [claude, codex]\nsource: local\n---\n\n# Body\n")
+	if err := os.WriteFile(filepath.Join(dir, "commit-discipline.md"), data, 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+	sn, err := Load(dir, "commit-discipline")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if sn.Name != "commit-discipline" || sn.Description != "Commit rules" || sn.Source != "local" {
+		t.Fatalf("snippet metadata = %#v", sn)
+	}
+	if string(sn.Body) != "# Body\n" {
+		t.Fatalf("Body = %q, want frontmatter stripped", sn.Body)
+	}
+	if len(sn.Targets) != 2 || sn.Targets[0] != "claude" || sn.Targets[1] != "codex" {
+		t.Fatalf("Targets = %v", sn.Targets)
+	}
+}
+
+func TestLoadParsesScalarAllTarget(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte("---\nname: all-rules\ndescription: All rules\ntargets: all\nsource: local\n---\n# Body\n")
+	if err := os.WriteFile(filepath.Join(dir, "all-rules.md"), data, 0o644); err != nil {
+		t.Fatalf("write snippet: %v", err)
+	}
+	sn, err := Load(dir, "all-rules")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(sn.Targets) != 1 || sn.Targets[0] != "all" {
+		t.Fatalf("Targets = %v, want [all]", sn.Targets)
+	}
+}
+
 func TestProjectWritesManagedBlocksIdempotently(t *testing.T) {
 	project := t.TempDir()
 	sn := Snippet{
@@ -30,8 +66,11 @@ func TestProjectWritesManagedBlocksIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
-	if !strings.Contains(string(first), "user rule") || !strings.Contains(string(first), "Agent Commit Discipline") {
-		t.Fatalf("CLAUDE.md missing user content or snippet:\n%s", first)
+	if !strings.Contains(string(first), "user rule\n") || !strings.Contains(string(first), "<!-- scribe:start name=commit-discipline hash=") {
+		t.Fatalf("CLAUDE.md missing user content or marker:\n%s", first)
+	}
+	if !strings.Contains(string(first), "<!-- scribe:end name=commit-discipline -->") {
+		t.Fatalf("CLAUDE.md missing end marker:\n%s", first)
 	}
 
 	paths, err = Project(project, []Snippet{sn}, []string{"claude", "codex"})
@@ -47,6 +86,53 @@ func TestProjectWritesManagedBlocksIdempotently(t *testing.T) {
 	}
 	if string(first) != string(second) {
 		t.Fatalf("projection not idempotent\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestProjectUpdatesExistingBlockWhenHashChanges(t *testing.T) {
+	project := t.TempDir()
+	sn := Snippet{Name: "rules", Targets: []string{"claude"}, Body: []byte("old body\n")}
+	if _, err := Project(project, []Snippet{sn}, []string{"claude"}); err != nil {
+		t.Fatalf("Project initial: %v", err)
+	}
+	sn.Body = []byte("new body\n")
+	if _, err := Project(project, []Snippet{sn}, []string{"claude"}); err != nil {
+		t.Fatalf("Project update: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(project, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if strings.Contains(string(data), "old body") || !strings.Contains(string(data), "new body") {
+		t.Fatalf("block was not hash-updated:\n%s", data)
+	}
+	if strings.Count(string(data), "<!-- scribe:start name=rules hash=") != 1 {
+		t.Fatalf("expected one rules block:\n%s", data)
+	}
+}
+
+func TestProjectPreservesUserContentAroundManagedBlocks(t *testing.T) {
+	project := t.TempDir()
+	existing := "top\n<!-- scribe:start name=old hash=abc -->\nold\n<!-- scribe:end name=old -->\nbetween\n<!-- scribe:start name=keep hash=abc -->\nstale\n<!-- scribe:end name=keep -->\nbottom\n"
+	if err := os.WriteFile(filepath.Join(project, "AGENTS.md"), []byte(existing), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+	sn := Snippet{Name: "keep", Targets: []string{"codex"}, Body: []byte("fresh\n")}
+	if _, err := Project(project, []Snippet{sn}, []string{"codex"}); err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(project, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{"top\n", "\nbetween\n", "\nbottom\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("user content %q not preserved byte-for-byte:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "old\n") || strings.Contains(got, "stale\n") || !strings.Contains(got, "fresh\n") {
+		t.Fatalf("managed block content mismatch:\n%s", got)
 	}
 }
 
@@ -84,54 +170,10 @@ func TestProjectRemovesStaleBlocksAndAppliesOrder(t *testing.T) {
 	}
 }
 
-func TestProjectRemovesCursorRuleWhenSnippetRemoved(t *testing.T) {
-	project := t.TempDir()
-	sn := Snippet{Name: "commit-discipline", Targets: []string{"cursor"}, Body: []byte("# Body\n")}
-	if _, err := Project(project, []Snippet{sn}, []string{"cursor"}); err != nil {
-		t.Fatalf("Project initial: %v", err)
-	}
-	path := filepath.Join(project, ".cursor", "rules", "commit-discipline.mdc")
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("stat cursor rule: %v", err)
-	}
-	if _, err := Project(project, nil, []string{"cursor"}); err != nil {
-		t.Fatalf("Project removed: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("cursor rule still exists or stat failed: %v", err)
-	}
-}
-
-func TestContentForBudgetAndCursorRuleQuoteYAMLDescriptions(t *testing.T) {
-	sn := Snippet{
-		Name:        "quotes",
-		Description: "Commit: \"carefully\"\nwith newline",
-		Targets:     []string{"cursor"},
-		Body:        []byte("# Body\n"),
-	}
-	if !strings.Contains(string(ContentForBudget(sn)), "description:") {
-		t.Fatalf("budget content missing description:\n%s", ContentForBudget(sn))
-	}
-	if strings.Contains(string(ContentForBudget(sn)), "name:") || strings.Contains(string(ContentForBudget(sn)), "targets:") {
-		t.Fatalf("budget content includes empty metadata:\n%s", ContentForBudget(sn))
-	}
-	project := t.TempDir()
-	if _, err := Project(project, []Snippet{sn}, []string{"cursor"}); err != nil {
-		t.Fatalf("Project: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(project, ".cursor", "rules", "quotes.mdc"))
-	if err != nil {
-		t.Fatalf("read cursor rule: %v", err)
-	}
-	if !strings.Contains(string(data), "Commit:") || !strings.Contains(string(data), "with newline") {
-		t.Fatalf("cursor YAML lost description:\n%s", data)
-	}
-}
-
-func TestProjectWritesCursorRule(t *testing.T) {
+func TestProjectWritesCursorRulesFile(t *testing.T) {
 	project := t.TempDir()
 	sn := Snippet{
-		Name:        "commit discipline",
+		Name:        "commit-discipline",
 		Description: "Commit rules",
 		Targets:     []string{"cursor"},
 		Body:        []byte("# Agent Commit Discipline\n"),
@@ -144,12 +186,12 @@ func TestProjectWritesCursorRule(t *testing.T) {
 	if len(paths) != 1 {
 		t.Fatalf("paths = %v, want one changed target", paths)
 	}
-	data, err := os.ReadFile(filepath.Join(project, ".cursor", "rules", "commit-discipline.mdc"))
+	data, err := os.ReadFile(filepath.Join(project, ".cursorrules"))
 	if err != nil {
-		t.Fatalf("read cursor rule: %v", err)
+		t.Fatalf("read .cursorrules: %v", err)
 	}
-	if !strings.Contains(string(data), "alwaysApply: false") || !strings.Contains(string(data), "Agent Commit Discipline") {
-		t.Fatalf("cursor rule missing expected content:\n%s", data)
+	if !strings.Contains(string(data), "<!-- scribe:start name=commit-discipline hash=") || !strings.Contains(string(data), "Agent Commit Discipline") {
+		t.Fatalf(".cursorrules missing expected content:\n%s", data)
 	}
 	paths, err = Project(project, []Snippet{sn}, []string{"cursor"})
 	if err != nil {
@@ -160,20 +202,54 @@ func TestProjectWritesCursorRule(t *testing.T) {
 	}
 }
 
-func TestLoadStripsFrontmatter(t *testing.T) {
-	dir := t.TempDir()
-	data := []byte("---\nname: commit-discipline\ndescription: Commit rules\ntargets: [claude, codex]\n---\n\n# Body\n")
-	if err := os.WriteFile(filepath.Join(dir, "commit-discipline.md"), data, 0o644); err != nil {
-		t.Fatalf("write snippet: %v", err)
+func TestProjectAllTargetsExistingOnlyUnlessCreateTargets(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "AGENTS.md"), []byte("codex user\n"), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
 	}
-	sn, err := Load(dir, "commit-discipline")
+	sn := Snippet{Name: "all-rules", Targets: []string{"all"}, Body: []byte("body\n")}
+	paths, err := Project(project, []Snippet{sn}, []string{"claude", "codex", "cursor"})
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("Project existing-only: %v", err)
 	}
-	if string(sn.Body) != "# Body\n" {
-		t.Fatalf("Body = %q, want frontmatter stripped", sn.Body)
+	if len(paths) != 1 || filepath.Base(paths[0]) != "AGENTS.md" {
+		t.Fatalf("paths = %v, want only AGENTS.md", paths)
 	}
-	if len(sn.Targets) != 2 || sn.Targets[0] != "claude" || sn.Targets[1] != "codex" {
-		t.Fatalf("Targets = %v", sn.Targets)
+	for _, rel := range []string{"CLAUDE.md", ".cursorrules"} {
+		if _, err := os.Stat(filepath.Join(project, rel)); !os.IsNotExist(err) {
+			t.Fatalf("%s created without CreateTargets: %v", rel, err)
+		}
+	}
+
+	paths, err = ProjectWithOptions(project, []Snippet{sn}, []string{"claude", "codex", "cursor"}, ProjectOptions{CreateTargets: true})
+	if err != nil {
+		t.Fatalf("Project create-targets: %v", err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("paths = %v, want two newly created targets", paths)
+	}
+	for _, rel := range []string{"CLAUDE.md", "AGENTS.md", ".cursorrules"} {
+		data, err := os.ReadFile(filepath.Join(project, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if !strings.Contains(string(data), "body\n") {
+			t.Fatalf("%s missing snippet body:\n%s", rel, data)
+		}
+	}
+}
+
+func TestContentForBudget(t *testing.T) {
+	sn := Snippet{
+		Name:        "quotes",
+		Description: "Commit: \"carefully\"\nwith newline",
+		Targets:     []string{"cursor"},
+		Body:        []byte("# Body\n"),
+	}
+	if !strings.Contains(string(ContentForBudget(sn)), "description:") {
+		t.Fatalf("budget content missing description:\n%s", ContentForBudget(sn))
+	}
+	if strings.Contains(string(ContentForBudget(sn)), "name:") || strings.Contains(string(ContentForBudget(sn)), "targets:") {
+		t.Fatalf("budget content includes empty metadata:\n%s", ContentForBudget(sn))
 	}
 }
