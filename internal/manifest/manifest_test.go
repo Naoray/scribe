@@ -204,6 +204,34 @@ func TestParseSource(t *testing.T) {
 	}
 }
 
+func TestNormalizeGitHubRepo(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"vercel-labs/agent-skills", "vercel-labs/agent-skills"},
+		{"https://github.com/vercel-labs/agent-skills", "vercel-labs/agent-skills"},
+		{"https://github.com/vercel-labs/agent-skills/tree/main/skills/nextjs", "vercel-labs/agent-skills"},
+		{"git@github.com:vercel-labs/agent-skills.git", "vercel-labs/agent-skills"},
+	}
+
+	for _, c := range cases {
+		got, err := manifest.NormalizeGitHubRepo(c.input)
+		if err != nil {
+			t.Fatalf("NormalizeGitHubRepo(%q): %v", c.input, err)
+		}
+		if got != c.want {
+			t.Fatalf("NormalizeGitHubRepo(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeGitHubRepoRejectsUnsupportedURL(t *testing.T) {
+	if _, err := manifest.NormalizeGitHubRepo("https://gitlab.com/acme/skills"); err == nil {
+		t.Fatal("expected unsupported URL error")
+	}
+}
+
 func TestManifestEncode(t *testing.T) {
 	m, err := manifest.Parse([]byte(teamRegistry))
 	if err != nil {

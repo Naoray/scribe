@@ -66,7 +66,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 // resolveRepo returns the owner/repo string from args or an interactive prompt.
 func resolveRepo(args []string) (string, error) {
 	if len(args) > 0 {
-		return args[0], nil
+		return manifest.NormalizeGitHubRepo(args[0])
 	}
 
 	if !isatty.IsTerminal(os.Stdin.Fd()) {

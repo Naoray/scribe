@@ -46,7 +46,11 @@ func (p *GitHubProvider) warn(msg string) {
 
 // Discover probes the repo using a fallback chain and returns all discovered entries.
 func (p *GitHubProvider) Discover(ctx context.Context, repo string) (*DiscoverResult, error) {
-	owner, repoName, err := manifest.ParseOwnerRepo(repo)
+	normalized, err := manifest.NormalizeGitHubRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	owner, repoName, err := manifest.ParseOwnerRepo(normalized)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +130,24 @@ func (p *GitHubProvider) discoverTreeScan(ctx context.Context, owner, repo strin
 	entries := ScanTreeForSkills(tree, owner, repo)
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("no SKILL.md files found in %s/%s", owner, repo)
+	}
+
+	for i := range entries {
+		skillPath := entries[i].Path
+		if path.Base(skillPath) != skillFileName {
+			skillPath = path.Join(skillPath, skillFileName)
+		}
+		data, err := p.client.FetchFile(ctx, owner, repo, skillPath, "HEAD")
+		if err != nil {
+			p.warn(fmt.Sprintf("%s/%s: could not read %s frontmatter: %v", owner, repo, skillPath, err))
+			continue
+		}
+		enriched, err := EnrichTreeSkillEntry(entries[i], data)
+		if err != nil {
+			p.warn(fmt.Sprintf("%s/%s: invalid %s frontmatter: %v", owner, repo, skillPath, err))
+			continue
+		}
+		entries[i] = enriched
 	}
 	return entries, nil
 }

@@ -269,6 +269,83 @@ func TestDiscoverTreeScanAsLastResort(t *testing.T) {
 	}
 }
 
+func TestDiscoverTreeScanEnrichesSkillFrontmatter(t *testing.T) {
+	client := &stubClient{
+		treeFiles: []provider.TreeEntry{
+			{Path: "skills/nextjs/SKILL.md", Type: "blob"},
+		},
+		files: map[string][]byte{
+			"vercel-labs/agent-skills/skills/nextjs/SKILL.md": []byte(`---
+name: next-js
+description: Build and debug Next.js applications.
+source:
+  author: vercel
+---
+# Next.js
+`),
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	result, err := p.Discover(context.Background(), "https://github.com/vercel-labs/agent-skills")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if result.IsTeam {
+		t.Fatal("tree-scan repo should not be a team registry")
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries: got %d, want 1", len(result.Entries))
+	}
+	entry := result.Entries[0]
+	if entry.Name != "next-js" {
+		t.Fatalf("Name = %q, want frontmatter name", entry.Name)
+	}
+	if entry.Description != "Build and debug Next.js applications." {
+		t.Fatalf("Description = %q", entry.Description)
+	}
+	if entry.Author != "vercel" {
+		t.Fatalf("Author = %q", entry.Author)
+	}
+	if entry.Source != "github:vercel-labs/agent-skills@HEAD" {
+		t.Fatalf("Source = %q", entry.Source)
+	}
+	if entry.Path != "skills/nextjs" {
+		t.Fatalf("Path = %q", entry.Path)
+	}
+}
+
+func TestDiscoverTreeScanWarnsAndKeepsDirectoryNameForBadFrontmatter(t *testing.T) {
+	client := &stubClient{
+		treeFiles: []provider.TreeEntry{
+			{Path: "skills/nextjs/SKILL.md", Type: "blob"},
+		},
+		files: map[string][]byte{
+			"vercel-labs/agent-skills/skills/nextjs/SKILL.md": []byte(`---
+name: ../nextjs
+description: bad
+---
+`),
+		},
+	}
+
+	var warnings []string
+	p := provider.NewGitHubProvider(client)
+	p.OnWarning = func(msg string) { warnings = append(warnings, msg) }
+
+	result, err := p.Discover(context.Background(), "vercel-labs/agent-skills")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected frontmatter warning")
+	}
+	if result.Entries[0].Name != "nextjs" {
+		t.Fatalf("Name = %q, want directory fallback", result.Entries[0].Name)
+	}
+}
+
 func TestDiscoverTreeScanAnthropicsFixture(t *testing.T) {
 	client := &stubClient{
 		treeFiles: []provider.TreeEntry{
