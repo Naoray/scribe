@@ -1019,6 +1019,13 @@ func validateProjectRegistriesConnected(lf *lockfile.ProjectLockfile, connected 
 			)
 		}
 	}
+	for _, kit := range lf.Kits {
+		if !set[kit.SourceRegistry] {
+			return clierrors.Wrap(fmt.Errorf("registry %q is not connected", kit.SourceRegistry), "PROJECT_REGISTRY_NOT_CONNECTED", clierrors.ExitPerm,
+				clierrors.WithRemediation("Run `scribe registry connect "+kit.SourceRegistry+"` before `scribe sync`."),
+			)
+		}
+	}
 	return nil
 }
 

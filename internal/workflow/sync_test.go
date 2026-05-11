@@ -77,6 +77,26 @@ func TestStepFilterRegistries_WithFilterFunc(t *testing.T) {
 	}
 }
 
+func TestValidateProjectRegistriesConnectedChecksKitPins(t *testing.T) {
+	lf := &lockfile.ProjectLockfile{
+		FormatVersion: lockfile.SchemaVersion,
+		Kind:          lockfile.ProjectKind,
+		Kits: []lockfile.ProjectKit{{
+			Name:           "baseline",
+			SourceRegistry: "acme/skills",
+			CommitSHA:      "abc123",
+			ContentHash:    "hash",
+		}},
+	}
+	err := validateProjectRegistriesConnected(lf, []string{"other/skills"})
+	if err == nil {
+		t.Fatal("expected missing registry error")
+	}
+	if !strings.Contains(err.Error(), `registry "acme/skills" is not connected`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestStepResolveKitFilter_WithProjectFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
