@@ -43,6 +43,7 @@ Examples:
 		RunE: runDoctor,
 	}
 	cmd.Flags().Bool("fix", false, "Normalize canonical skill metadata and repair affected projections")
+	cmd.Flags().Bool("verbose", false, "Include full doctor issue details")
 	cmd.Flags().String("skill", "", "Inspect a single managed skill")
 	return markJSONSupported(cmd)
 }
@@ -104,6 +105,7 @@ type pathSnapshot struct {
 
 func runDoctor(cmd *cobra.Command, _ []string) error {
 	fixFlag, _ := cmd.Flags().GetBool("fix")
+	verboseFlag, _ := cmd.Flags().GetBool("verbose")
 	skillFlag, _ := cmd.Flags().GetString("skill")
 	jsonFlag := jsonFlagPassed(cmd)
 
@@ -170,7 +172,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		}
 		logo.Render(out, Version, width)
 	}
-	return writeDoctorText(out, skillFlag, report)
+	return writeDoctorText(out, skillFlag, report, verboseFlag)
 }
 
 func applyDoctorFixes(cfg *config.Config, st *state.State, skillName string, report doctor.Report) ([]doctorFixResult, error) {
@@ -624,10 +626,10 @@ func buildDoctorReportJSON(skill string, report doctor.Report) doctorReportJSON 
 	return out
 }
 
-func writeDoctorText(w io.Writer, skill string, report doctor.Report) error {
+func writeDoctorText(w io.Writer, skill string, report doctor.Report, verbose bool) error {
 	tty := writerIsTerminal(w)
 	var buf strings.Builder
-	if err := writeDoctorTextWithOptions(&buf, skill, report, tty); err != nil {
+	if err := writeDoctorTextWithOptions(&buf, skill, report, tty, verbose); err != nil {
 		return err
 	}
 	out := buf.String()
@@ -720,7 +722,7 @@ func writeDoctorFixTextStyled(w io.Writer, skill string, results []doctorFixResu
 	return err
 }
 
-func writeDoctorTextWithOptions(w io.Writer, skill string, report doctor.Report, truncate bool) error {
+func writeDoctorTextWithOptions(w io.Writer, skill string, report doctor.Report, truncate bool, verbose bool) error {
 	if len(report.Issues) == 0 {
 		_, err := fmt.Fprintln(w, doctorOKStyle.Render("✓")+" "+doctorDimStyle.Render("No managed skill issues found."))
 		return err
@@ -739,7 +741,7 @@ func writeDoctorTextWithOptions(w io.Writer, skill string, report doctor.Report,
 		return err
 	}
 
-	groups := groupDoctorIssuesByKind(report.Issues)
+	groups := groupDoctorIssuesByKind(report.Issues, verbose)
 	for gi, group := range groups {
 		if gi > 0 {
 			if _, err := fmt.Fprintln(w); err != nil {
@@ -775,6 +777,11 @@ func writeDoctorTextWithOptions(w io.Writer, skill string, report doctor.Report,
 		}
 	}
 
+	fixable := doctorFixableIssueCount(report.Issues)
+	if fixable > 0 {
+		_, err := fmt.Fprintln(w, "\n"+doctorDimStyle.Render(fmt.Sprintf("Run `scribe doctor --fix` to auto-resolve %d of these.", fixable)))
+		return err
+	}
 	_, err := fmt.Fprintln(w, "\n"+doctorDimStyle.Render("Run `scribe doctor --fix` to repair drift and normalize canonical metadata."))
 	return err
 }
@@ -794,7 +801,7 @@ type doctorIssueRow struct {
 	Message string
 }
 
-func groupDoctorIssuesByKind(issues []doctor.Issue) []doctorIssueGroup {
+func groupDoctorIssuesByKind(issues []doctor.Issue, verbose bool) []doctorIssueGroup {
 	byKind := map[doctor.IssueKind][]doctor.Issue{}
 	for _, issue := range issues {
 		byKind[issue.Kind] = append(byKind[issue.Kind], issue)
@@ -806,7 +813,7 @@ func groupDoctorIssuesByKind(issues []doctor.Issue) []doctorIssueGroup {
 			Kind:   kind,
 			Count:  len(kindIssues),
 			Issues: kindIssues,
-			Rows:   foldDoctorIssueRows(kind, kindIssues),
+			Rows:   foldDoctorIssueRows(kind, kindIssues, verbose),
 		})
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
@@ -818,7 +825,7 @@ func groupDoctorIssuesByKind(issues []doctor.Issue) []doctorIssueGroup {
 	return groups
 }
 
-func foldDoctorIssueRows(kind doctor.IssueKind, issues []doctor.Issue) []doctorIssueRow {
+func foldDoctorIssueRows(kind doctor.IssueKind, issues []doctor.Issue, verbose bool) []doctorIssueRow {
 	bySkill := map[string][]doctor.Issue{}
 	for _, issue := range issues {
 		bySkill[issue.Skill] = append(bySkill[issue.Skill], issue)
@@ -846,17 +853,152 @@ func foldDoctorIssueRows(kind doctor.IssueKind, issues []doctor.Issue) []doctorI
 				Status:  foldedDoctorStatus(skillIssues),
 				Message: strings.Join(migrationBudgetParts(skillIssues), doctorDimStyle.Render(" · ")),
 			})
+		case doctor.IssueProjectionDrift:
+			rows = append(rows, projectionDriftIssueRows(kind, skill, skillIssues, verbose)...)
 		default:
 			rows = append(rows, doctorIssueRow{
 				Kind:    kind,
 				Skill:   tildePath(skill),
 				Tools:   issueTools(skillIssues),
 				Status:  foldedDoctorStatus(skillIssues),
-				Message: summarizeDoctorIssueMessage(kind, skillIssues),
+				Message: summarizeDoctorIssueMessage(kind, skillIssues, true),
 			})
 		}
 	}
 	return rows
+}
+
+func projectionDriftIssueRows(kind doctor.IssueKind, skill string, issues []doctor.Issue, verbose bool) []doctorIssueRow {
+	if verbose {
+		return []doctorIssueRow{{
+			Kind:    kind,
+			Skill:   tildePath(skill),
+			Tools:   issueTools(issues),
+			Status:  foldedDoctorStatus(issues),
+			Message: summarizeDoctorIssueMessage(kind, issues, true),
+		}}
+	}
+
+	summaries := map[string]*projectionDriftSummary{}
+	for _, issue := range issues {
+		for _, part := range strings.Split(issue.Message, ";") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			detail := parseProjectionDriftDetail(part)
+			tool := detail.Tool
+			if tool == "" {
+				tool = issue.Tool
+			}
+			if tool == "" {
+				tool = "tool"
+			}
+			summary := summaries[tool]
+			if summary == nil {
+				summary = &projectionDriftSummary{}
+				summaries[tool] = summary
+			}
+			summary.add(detail.Category)
+		}
+	}
+	if len(summaries) == 0 {
+		return []doctorIssueRow{{
+			Kind:    kind,
+			Skill:   tildePath(skill),
+			Tools:   issueTools(issues),
+			Status:  foldedDoctorStatus(issues),
+			Message: summarizeDoctorIssueMessage(kind, issues, false),
+		}}
+	}
+
+	tools := make([]string, 0, len(summaries))
+	for tool := range summaries {
+		tools = append(tools, tool)
+	}
+	sort.Strings(tools)
+
+	rows := make([]doctorIssueRow, 0, len(tools))
+	for _, tool := range tools {
+		rows = append(rows, doctorIssueRow{
+			Kind:    kind,
+			Skill:   tildePath(skill),
+			Tools:   []string{tool},
+			Status:  foldedDoctorStatus(issues),
+			Message: summaries[tool].message(),
+		})
+	}
+	return rows
+}
+
+type projectionDriftDetail struct {
+	Tool     string
+	Category string
+}
+
+type projectionDriftSummary struct {
+	Unexpected int
+	Missing    int
+	Conflicted int
+	Mismatched int
+	Other      int
+}
+
+func (s *projectionDriftSummary) add(category string) {
+	switch category {
+	case "unexpected":
+		s.Unexpected++
+	case "missing":
+		s.Missing++
+	case "conflicted":
+		s.Conflicted++
+	case "mismatched":
+		s.Mismatched++
+	default:
+		s.Other++
+	}
+}
+
+func (s projectionDriftSummary) message() string {
+	var parts []string
+	if s.Unexpected > 0 {
+		parts = append(parts, fmt.Sprintf("%d unexpected", s.Unexpected))
+	}
+	if s.Missing > 0 {
+		parts = append(parts, fmt.Sprintf("%d missing", s.Missing))
+	}
+	if s.Conflicted > 0 {
+		parts = append(parts, fmt.Sprintf("%d conflicted", s.Conflicted))
+	}
+	if s.Mismatched > 0 {
+		parts = append(parts, fmt.Sprintf("%d target mismatch", s.Mismatched))
+	}
+	if s.Other > 0 {
+		parts = append(parts, fmt.Sprintf("%d other", s.Other))
+	}
+	return strings.Join(parts, doctorDimStyle.Render(" · "))
+}
+
+func parseProjectionDriftDetail(part string) projectionDriftDetail {
+	part = strings.TrimSpace(part)
+	switch {
+	case strings.HasPrefix(part, "unexpected managed projection "):
+		rest := strings.TrimPrefix(part, "unexpected managed projection ")
+		tool, _, _ := strings.Cut(rest, " at ")
+		return projectionDriftDetail{Tool: strings.TrimSpace(tool), Category: "unexpected"}
+	case strings.HasPrefix(part, "missing managed projection for "):
+		rest := strings.TrimPrefix(part, "missing managed projection for ")
+		tool, _, _ := strings.Cut(rest, " at ")
+		return projectionDriftDetail{Tool: strings.TrimSpace(tool), Category: "missing"}
+	case strings.Contains(part, " projection at ") && strings.HasSuffix(part, " is conflicted"):
+		tool, _, _ := strings.Cut(part, " projection at ")
+		return projectionDriftDetail{Tool: strings.TrimSpace(tool), Category: "conflicted"}
+	case strings.Contains(part, " projection at ") && strings.HasSuffix(part, " does not point to the canonical target"):
+		tool, _, _ := strings.Cut(part, " projection at ")
+		return projectionDriftDetail{Tool: strings.TrimSpace(tool), Category: "mismatched"}
+	default:
+		return projectionDriftDetail{Category: "other"}
+	}
 }
 
 func renderDoctorIssueRow(row doctorIssueRow) string {
@@ -939,7 +1081,7 @@ func issueTools(issues []doctor.Issue) []string {
 	return tools
 }
 
-func summarizeDoctorIssueMessage(kind doctor.IssueKind, issues []doctor.Issue) string {
+func summarizeDoctorIssueMessage(kind doctor.IssueKind, issues []doctor.Issue, verbose bool) string {
 	seen := map[string]bool{}
 	var parts []string
 	for _, issue := range issues {
@@ -948,7 +1090,7 @@ func summarizeDoctorIssueMessage(kind doctor.IssueKind, issues []doctor.Issue) s
 			if part == "" {
 				continue
 			}
-			part = summarizeDoctorMessagePart(kind, part)
+			part = summarizeDoctorMessagePart(kind, part, verbose)
 			if !seen[part] {
 				seen[part] = true
 				parts = append(parts, part)
@@ -961,10 +1103,23 @@ func summarizeDoctorIssueMessage(kind doctor.IssueKind, issues []doctor.Issue) s
 	return strings.Join(parts, doctorDimStyle.Render(" · "))
 }
 
-func summarizeDoctorMessagePart(kind doctor.IssueKind, part string) string {
+func summarizeDoctorMessagePart(kind doctor.IssueKind, part string, verbose bool) string {
 	part = tildePath(part)
 	if kind != doctor.IssueProjectionDrift {
 		return part
+	}
+	if !verbose {
+		detail := parseProjectionDriftDetail(part)
+		switch detail.Category {
+		case "unexpected":
+			return "1 unexpected"
+		case "missing":
+			return "1 missing"
+		case "conflicted":
+			return "1 conflicted"
+		case "mismatched":
+			return "1 target mismatch"
+		}
 	}
 	switch {
 	case strings.HasPrefix(part, "unexpected managed projection "):
@@ -985,6 +1140,19 @@ func summarizeDoctorMessagePart(kind doctor.IssueKind, part string) string {
 		}
 	}
 	return part
+}
+
+func doctorFixableIssueCount(issues []doctor.Issue) int {
+	count := 0
+	for _, issue := range issues {
+		switch issue.Kind {
+		case doctor.IssueCanonicalMetadata, doctor.IssueProjectionDrift:
+			if issue.Status != "error" {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func suffixAfter(s, marker string) (string, bool) {
