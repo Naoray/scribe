@@ -58,6 +58,25 @@ func TestEstimateDescriptionBytes(t *testing.T) {
 	}
 }
 
+func TestEstimateDescriptionBytesTracksRenderedDescriptionWithinTolerance(t *testing.T) {
+	description := "Short summary for the agent."
+	firstParagraph := "First paragraph spans two lines and is what Codex lists."
+	content := "---\n" +
+		"name: rendered\n" +
+		"description: " + description + "\n" +
+		"---\n\n" +
+		"First paragraph spans two lines\n" +
+		"and is what Codex lists.\n\n" +
+		"Second paragraph is full instructions and should not be counted.\n"
+
+	got := EstimateDescriptionBytes(Skill{Name: "rendered", Content: []byte(content)})
+	realBytes := len([]byte(description + "\n\n" + firstParagraph))
+	tolerance := 2
+	if got < realBytes-tolerance || got > realBytes+tolerance {
+		t.Fatalf("EstimateDescriptionBytes() = %d, want within %d bytes of rendered %d", got, tolerance, realBytes)
+	}
+}
+
 func TestCheckBudgetThresholdBoundaries(t *testing.T) {
 	tests := []struct {
 		name string

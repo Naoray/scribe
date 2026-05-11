@@ -113,7 +113,14 @@ func TestProjectUpdatesExistingBlockWhenHashChanges(t *testing.T) {
 
 func TestProjectPreservesUserContentAroundManagedBlocks(t *testing.T) {
 	project := t.TempDir()
-	existing := "top\n<!-- scribe:start name=old hash=abc -->\nold\n<!-- scribe:end name=old -->\nbetween\n<!-- scribe:start name=keep hash=abc -->\nstale\n<!-- scribe:end name=keep -->\nbottom\n"
+	above := "top: user bytes stay exactly\n\n"
+	between := "between: keep spacing\tand punctuation!\n\n"
+	below := "bottom: no rewrite\n"
+	existing := above +
+		"<!-- scribe:start name=old hash=abc -->\nold\n<!-- scribe:end name=old -->\n" +
+		between +
+		"<!-- scribe:start name=keep hash=abc -->\nstale\n<!-- scribe:end name=keep -->\n" +
+		below
 	if err := os.WriteFile(filepath.Join(project, "AGENTS.md"), []byte(existing), 0o644); err != nil {
 		t.Fatalf("write AGENTS.md: %v", err)
 	}
@@ -126,10 +133,13 @@ func TestProjectPreservesUserContentAroundManagedBlocks(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	got := string(data)
-	for _, want := range []string{"top\n", "\nbetween\n", "\nbottom\n"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("user content %q not preserved byte-for-byte:\n%s", want, got)
-		}
+	managedStart := strings.Index(got, "<!-- scribe:start name=keep hash=")
+	if managedStart < 0 {
+		t.Fatalf("updated managed block missing:\n%s", got)
+	}
+	unmanaged := got[:managedStart]
+	if unmanaged != above+between+below+"\n" {
+		t.Fatalf("unmanaged content changed\n got: %q\nwant: %q", unmanaged, above+between+below+"\n")
 	}
 	if strings.Contains(got, "old\n") || strings.Contains(got, "stale\n") || !strings.Contains(got, "fresh\n") {
 		t.Fatalf("managed block content mismatch:\n%s", got)
