@@ -449,6 +449,18 @@ func (c *Client) HasPushAccess(ctx context.Context, owner, repo string) (bool, e
 	return perms["push"] || perms["admin"], nil
 }
 
+// RepositoryIsPrivate returns the GitHub repository privacy flag.
+func (c *Client) RepositoryIsPrivate(ctx context.Context, owner, repo string) (bool, error) {
+	if c == nil || c.gh == nil {
+		return false, errors.New("github client is not initialized")
+	}
+	r, _, err := c.gh.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return false, wrapErr(err, fmt.Sprintf("check visibility %s/%s", owner, repo))
+	}
+	return r.GetPrivate(), nil
+}
+
 // LatestRelease fetches the latest published release for a repository.
 func (c *Client) LatestRelease(ctx context.Context, owner, repo string) (*github.RepositoryRelease, error) {
 	release, _, err := c.gh.Repositories.GetLatestRelease(ctx, owner, repo)

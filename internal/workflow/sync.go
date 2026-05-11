@@ -708,6 +708,9 @@ func StepLoadConfig(ctx context.Context, b *Bag) error {
 			b.Provider = provider.NewGitHubProvider(provider.WrapGitHubClient(b.Client))
 		}
 	}
+	if b.Visibility == nil {
+		b.Visibility = b.Client
+	}
 
 	return nil
 }

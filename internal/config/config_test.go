@@ -73,6 +73,11 @@ token = "ghp_test"
 	if cfg.Token != "ghp_test" {
 		t.Errorf("token: got %q", cfg.Token)
 	}
+	for _, registry := range cfg.Registries {
+		if registry.Visibility != config.RegistryVisibilityUnknown {
+			t.Errorf("legacy TOML visibility for %s: got %q, want %q", registry.Repo, registry.Visibility, config.RegistryVisibilityUnknown)
+		}
+	}
 }
 
 func TestLoadLegacyTeamRepo(t *testing.T) {
@@ -88,6 +93,9 @@ token = "ghp_legacy"
 	}
 	if len(cfg.TeamRepos()) != 1 {
 		t.Fatalf("expected 1 team repo from legacy migration, got %d", len(cfg.TeamRepos()))
+	}
+	if cfg.Registries[0].Visibility != config.RegistryVisibilityUnknown {
+		t.Errorf("legacy team_repo visibility: got %q, want %q", cfg.Registries[0].Visibility, config.RegistryVisibilityUnknown)
 	}
 	if cfg.TeamRepos()[0] != "ArtistfyHQ/team-skills" {
 		t.Errorf("migrated repo: got %q", cfg.TeamRepos()[0])
@@ -364,7 +372,7 @@ func TestSaveYAML(t *testing.T) {
 
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
-			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: config.RegistryTypeGitHub, Writable: true},
+			{Repo: "ArtistfyHQ/team-skills", Enabled: true, Type: config.RegistryTypeGitHub, Visibility: config.RegistryVisibilityPrivate, Writable: true},
 		},
 		Token: "ghp_save_test",
 	}
@@ -397,6 +405,9 @@ func TestSaveYAML(t *testing.T) {
 	}
 	if loaded.Token != "ghp_save_test" {
 		t.Errorf("Token round-trip: got %q", loaded.Token)
+	}
+	if loaded.Registries[0].Visibility != config.RegistryVisibilityPrivate {
+		t.Errorf("Visibility round-trip: got %q, want %q", loaded.Registries[0].Visibility, config.RegistryVisibilityPrivate)
 	}
 }
 
@@ -441,6 +452,86 @@ func TestRegistryType(t *testing.T) {
 	}
 }
 
+func TestRegistryVisibilityHelpers(t *testing.T) {
+	cases := []struct {
+		name       string
+		visibility string
+		wantPublic bool
+	}{
+		{"public", config.RegistryVisibilityPublic, true},
+		{"private", config.RegistryVisibilityPrivate, false},
+		{"unknown", config.RegistryVisibilityUnknown, false},
+		{"empty", "", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rc := config.RegistryConfig{Repo: "owner/repo", Visibility: c.visibility}
+			if rc.IsPublic() != c.wantPublic {
+				t.Errorf("IsPublic: got %v, want %v", rc.IsPublic(), c.wantPublic)
+			}
+		})
+	}
+}
+
+func TestRegistryVisibilityMigration(t *testing.T) {
+	cases := []struct {
+		name    string
+		regType string
+		want    string
+	}{
+		{"community becomes public", config.RegistryTypeCommunity, config.RegistryVisibilityPublic},
+		{"team becomes private", config.RegistryTypeTeam, config.RegistryVisibilityPrivate},
+		{"github becomes unknown", config.RegistryTypeGitHub, config.RegistryVisibilityUnknown},
+		{"empty becomes unknown", "", config.RegistryVisibilityUnknown},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rc := config.RegistryConfig{Repo: "owner/repo", Type: c.regType}
+			rc.Normalize()
+			if rc.Visibility != c.want {
+				t.Errorf("Visibility = %q, want %q", rc.Visibility, c.want)
+			}
+		})
+	}
+}
+
+func TestLoadYAMLMigratesLegacyRegistryVisibility(t *testing.T) {
+	home := setupHome(t)
+	writeYAMLConfig(t, home, `
+registries:
+  - repo: acme/community
+    enabled: true
+    type: community
+  - repo: acme/team
+    enabled: true
+    type: team
+  - repo: acme/github
+    enabled: true
+    type: github
+`)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := map[string]string{}
+	for _, registry := range cfg.Registries {
+		got[registry.Repo] = registry.Visibility
+	}
+	want := map[string]string{
+		"acme/community": config.RegistryVisibilityPublic,
+		"acme/team":      config.RegistryVisibilityPrivate,
+		"acme/github":    config.RegistryVisibilityUnknown,
+	}
+	for repo, visibility := range want {
+		if got[repo] != visibility {
+			t.Errorf("%s visibility = %q, want %q", repo, got[repo], visibility)
+		}
+	}
+}
+
 func TestFindRegistry(t *testing.T) {
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
@@ -477,10 +568,11 @@ func TestAddRegistryUpdatesExisting(t *testing.T) {
 	}
 
 	cfg.AddRegistry(config.RegistryConfig{
-		Repo:     "acme/skills",
-		Enabled:  true,
-		Type:     config.RegistryTypeTeam,
-		Writable: true,
+		Repo:       "acme/skills",
+		Enabled:    true,
+		Type:       config.RegistryTypeTeam,
+		Visibility: config.RegistryVisibilityPrivate,
+		Writable:   true,
 	})
 
 	if len(cfg.Registries) != 1 {
@@ -491,6 +583,9 @@ func TestAddRegistryUpdatesExisting(t *testing.T) {
 	}
 	if !cfg.Registries[0].Writable {
 		t.Error("expected writable to be updated")
+	}
+	if cfg.Registries[0].Visibility != config.RegistryVisibilityPrivate {
+		t.Errorf("visibility: got %q, want %q", cfg.Registries[0].Visibility, config.RegistryVisibilityPrivate)
 	}
 }
 

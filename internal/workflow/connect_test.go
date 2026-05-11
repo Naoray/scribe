@@ -1,10 +1,42 @@
 package workflow_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
+	"github.com/Naoray/scribe/internal/tools"
 	"github.com/Naoray/scribe/internal/workflow"
 )
+
+type connectTestProvider struct {
+	isTeam bool
+}
+
+func (p connectTestProvider) Discover(context.Context, string) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{
+		IsTeam: p.isTeam,
+		Entries: []manifest.Entry{
+			{Name: "deploy", Source: "github:acme/skills@main", Path: "skills/deploy"},
+		},
+	}, nil
+}
+
+func (p connectTestProvider) Fetch(context.Context, manifest.Entry) ([]tools.SkillFile, error) {
+	return nil, errors.New("unused")
+}
+
+type connectVisibilityClient struct {
+	private bool
+	err     error
+}
+
+func (c connectVisibilityClient) RepositoryIsPrivate(context.Context, string, string) (bool, error) {
+	return c.private, c.err
+}
 
 func TestConnectSteps_EndsWithShowAvailable(t *testing.T) {
 	steps := workflow.ConnectSteps()
@@ -65,5 +97,48 @@ func TestConnectInstallAllTail_EndsWithSyncSkills(t *testing.T) {
 	last := tail[len(tail)-1]
 	if last.Name != "SyncSkills" {
 		t.Errorf("expected ConnectInstallAllTail last step SyncSkills, got %s", last.Name)
+	}
+}
+
+func TestStepInferRegistryTypeSetsVisibilityFromGitHubMetadata(t *testing.T) {
+	cases := []struct {
+		name       string
+		private    bool
+		err        error
+		want       string
+		wantPublic bool
+	}{
+		{"public repo", false, nil, config.RegistryVisibilityPublic, true},
+		{"private repo", true, nil, config.RegistryVisibilityPrivate, false},
+		{"metadata error fail closed", false, errors.New("api unavailable"), config.RegistryVisibilityUnknown, false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bag := &workflow.Bag{
+				Config:     &config.Config{},
+				Provider:   connectTestProvider{},
+				Visibility: connectVisibilityClient{private: c.private, err: c.err},
+				RepoArg:    "acme/skills",
+			}
+
+			if err := workflow.StepFetchManifest(context.Background(), bag); err != nil {
+				t.Fatalf("StepFetchManifest: %v", err)
+			}
+			if err := workflow.StepValidateManifest(context.Background(), bag); err != nil {
+				t.Fatalf("StepValidateManifest: %v", err)
+			}
+			if err := workflow.StepInferRegistryType(context.Background(), bag); err != nil {
+				t.Fatalf("StepInferRegistryType: %v", err)
+			}
+
+			got := bag.Config.Registries[0]
+			if got.Visibility != c.want {
+				t.Errorf("Visibility = %q, want %q", got.Visibility, c.want)
+			}
+			if got.IsPublic() != c.wantPublic {
+				t.Errorf("IsPublic = %v, want %v", got.IsPublic(), c.wantPublic)
+			}
+		})
 	}
 }

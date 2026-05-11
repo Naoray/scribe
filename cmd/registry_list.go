@@ -16,14 +16,29 @@ func newRegistryListCommand() *cobra.Command {
 		RunE:  runRegistryList,
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runRegistryList(cmd *cobra.Command, args []string) error {
-	jsonFlag, _ := cmd.Flags().GetBool("json")
+	jsonFlag := jsonFlagPassed(cmd)
 
 	bag := &workflow.Bag{
-		JSONFlag: jsonFlag,
+		JSONFlag:   jsonFlag,
+		LazyGitHub: true,
+		Factory:    newCommandFactory(),
+	}
+
+	if jsonFlag {
+		steps := workflow.RegistryListSteps()[:2]
+		if err := workflow.Run(cmd.Context(), steps, bag); err != nil {
+			return err
+		}
+		out := workflow.BuildRegistryListJSON(bag.Config.EnabledRegistries(), bag.State)
+		renderer := jsonRendererForCommand(cmd, jsonFlag)
+		if err := renderer.Result(out); err != nil {
+			return err
+		}
+		return renderer.Flush()
 	}
 
 	if err := workflow.Run(cmd.Context(), workflow.RegistryListSteps(), bag); err != nil {

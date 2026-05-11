@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"context"
+
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/discovery"
@@ -11,6 +13,10 @@ import (
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
 )
+
+type RepositoryVisibilityClient interface {
+	RepositoryIsPrivate(ctx context.Context, owner, repo string) (bool, error)
+}
 
 // Bag carries all intermediate state across workflow steps.
 // Each step reads/writes only its relevant fields.
@@ -52,6 +58,7 @@ type Bag struct {
 	Config        *config.Config
 	State         *state.State
 	Client        *gh.Client
+	Visibility    RepositoryVisibilityClient
 	Tools         []tools.Tool
 	ProjectRoot   string
 	TeamShareMode bool
@@ -77,8 +84,9 @@ type Bag struct {
 	Partial       bool                          // true when a mutating workflow completed with failures
 
 	// Registry list command results:
-	RegistryRepos  []string       // connected registries
-	RegistryCounts map[string]int // skills per registry
+	RegistryRepos   []string                // connected registries
+	RegistryConfigs []config.RegistryConfig // connected registry config rows
+	RegistryCounts  map[string]int          // skills per registry
 
 	// Internal fields populated by steps
 	manifest *manifest.Manifest

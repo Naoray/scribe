@@ -18,15 +18,20 @@ const (
 	RegistryTypeGitHub    = "github"    // kind: legacy-migrated registry (no type info at migration time)
 	RegistryTypeTeam      = "team"      // kind: org/team registry with scribe.yaml
 	RegistryTypeCommunity = "community" // kind: community registry (marketplace or tree scan)
+
+	RegistryVisibilityPublic  = "public"
+	RegistryVisibilityPrivate = "private"
+	RegistryVisibilityUnknown = "unknown"
 )
 
 // RegistryConfig describes a connected skill registry.
 type RegistryConfig struct {
-	Repo     string `yaml:"repo"`
-	Enabled  bool   `yaml:"enabled"`
-	Builtin  bool   `yaml:"builtin,omitempty"`
-	Type     string `yaml:"type,omitempty"`
-	Writable bool   `yaml:"writable,omitempty"`
+	Repo       string `yaml:"repo"`
+	Enabled    bool   `yaml:"enabled"`
+	Builtin    bool   `yaml:"builtin,omitempty"`
+	Type       string `yaml:"type,omitempty"`
+	Visibility string `yaml:"visibility,omitempty"`
+	Writable   bool   `yaml:"writable,omitempty"`
 }
 
 // ToolConfig describes an AI tool target for skill installation.
@@ -94,6 +99,7 @@ func (c *Config) TeamRepos() []string {
 
 // AddRegistry adds or updates a registry in the config.
 func (c *Config) AddRegistry(rc RegistryConfig) {
+	rc.Normalize()
 	for i := range c.Registries {
 		if strings.EqualFold(c.Registries[i].Repo, rc.Repo) {
 			c.Registries[i] = rc
@@ -207,6 +213,40 @@ func (rc RegistryConfig) IsTeam() bool {
 	return rc.Type == RegistryTypeTeam
 }
 
+// IsPublic returns true only for registries verified or migrated as public.
+func (rc RegistryConfig) IsPublic() bool {
+	return rc.Visibility == RegistryVisibilityPublic
+}
+
+// Normalize fills privacy-safe defaults for legacy or incomplete registry rows.
+func (rc *RegistryConfig) Normalize() {
+	if rc.Visibility == "" {
+		rc.Visibility = VisibilityForLegacyType(rc.Type)
+		return
+	}
+	rc.Visibility = NormalizeRegistryVisibility(rc.Visibility)
+}
+
+func NormalizeRegistryVisibility(visibility string) string {
+	switch visibility {
+	case RegistryVisibilityPublic, RegistryVisibilityPrivate, RegistryVisibilityUnknown:
+		return visibility
+	default:
+		return RegistryVisibilityUnknown
+	}
+}
+
+func VisibilityForLegacyType(regType string) string {
+	switch regType {
+	case RegistryTypeCommunity:
+		return RegistryVisibilityPublic
+	case RegistryTypeTeam:
+		return RegistryVisibilityPrivate
+	default:
+		return RegistryVisibilityUnknown
+	}
+}
+
 // legacyTOML is the shadow struct for reading old config.toml files.
 type legacyTOML struct {
 	TeamRepo  string   `toml:"team_repo"`
@@ -271,6 +311,9 @@ func (c *Config) applyDefaults() {
 	if !c.ScribeAgent.enabledSet {
 		c.ScribeAgent.Enabled = true
 	}
+	for i := range c.Registries {
+		c.Registries[i].Normalize()
+	}
 }
 
 // migrateFromTOML converts legacy TOML fields to the new Config struct.
@@ -283,9 +326,10 @@ func migrateFromTOML(raw legacyTOML) *Config {
 	cfg := &Config{Token: raw.Token}
 	for _, repo := range repos {
 		cfg.Registries = append(cfg.Registries, RegistryConfig{
-			Repo:    repo,
-			Enabled: true,
-			Type:    RegistryTypeGitHub,
+			Repo:       repo,
+			Enabled:    true,
+			Type:       RegistryTypeGitHub,
+			Visibility: RegistryVisibilityUnknown,
 		})
 	}
 	return cfg

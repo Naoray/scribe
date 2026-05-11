@@ -1,3 +1,8 @@
+## Unreleased
+
+### Added
+- Add `visibility` to registry config as a foundation for future opt-in registry discovery; no telemetry is added.
+
 ## v1.3.0 — 2026-05-09
 
 ### Added

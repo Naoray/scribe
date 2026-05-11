@@ -8,6 +8,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	"github.com/Naoray/scribe/internal/config"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -45,7 +46,8 @@ func StepPrintRegistryList(_ context.Context, b *Bag) error {
 	useJSON := b.JSONFlag || !isatty.IsTerminal(os.Stdout.Fd())
 	w := os.Stdout
 
-	repos := b.Config.TeamRepos()
+	registries := b.Config.EnabledRegistries()
+	repos := registryRepos(registries)
 
 	if len(repos) == 0 {
 		if useJSON {
@@ -59,34 +61,46 @@ func StepPrintRegistryList(_ context.Context, b *Bag) error {
 	counts := CountSkillsPerRegistry(repos, b.State)
 
 	if useJSON {
-		return PrintRegistryJSON(w, repos, b.State)
+		return PrintRegistryJSON(w, registries, b.State)
 	}
 
 	// Populate Bag for cmd/ to render.
 	b.RegistryRepos = repos
+	b.RegistryConfigs = registries
 	b.RegistryCounts = counts
 	return nil
 }
 
-type regJSON struct {
+type RegistryJSON struct {
 	Registry   string `json:"registry"`
+	Visibility string `json:"visibility"`
 	SkillCount int    `json:"skill_count"`
 }
 
-type regListJSON struct {
-	Registries []regJSON `json:"registries"`
-	LastSync   *string   `json:"last_sync"`
+type RegistryListJSON struct {
+	Registries []RegistryJSON `json:"registries"`
+	LastSync   *string        `json:"last_sync"`
 }
 
 // PrintRegistryJSON writes registry list as JSON to w.
-func PrintRegistryJSON(w io.Writer, repos []string, st *state.State) error {
+func PrintRegistryJSON(w io.Writer, registries []config.RegistryConfig, st *state.State) error {
+	out := BuildRegistryListJSON(registries, st)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func BuildRegistryListJSON(registries []config.RegistryConfig, st *state.State) RegistryListJSON {
+	repos := registryRepos(registries)
 	counts := CountSkillsPerRegistry(repos, st)
 
-	entries := make([]regJSON, 0, len(repos))
-	for _, repo := range repos {
-		entries = append(entries, regJSON{
-			Registry:   repo,
-			SkillCount: counts[repo],
+	entries := make([]RegistryJSON, 0, len(registries))
+	for _, registry := range registries {
+		registry.Normalize()
+		entries = append(entries, RegistryJSON{
+			Registry:   registry.Repo,
+			Visibility: registry.Visibility,
+			SkillCount: counts[registry.Repo],
 		})
 	}
 
@@ -96,17 +110,23 @@ func PrintRegistryJSON(w io.Writer, repos []string, st *state.State) error {
 		lastSync = &s
 	}
 
-	out := regListJSON{
+	out := RegistryListJSON{
 		Registries: entries,
 		LastSync:   lastSync,
 	}
 
 	// Ensure empty slice renders as [] not null.
 	if out.Registries == nil {
-		out.Registries = []regJSON{}
+		out.Registries = []RegistryJSON{}
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return out
+}
+
+func registryRepos(registries []config.RegistryConfig) []string {
+	repos := make([]string, 0, len(registries))
+	for _, registry := range registries {
+		repos = append(repos, registry.Repo)
+	}
+	return repos
 }

@@ -180,7 +180,7 @@ This commits the skill directly to the registry's default branch via the GitHub 
 - **One repo, many skills.** Registries are intentionally flat collections — no nested registries.
 - **Stable skill names.** Renaming a skill is a breaking change for every consumer; bump the manifest version and document the migration in the registry's `README.md`.
 - **`scribe.yaml`, not `scribe.toml`.** The TOML format is deprecated; run `scribe registry migrate` on legacy registries to convert.
-- **Public discovery is opt-in.** Scribe does not phone home about registries you connect. A future public-discovery feature will be opt-in per registry.
+- **Public discovery is opt-in.** Scribe does not phone home about registries. Public discovery is opt-in and gated on registry visibility — see `docs/registry-visibility.md`.
 
 ## Code of conduct
 

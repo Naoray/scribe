@@ -106,6 +106,7 @@ func StepInferRegistryType(ctx context.Context, b *Bag) error {
 	if b.manifest.IsRegistry() {
 		regType = config.RegistryTypeTeam
 	}
+	visibility := registryVisibility(ctx, b)
 
 	writable := false
 	if b.Client != nil {
@@ -116,13 +117,32 @@ func StepInferRegistryType(ctx context.Context, b *Bag) error {
 	}
 
 	b.Config.AddRegistry(config.RegistryConfig{
-		Repo:     b.RepoArg,
-		Enabled:  true,
-		Type:     regType,
-		Writable: writable,
+		Repo:       b.RepoArg,
+		Enabled:    true,
+		Type:       regType,
+		Visibility: visibility,
+		Writable:   writable,
 	})
 
 	return nil
+}
+
+func registryVisibility(ctx context.Context, b *Bag) string {
+	if b.Visibility == nil {
+		return config.RegistryVisibilityUnknown
+	}
+	owner, repo, err := manifest.ParseOwnerRepo(b.RepoArg)
+	if err != nil {
+		return config.RegistryVisibilityUnknown
+	}
+	private, err := b.Visibility.RepositoryIsPrivate(ctx, owner, repo)
+	if err != nil {
+		return config.RegistryVisibilityUnknown
+	}
+	if private {
+		return config.RegistryVisibilityPrivate
+	}
+	return config.RegistryVisibilityPublic
 }
 
 func StepSaveConfig(_ context.Context, b *Bag) error {

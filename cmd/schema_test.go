@@ -66,6 +66,37 @@ func TestSchemaCommandAll(t *testing.T) {
 	}
 }
 
+func TestSchemaCommandRegistryListIncludesVisibility(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"schema", "registry list"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var got commandSchema
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out.String())
+	}
+	if got.OutputSchema == nil {
+		t.Fatal("output_schema = nil, want registry list schema")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(*got.OutputSchema, &schema); err != nil {
+		t.Fatalf("output schema unmarshal: %v", err)
+	}
+	props := schema["properties"].(map[string]any)
+	registries := props["registries"].(map[string]any)
+	items := registries["items"].(map[string]any)
+	itemProps := items["properties"].(map[string]any)
+	if _, ok := itemProps["visibility"]; !ok {
+		t.Fatalf("registry list schema missing visibility: %#v", itemProps)
+	}
+}
+
 func TestSchemaCommandUnregistered(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := newRootCmd()
