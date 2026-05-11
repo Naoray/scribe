@@ -86,6 +86,10 @@ type Syncer struct {
 	// real directory already exists at the original tool projection path.
 	AliasName string
 
+	// SkillAliases installs named incoming skills under fixed local names.
+	// Used by registry kits to avoid same-name collisions across sources.
+	SkillAliases map[string]string
+
 	// OnRegistryFetched runs after a registry manifest has been fetched and
 	// applied successfully. Callers use this for local metadata caches.
 	OnRegistryFetched func(repo string, m *manifest.Manifest) error
@@ -871,7 +875,15 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 			}
 
 			installName := sk.Name
-			if conflict, ok := s.firstRealDirectoryConflict(sk.Name, effectiveTools); ok {
+			aliasFor := ""
+			if alias := strings.TrimSpace(s.SkillAliases[sk.Name]); alias != "" {
+				installName = alias
+				aliasFor = sk.Name
+				if installed == nil {
+					installed = lookupInstalled(st, installName)
+				}
+			}
+			if conflict, ok := s.firstRealDirectoryConflict(installName, effectiveTools); ok {
 				resolution, err := s.resolveNameConflict(conflict, st, effectiveTools)
 				if err != nil {
 					return err
@@ -973,6 +985,7 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 				Paths:         append([]string(nil), managedPaths...),
 				Projections:   mergeProjection(installed, s.ProjectRoot, toolNames),
 				ManagedPaths:  managedPaths,
+				AliasFor:      aliasFor,
 			})
 			// Save after each successful install — partial sync is safe.
 			if err := st.Save(); err != nil {

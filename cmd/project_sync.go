@@ -417,7 +417,11 @@ func resolveProjectSkillNames(pf *projectfile.ProjectFile, kits map[string]*kit.
 	for _, kitName := range pf.Kits {
 		if k, ok := kits[kitName]; ok {
 			for _, skill := range k.Skills {
-				add(skill)
+				if alias := k.SkillAliases[skill]; alias != "" {
+					add(alias)
+					continue
+				}
+				add(projectSkillName(skill))
 			}
 		}
 	}

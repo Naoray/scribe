@@ -1414,6 +1414,42 @@ func TestRunWithDiff_NameConflictAliasInstallsIncomingUnderAlias(t *testing.T) {
 	assertConflictResolutionEvent(t, events, sync.NameConflictActionAlias, "qa-registry")
 }
 
+func TestRunWithDiff_SkillAliasesInstallUnderAlias(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	syncer := &sync.Syncer{
+		Client:       &syncTestFetcher{files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# tdd\n")}}},
+		Tools:        []tools.Tool{testProjectionTool{root: filepath.Join(home, ".test-tool")}},
+		SkillAliases: map[string]string{"tdd": "other-tdd"},
+	}
+	st := &state.State{Installed: map[string]state.InstalledSkill{}}
+
+	if err := syncer.RunWithDiff(context.Background(), "other/skills", []sync.SkillStatus{{
+		Name:   "tdd",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "tdd", Source: "github:other/skills@main"},
+	}}, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+	if _, ok := st.Installed["tdd"]; ok {
+		t.Fatal("source name should not be installed")
+	}
+	installed, ok := st.Installed["other-tdd"]
+	if !ok {
+		t.Fatal("alias should be installed")
+	}
+	if installed.AliasFor != "tdd" {
+		t.Fatalf("AliasFor = %q, want tdd", installed.AliasFor)
+	}
+	if len(installed.Sources) != 1 || installed.Sources[0].Registry != "other/skills" {
+		t.Fatalf("sources = %#v", installed.Sources)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".test-tool", "other-tdd")); err != nil {
+		t.Fatalf("alias projection missing: %v", err)
+	}
+}
+
 func TestRunWithDiff_NameConflictAliasCollisionReturnsConflict(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

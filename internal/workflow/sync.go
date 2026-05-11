@@ -883,6 +883,7 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 		TrustAll:         b.TrustAllFlag,
 		ForceBudget:      b.ForceBudget,
 		AliasName:        b.AliasName,
+		SkillAliases:     b.SkillAliases,
 		SkillFilter:      b.SkillFilter,
 		KitFilter:        b.KitFilter,
 		KitFilterEnabled: b.KitFilterEnabled,

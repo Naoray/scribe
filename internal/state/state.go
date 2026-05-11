@@ -155,6 +155,9 @@ type InstalledSkill struct {
 	// legacy entries defaults to KindSkill; the first sync after upgrade
 	// may flip an entry to KindPackage via the reclassification pass.
 	Kind Kind `json:"kind,omitempty"`
+	// AliasFor records the upstream skill name when this local entry was
+	// installed under a kit-defined alias.
+	AliasFor string `json:"alias_for,omitempty"`
 
 	// Package-specific fields (omitted for regular skills).
 	Type       string            `json:"type,omitempty"`
@@ -245,6 +248,7 @@ type legacyInstalledSkill struct {
 	Origin        Origin            `json:"origin,omitempty"`
 	ToolsMode     ToolsMode         `json:"tools_mode,omitempty"`
 	Kind          Kind              `json:"kind,omitempty"`
+	AliasFor      string            `json:"alias_for,omitempty"`
 	Projections   []ProjectionEntry `json:"projections,omitempty"`
 }
 
@@ -733,6 +737,7 @@ func legacyToSkill(ls legacyInstalledSkill) InstalledSkill {
 		ManagedPaths:  append([]string(nil), ls.Paths...),
 		Origin:        ls.Origin,
 		Kind:          kind,
+		AliasFor:      ls.AliasFor,
 		Type:          ls.Type,
 		InstallCmd:    ls.InstallCmd,
 		UpdateCmd:     ls.UpdateCmd,

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Naoray/scribe/internal/app"
+	"github.com/Naoray/scribe/internal/cli/envelope"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/cli/fields"
 	"github.com/Naoray/scribe/internal/cli/output"
@@ -43,9 +45,10 @@ type kitListOptions struct {
 }
 
 type kitInstallOptions struct {
-	alias  string
-	noDeps bool
-	json   bool
+	alias         string
+	noDeps        bool
+	noInteraction bool
+	json          bool
 }
 
 type kitCreateOutput struct {
@@ -81,12 +84,13 @@ type kitShowOutput struct {
 }
 
 type kitInstallOutput struct {
-	Name            string         `json:"name"`
-	Registry        string         `json:"registry"`
-	Path            string         `json:"path"`
-	Rev             string         `json:"rev"`
-	SkillsInstalled []string       `json:"skills_installed,omitempty"`
-	MissingRefs     []kitRefOutput `json:"missing_refs,omitempty"`
+	Name              string         `json:"name"`
+	Registry          string         `json:"registry"`
+	Path              string         `json:"path"`
+	Rev               string         `json:"rev"`
+	SkillsInstalled   []string       `json:"skills_installed,omitempty"`
+	MissingRefs       []kitRefOutput `json:"missing_refs,omitempty"`
+	MissingRegistries []string       `json:"missing_registries,omitempty"`
 }
 
 type kitSourceOutput struct {
@@ -110,6 +114,7 @@ var listRemoteKitsFn = registry.ListKits
 var findRemoteKitFn = registry.FindKit
 var fetchRemoteKitFn = registry.FetchKitBody
 var runKitInstallDepsFn = runKitInstallDeps
+var confirmKitMissingRegistriesFn = confirmKitMissingRegistries
 var remoteKitRevFn = func(ctx context.Context, client *gh.Client, registryRepo string) (string, error) {
 	owner, repo, err := manifest.ParseOwnerRepo(registryRepo)
 	if err != nil {
@@ -152,6 +157,7 @@ func newKitCommand() *cobra.Command {
 	cmd.AddCommand(newKitListCommand())
 	cmd.AddCommand(newKitShowCommand())
 	cmd.AddCommand(newKitInstallCommand())
+	cmd.AddCommand(newKitSyncCommand())
 	return cmd
 }
 
@@ -211,12 +217,32 @@ func newKitInstallCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.json = jsonFlagPassed(cmd)
+			opts.noInteraction = noInteractionFlagPassed(cmd)
 			return runKitInstall(cmd, args[0], opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.alias, "alias", "", "Install incoming kit under this local name")
-	cmd.Flags().BoolVar(&opts.noDeps, "no-deps", false, "Install kit body without installing same-registry skills")
+	cmd.Flags().BoolVar(&opts.noDeps, "no-deps", false, "Install kit body without installing referenced skills")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
+	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
+	return markJSONSupported(cmd)
+}
+
+func newKitSyncCommand() *cobra.Command {
+	opts := &kitInstallOptions{}
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Refresh installed registry kits",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.json = jsonFlagPassed(cmd)
+			opts.noInteraction = noInteractionFlagPassed(cmd)
+			return runKitSync(cmd, opts)
+		},
+	}
+	cmd.Flags().BoolVar(&opts.noDeps, "no-deps", false, "Refresh kit bodies without installing referenced skills")
+	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
+	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	return markJSONSupported(cmd)
 }
 
@@ -416,12 +442,36 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 	k.Source.Registry = registryRepo
 	k.Source.Rev = rev
 
-	sameRegistry, missingRefs, err := installableKitRefs(k.Skills, registryRepo, cfg)
+	depsByRegistry, missingRefs, missingRegistries, err := installableKitRefs(k, registryRepo, cfg)
 	if err != nil {
 		return err
 	}
-	if !opts.noDeps && len(sameRegistry) > 0 {
-		if err := runKitInstallDepsFn(cmd, factory, registryRepo, sameRegistry); err != nil {
+	if len(missingRegistries) > 0 {
+		if opts.noInteraction {
+			out := kitInstallOutput{Name: localName, Registry: registryRepo, Rev: rev, MissingRefs: missingRefs, MissingRegistries: missingRegistries}
+			if opts.json {
+				_ = renderMutatorEnvelope(cmd, out, envelope.StatusPartialSuccess)
+			}
+			return clierrors.Wrap(clierrors.ErrPartialSuccess, "KIT_MISSING_REGISTRIES", clierrors.ExitPartial,
+				clierrors.WithMessage("kit references registries that are not connected"),
+				clierrors.WithRemediation("Run `scribe registry connect <owner/repo>` for each missing registry, then retry."),
+				clierrors.WithRendered(opts.json),
+			)
+		}
+		if err := confirmKitMissingRegistriesFn(cmd, cfg, missingRegistries); err != nil {
+			return err
+		}
+		depsByRegistry, missingRefs, missingRegistries, err = installableKitRefs(k, registryRepo, cfg)
+		if err != nil {
+			return err
+		}
+		if len(missingRegistries) > 0 {
+			return clierrors.Wrap(fmt.Errorf("registries still missing: %s", strings.Join(missingRegistries, ", ")), "KIT_MISSING_REGISTRIES", clierrors.ExitPartial)
+		}
+	}
+	installedSkills := flattenKitDeps(depsByRegistry)
+	if !opts.noDeps {
+		if err := runKitInstallDepsFn(cmd, factory, depsByRegistry); err != nil {
 			return err
 		}
 	}
@@ -448,12 +498,13 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 	}
 
 	out := kitInstallOutput{
-		Name:            localName,
-		Registry:        registryRepo,
-		Path:            kitPath,
-		Rev:             rev,
-		SkillsInstalled: sameRegistry,
-		MissingRefs:     missingRefs,
+		Name:              localName,
+		Registry:          registryRepo,
+		Path:              kitPath,
+		Rev:               rev,
+		SkillsInstalled:   installedSkills,
+		MissingRefs:       missingRefs,
+		MissingRegistries: missingRegistries,
 	}
 	if opts.json {
 		r := jsonRendererForCommand(cmd, true)
@@ -463,8 +514,8 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 		return r.Flush()
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Installed kit %s from %s\n", localName, registryRepo)
-	if len(sameRegistry) > 0 && !opts.noDeps {
-		fmt.Fprintf(cmd.OutOrStdout(), "Installed skills: %s\n", strings.Join(sameRegistry, ", "))
+	if len(installedSkills) > 0 && !opts.noDeps {
+		fmt.Fprintf(cmd.OutOrStdout(), "Installed skills: %s\n", strings.Join(installedSkills, ", "))
 	}
 	for _, missing := range missingRefs {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: deferred %s (%s)\n", missing.Raw, missing.Reason)
@@ -472,11 +523,17 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 	return nil
 }
 
-func installableKitRefs(rawRefs []string, registryRepo string, cfg *config.Config) ([]string, []kitRefOutput, error) {
-	var same []string
+type kitInstallDep struct {
+	Name  string
+	Alias string
+}
+
+func installableKitRefs(k *kit.Kit, registryRepo string, cfg *config.Config) (map[string][]kitInstallDep, []kitRefOutput, []string, error) {
+	deps := map[string][]kitInstallDep{}
 	var missing []kitRefOutput
 	seen := map[string]bool{}
-	for _, raw := range rawRefs {
+	missingRegistrySet := map[string]bool{}
+	for _, raw := range k.Skills {
 		ref, err := kit.ParseSkillRef(raw, registryRepo)
 		if err != nil {
 			missing = append(missing, kitRefOutput{Raw: raw, Reason: err.Error()})
@@ -486,49 +543,240 @@ func installableKitRefs(rawRefs []string, registryRepo string, cfg *config.Confi
 			missing = append(missing, kitRefOutput{Raw: raw, Skill: ref.Skill, Origin: string(kit.OriginLocal), Local: true, Reason: "local_ref_forbidden"})
 			continue
 		}
+		origin := string(kit.OriginSameRegistry)
 		if ref.Registry != registryRepo {
-			reason := "cross_registry_deferred"
-			if !registryConnected(cfg, ref.Registry) {
-				reason = "registry_not_connected"
-			}
+			origin = string(kit.OriginCrossRegistry)
+		}
+		if !registryConnected(cfg, ref.Registry) {
+			missingRegistrySet[ref.Registry] = true
 			missing = append(missing, kitRefOutput{
 				Raw:       raw,
 				Skill:     ref.Skill,
-				Origin:    string(kit.OriginCrossRegistry),
+				Origin:    origin,
 				Registry:  ref.Registry,
-				Connected: registryConnected(cfg, ref.Registry),
+				Connected: false,
 				Glob:      ref.Glob,
-				Reason:    reason,
+				Reason:    "registry_not_connected",
 			})
 			continue
 		}
 		if ref.Glob {
-			missing = append(missing, kitRefOutput{Raw: raw, Skill: ref.Skill, Origin: string(kit.OriginSameRegistry), Registry: registryRepo, Connected: true, Glob: true, Reason: "glob_deferred"})
+			missing = append(missing, kitRefOutput{Raw: raw, Skill: ref.Skill, Origin: origin, Registry: ref.Registry, Connected: true, Glob: true, Reason: "glob_deferred"})
 			continue
 		}
-		if !seen[ref.Skill] {
-			seen[ref.Skill] = true
-			same = append(same, ref.Skill)
+		key := ref.Registry + ":" + ref.Skill
+		if !seen[key] {
+			seen[key] = true
+			deps[ref.Registry] = append(deps[ref.Registry], kitInstallDep{Name: ref.Skill, Alias: k.SkillAliases[raw]})
 		}
 	}
-	sort.Strings(same)
-	return same, missing, nil
+	for registryName := range deps {
+		sort.Slice(deps[registryName], func(i, j int) bool { return deps[registryName][i].Name < deps[registryName][j].Name })
+	}
+	missingRegistries := make([]string, 0, len(missingRegistrySet))
+	for registryName := range missingRegistrySet {
+		missingRegistries = append(missingRegistries, registryName)
+	}
+	sort.Strings(missingRegistries)
+	return deps, missing, missingRegistries, nil
 }
 
-func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, registryRepo string, skillNames []string) error {
-	if len(skillNames) == 0 {
-		return nil
+func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry map[string][]kitInstallDep) error {
+	registries := make([]string, 0, len(depsByRegistry))
+	for registryRepo := range depsByRegistry {
+		registries = append(registries, registryRepo)
 	}
-	bag := &workflow.Bag{
-		Args:             skillNames,
-		RepoFlag:         registryRepo,
-		Factory:          factory,
-		FilterRegistries: filterRegistries,
+	sort.Strings(registries)
+	for _, registryRepo := range registries {
+		deps := depsByRegistry[registryRepo]
+		if len(deps) == 0 {
+			continue
+		}
+		skillNames := make([]string, 0, len(deps))
+		aliases := map[string]string{}
+		for _, dep := range deps {
+			skillNames = append(skillNames, dep.Name)
+			if dep.Alias != "" {
+				aliases[dep.Name] = dep.Alias
+			}
+		}
+		bag := &workflow.Bag{
+			Args:             skillNames,
+			RepoFlag:         registryRepo,
+			Factory:          factory,
+			FilterRegistries: filterRegistries,
+			SkillAliases:     aliases,
+		}
+		if err := workflow.Run(cmd.Context(), workflow.InstallSteps(), bag); err != nil {
+			return handleNameConflictError(cmd, err)
+		}
+		if err := saveWorkflowState(bag); err != nil {
+			return err
+		}
 	}
-	if err := workflow.Run(cmd.Context(), workflow.InstallSteps(), bag); err != nil {
-		return handleNameConflictError(cmd, err)
+	return nil
+}
+
+func runKitSync(cmd *cobra.Command, opts *kitInstallOptions) error {
+	if opts == nil {
+		opts = &kitInstallOptions{}
 	}
-	return saveWorkflowState(bag)
+	factory := commandFactory()
+	cfg, err := factory.Config()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	st, err := factory.State()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	client, err := factory.Client()
+	if err != nil {
+		return fmt.Errorf("load github client: %w", err)
+	}
+	scribeDir, err := paths.ScribeDir()
+	if err != nil {
+		return fmt.Errorf("resolve scribe dir: %w", err)
+	}
+
+	names := make([]string, 0, len(st.Kits))
+	for name := range st.Kits {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var outputs []kitInstallOutput
+	for _, localName := range names {
+		installed := st.Kits[localName]
+		registryRepo := installed.SourceRegistry
+		if registryRepo == "" {
+			registryRepo = installed.Source
+		}
+		if registryRepo == "" {
+			continue
+		}
+		if !registryConnected(cfg, registryRepo) {
+			return clierrors.Wrap(fmt.Errorf("registry %q is not connected", registryRepo), "REGISTRY_NOT_CONNECTED", clierrors.ExitNotFound,
+				clierrors.WithResource(registryRepo),
+				clierrors.WithRemediation("Run `scribe registry connect "+registryRepo+"` first."),
+			)
+		}
+		remoteName := installed.Name
+		if remoteName == "" {
+			remoteName = localName
+		}
+		entry, err := findRemoteKitFn(cmd.Context(), client, registryRepo, remoteName)
+		if err != nil {
+			return clierrors.Wrap(err, "KIT_NOT_FOUND", clierrors.ExitNotFound,
+				clierrors.WithResource(registryRepo+":"+remoteName),
+				clierrors.WithRemediation("Run `scribe kit list --remote --registry "+registryRepo+"`."),
+			)
+		}
+		k, err := fetchRemoteKitFn(cmd.Context(), client, registryRepo, entry)
+		if err != nil {
+			return err
+		}
+		k.Name = localName
+		rev, err := remoteKitRevFn(cmd.Context(), client, registryRepo)
+		if err != nil {
+			return err
+		}
+		if k.Source == nil {
+			k.Source = &kit.Source{}
+		}
+		k.Source.Registry = registryRepo
+		k.Source.Rev = rev
+		depsByRegistry, missingRefs, missingRegistries, err := installableKitRefs(k, registryRepo, cfg)
+		if err != nil {
+			return err
+		}
+		if len(missingRegistries) > 0 {
+			if opts.noInteraction {
+				out := kitInstallOutput{Name: localName, Registry: registryRepo, Rev: rev, MissingRefs: missingRefs, MissingRegistries: missingRegistries}
+				if opts.json {
+					_ = renderMutatorEnvelope(cmd, out, envelope.StatusPartialSuccess)
+				}
+				return clierrors.Wrap(clierrors.ErrPartialSuccess, "KIT_MISSING_REGISTRIES", clierrors.ExitPartial,
+					clierrors.WithMessage("kit references registries that are not connected"),
+					clierrors.WithRendered(opts.json),
+				)
+			}
+			if err := confirmKitMissingRegistriesFn(cmd, cfg, missingRegistries); err != nil {
+				return err
+			}
+			depsByRegistry, missingRefs, missingRegistries, err = installableKitRefs(k, registryRepo, cfg)
+			if err != nil {
+				return err
+			}
+		}
+		installedSkills := flattenKitDeps(depsByRegistry)
+		if !opts.noDeps {
+			if err := runKitInstallDepsFn(cmd, factory, depsByRegistry); err != nil {
+				return err
+			}
+		}
+		kitPath := filepath.Join(scribeDir, "kits", localName+".yaml")
+		if err := kit.Save(kitPath, k); err != nil {
+			return err
+		}
+		contentHash, err := hashKitFile(localName, kitPath)
+		if err != nil {
+			return err
+		}
+		recordInstalledKit(st, localName, registryRepo, rev, contentHash, k.Skills)
+		outputs = append(outputs, kitInstallOutput{
+			Name:              localName,
+			Registry:          registryRepo,
+			Path:              kitPath,
+			Rev:               rev,
+			SkillsInstalled:   installedSkills,
+			MissingRefs:       missingRefs,
+			MissingRegistries: missingRegistries,
+		})
+	}
+	if err := st.Save(); err != nil {
+		return err
+	}
+	if opts.json {
+		return renderMutatorEnvelope(cmd, map[string]any{"kits": outputs}, envelope.StatusOK)
+	}
+	for _, out := range outputs {
+		fmt.Fprintf(cmd.OutOrStdout(), "Synced kit %s from %s\n", out.Name, out.Registry)
+	}
+	return nil
+}
+
+func flattenKitDeps(depsByRegistry map[string][]kitInstallDep) []string {
+	var installed []string
+	for registryRepo, deps := range depsByRegistry {
+		for _, dep := range deps {
+			name := dep.Name
+			if dep.Alias != "" {
+				name = dep.Alias
+			}
+			installed = append(installed, registryRepo+":"+name)
+		}
+	}
+	sort.Strings(installed)
+	return installed
+}
+
+func confirmKitMissingRegistries(cmd *cobra.Command, cfg *config.Config, registries []string) error {
+	fmt.Fprintf(cmd.ErrOrStderr(), "Kit references unconnected registries: %s\nConnect them now? [y/N] ", strings.Join(registries, ", "))
+	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer != "y" && answer != "yes" {
+		return clierrors.Wrap(clierrors.ErrPartialSuccess, "KIT_MISSING_REGISTRIES", clierrors.ExitPartial,
+			clierrors.WithMessage("kit references registries that are not connected"),
+			clierrors.WithRemediation("Run `scribe registry connect <owner/repo>` for each missing registry, then retry."),
+		)
+	}
+	for _, repo := range registries {
+		cfg.AddRegistry(config.RegistryConfig{Repo: repo, Enabled: true, Type: config.RegistryTypeGitHub})
+	}
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	return nil
 }
 
 func recordInstalledKit(st *state.State, name, registryRepo, rev, contentHash string, skills []string) {
