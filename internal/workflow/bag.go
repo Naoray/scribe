@@ -10,6 +10,7 @@ import (
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/registryindex"
+	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
@@ -75,7 +76,10 @@ type Bag struct {
 	Provider provider.Provider
 
 	// Connect-specific
-	RepoArg string // resolved owner/repo from args or prompt
+	RepoArg   string // resolved owner/repo from args or prompt
+	SourceArg source.SourceSpec
+	SourceKey string
+	SourceID  string
 
 	// FilterRegistries is injected by cmd/ to bridge flag resolution.
 	// If nil, defaults to returning all repos.

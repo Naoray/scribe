@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -28,9 +27,6 @@ import (
 	"github.com/Naoray/scribe/internal/tools"
 	"github.com/Naoray/scribe/internal/workflow"
 )
-
-// skillRefPattern matches "owner/repo:skillname" — direct install reference.
-var skillRefPattern = regexp.MustCompile(`^\w[\w.-]*/[\w.-]+:\S+$`)
 
 // installResult is the per-skill JSON output for `scribe add`.
 type installResult struct {
@@ -76,7 +72,7 @@ Examples:
 	}
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	cmd.Flags().String("registry", "", "Limit search to a specific registry (owner/repo)")
+	addSourceFlags(cmd, true)
 	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
 	cmd.Flags().Bool("resync", false, "Overwrite local edits with the upstream version for modified skills")
 	cmd.Flags().String("alias", "", "Install incoming skill under this name when a local directory conflicts")
@@ -86,7 +82,10 @@ Examples:
 func runAdd(cmd *cobra.Command, args []string) error {
 	skipConfirm := noInteractionFlagPassed(cmd)
 	jsonFlag := jsonFlagPassed(cmd)
-	registryFilter, _ := cmd.Flags().GetString("registry")
+	sourceFlags, err := readSourceFlags(cmd)
+	if err != nil {
+		return err
+	}
 	forceBudget, _ := cmd.Flags().GetBool("force")
 	resync, _ := cmd.Flags().GetBool("resync")
 	aliasName, _ := cmd.Flags().GetString("alias")
@@ -119,33 +118,40 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve tools: %w", err)
 	}
 
-	// Direct install: owner/repo:skillname.
-	if len(args) == 1 && skillRefPattern.MatchString(args[0]) {
-		registryRepo, skillName, err := parseSkillRef(args[0])
+	syncer := newInstallSyncerWithOptions(client, targets, forceBudget, aliasName)
+	if resync {
+		syncer.ModifiedStrategy = sync.ModifiedStrategyPreferTheirs
+	}
+	configureInstallNameConflictResolver(syncer, conflictMode, aliasName)
+
+	if sourceFlags.hasTyped() {
+		if len(args) != 1 {
+			return fmt.Errorf("skill name required when using source flags")
+		}
+		spec, ident, display, err := sourceSpecFromFlags(sourceFlags)
 		if err != nil {
 			return err
 		}
-		if !client.IsAuthenticated() {
-			return clierrors.Wrap(
-				fmt.Errorf("authentication required"),
-				"GH_AUTH_FAILED",
-				clierrors.ExitPerm,
-				clierrors.WithRemediation("run `gh auth login` or set GITHUB_TOKEN"),
-			)
+		if err := runAddDirectInstallSourceForCommand(cmd, ctx, display, ident.Key, spec, args[0], cfg, st, syncer, client.IsAuthenticated(), useJSON, skipConfirm, resync); err != nil {
+			return handleNameConflictError(cmd, err)
 		}
-		syncer := newInstallSyncerWithOptions(client, targets, forceBudget, aliasName)
-		if resync {
-			syncer.ModifiedStrategy = sync.ModifiedStrategyPreferTheirs
+		return nil
+	}
+
+	// Direct install: owner/repo:skillname or [source]:skillname.
+	if len(args) == 1 && looksLikeInstallRef(args[0]) {
+		spec, ident, display, skillName, err := parseInstallRefForCommand(args[0])
+		if err != nil {
+			return err
 		}
-		configureInstallNameConflictResolver(syncer, conflictMode, aliasName)
-		if err := runAddDirectInstallForCommand(cmd, ctx, registryRepo, skillName, cfg, st, syncer, true, useJSON, skipConfirm, resync); err != nil {
+		if err := runAddDirectInstallSourceForCommand(cmd, ctx, display, ident.Key, spec, skillName, cfg, st, syncer, client.IsAuthenticated(), useJSON, skipConfirm, resync); err != nil {
 			return handleNameConflictError(cmd, err)
 		}
 		return nil
 	}
 
 	// Need at least one connected registry to search/browse.
-	if len(cfg.TeamRepos()) == 0 {
+	if len(cfg.EnabledSources()) == 0 {
 		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
 	}
 	if !client.IsAuthenticated() {
@@ -158,13 +164,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine which registries to browse.
-	repos := cfg.TeamRepos()
-	if registryFilter != "" {
-		repo, err := resolveRegistry(registryFilter, repos)
+	sources := cfg.EnabledSources()
+	if sourceFlags.source != "" {
+		sources, err = browseSources(sourceFlags.source, cfg)
 		if err != nil {
 			return err
 		}
-		repos = []string{repo}
 	}
 
 	// Build query from arg.
@@ -179,7 +184,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Discover all skills across the selected registries.
-	entries, errs := discoverEntries(ctx, repos, client, targets, st)
+	entries, errs := discoverSourceEntries(ctx, sources, client, targets, st)
 	for _, e := range errs {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", e)
 	}
@@ -237,6 +242,15 @@ func parseSkillRef(ref string) (registryRepo, skillName string, err error) {
 		return "", "", clierrors.Wrap(err, "USAGE_INVALID_SKILL_REF", clierrors.ExitUsage)
 	}
 	return registryRepo, skillName, nil
+}
+
+func looksLikeInstallRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "[") || strings.Contains(ref, "://") {
+		return true
+	}
+	parsed, err := source.ParseInstallRef(ref)
+	return err == nil && parsed.Source.Type == source.SourceGitHub && parsed.Source.Path == "" && parsed.Source.Ref == ""
 }
 
 // runAddDirectInstall installs a single skill from owner/repo:skillname.

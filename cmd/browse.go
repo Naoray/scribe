@@ -38,7 +38,7 @@ func newBrowseCommand() *cobra.Command {
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("query", "", "Filter remote skills by query")
 	cmd.Flags().String("install", "", "Install a skill by exact name or owner/repo:skill")
-	cmd.Flags().String("registry", "", "Limit browse/install to one connected registry or GitHub owner/repo")
+	addSourceFlags(cmd, true)
 	cmd.Flags().Bool("kits", false, "Browse registry kits instead of skills")
 	cmd.Flags().Bool("resync", false, "Overwrite local edits with the upstream version for modified skills")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
@@ -48,7 +48,10 @@ func newBrowseCommand() *cobra.Command {
 func runBrowse(cmd *cobra.Command, _ []string) error {
 	query, _ := cmd.Flags().GetString("query")
 	installRef, _ := cmd.Flags().GetString("install")
-	registryFilter, _ := cmd.Flags().GetString("registry")
+	sourceFlags, err := readSourceFlags(cmd)
+	if err != nil {
+		return err
+	}
 	resync, _ := cmd.Flags().GetBool("resync")
 	kits, _ := cmd.Flags().GetBool("kits")
 	yes := noInteractionFlagPassed(cmd)
@@ -73,7 +76,8 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve active tools: %w", err)
 	}
 
-	sources, err := browseSources(registryFilter, cfg)
+	sourceFilter := sourceFlags.source
+	sources, err := browseSources(sourceFilter, cfg)
 	if err != nil {
 		return err
 	}
@@ -342,11 +346,11 @@ func browseInstall(
 	resync bool,
 ) error {
 	if strings.Contains(installRef, ":") {
-		registryRepo, skillName, err := parseSkillRef(installRef)
+		spec, ident, display, skillName, err := parseInstallRefForCommand(installRef)
 		if err != nil {
 			return err
 		}
-		return runAddDirectInstall(ctx, registryRepo, skillName, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
+		return runAddDirectInstallSourceForCommand(nil, ctx, display, ident.Key, spec, skillName, cfg, st, newInstallSyncer(client, targets), client.IsAuthenticated(), useJSON, skipConfirm, resync)
 	}
 
 	var matches []browseEntry
