@@ -312,6 +312,7 @@ func newRootCmd() *cobra.Command {
 		newToolsCommand(),
 		newGuideCommand(),
 		newConfigCommand(),
+		newMCPCommand(),
 	)
 
 	cmd.AddCommand(newRegistryCommand())
