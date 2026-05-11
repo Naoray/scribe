@@ -95,13 +95,13 @@ type Config struct {
 	LazyGitHub      bool              `yaml:"-"`
 }
 
-// TeamRepos returns the list of enabled registry repos.
-// Backward-compatible helper for code that previously used Config.TeamRepos.
+// TeamRepos returns the list of enabled legacy registry repo strings.
+// Backward-compatible helper for GitHub-only code that previously used Config.TeamRepos.
 func (c *Config) TeamRepos() []string {
 	var repos []string
 	for _, r := range c.Registries {
 		if r.Enabled {
-			if repo := r.SourceSpec().Repo; repo != "" {
+			if repo := strings.TrimSpace(r.Repo); repo != "" {
 				repos = append(repos, repo)
 			}
 		}

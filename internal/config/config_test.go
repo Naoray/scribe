@@ -606,7 +606,7 @@ func TestConfigLoadSupportsNestedSourceWithoutLegacyChurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := cfg.TeamRepos(); len(got) != 2 || got[0] != "acme/legacy-skills" || got[1] != "vercel-labs/agent-skills" {
+	if got := cfg.TeamRepos(); len(got) != 1 || got[0] != "acme/legacy-skills" {
 		t.Fatalf("TeamRepos = %#v", got)
 	}
 	legacy := cfg.FindRegistry("acme/legacy-skills")
@@ -740,11 +740,46 @@ func TestEnabledRegistries(t *testing.T) {
 
 // TeamRepos returns the list of registry repo strings for backward compatibility.
 func TestTeamReposCompat(t *testing.T) {
+	gitWritable := true
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
 			{Repo: "ArtistfyHQ/team-skills", Enabled: true},
 			{Repo: "disabled/repo", Enabled: false},
 			{Repo: "vercel/skills", Enabled: true},
+			{
+				ID:      "github-tree",
+				Enabled: true,
+				Source: &source.SourceSpec{
+					Type: source.SourceGitHub,
+					Repo: "nested/github-skills",
+					Path: "packs/team",
+				},
+			},
+			{
+				ID:      "gitlab",
+				Enabled: true,
+				Source: &source.SourceSpec{
+					Type: source.SourceGitLab,
+					Repo: "group/project",
+				},
+			},
+			{
+				ID:      "git",
+				Enabled: true,
+				Source: &source.SourceSpec{
+					Type:     source.SourceGit,
+					URL:      "https://example.com/team/skills.git",
+					Writable: &gitWritable,
+				},
+			},
+			{
+				ID:      "local",
+				Enabled: true,
+				Source: &source.SourceSpec{
+					Type: source.SourceLocal,
+					Path: "/opt/scribe/skills",
+				},
+			},
 		},
 	}
 	repos := cfg.TeamRepos()
