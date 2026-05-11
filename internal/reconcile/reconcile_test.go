@@ -458,6 +458,49 @@ func TestReconcileDropsMissingRecordedProjection(t *testing.T) {
 	}
 }
 
+func TestReconcileDropsMissingOtherProjectProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	projectRoot := t.TempDir()
+	vanishedProject := filepath.Join(home, ".anvil", "worktrees", "old")
+	missingPath := filepath.Join(vanishedProject, ".agents", "skills", "recap")
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"recap": {
+			Revision:     1,
+			Paths:        []string{missingPath},
+			ManagedPaths: []string{missingPath},
+			Projections: []state.ProjectionEntry{
+				{Project: projectRoot, Tools: nil},
+				{Project: vanishedProject, Tools: []string{"codex"}},
+			},
+		},
+	}}
+
+	engine := reconcile.Engine{
+		Tools:       []tools.Tool{tools.CodexTool{}},
+		ProjectRoot: projectRoot,
+		Now:         func() time.Time { return time.Unix(6, 0).UTC() },
+	}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Installed != 0 || summary.Relinked != 0 || summary.Removed != 0 || len(summary.Conflicts) != 0 {
+		t.Fatalf("summary = %+v, want missing other-project projection dropped silently", summary)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("actions = %+v, want none for missing other-project projection", actions)
+	}
+	if got := st.Installed["recap"].ManagedPaths; len(got) != 0 {
+		t.Fatalf("ManagedPaths = %v, want empty", got)
+	}
+	if got := st.Installed["recap"].Paths; len(got) != 0 {
+		t.Fatalf("Paths = %v, want empty", got)
+	}
+}
+
 func TestReconcilePreservesOtherProjectCodexProjectionWhenCodexInactive(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
