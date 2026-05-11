@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
+	"github.com/Naoray/scribe/internal/source"
 	"gopkg.in/yaml.v3"
 )
 
@@ -560,6 +561,139 @@ func TestFindRegistry(t *testing.T) {
 	}
 }
 
+func TestRegistryConfigSourceSpecLegacyRepo(t *testing.T) {
+	rc := config.RegistryConfig{
+		Repo:    "Owner/Repo",
+		Enabled: true,
+		Type:    config.RegistryTypeCommunity,
+	}
+
+	spec := rc.SourceSpec()
+	if spec.Type != source.SourceGitHub || spec.Repo != "Owner/Repo" {
+		t.Fatalf("SourceSpec = %#v", spec)
+	}
+	parsed, err := config.ParseConfigSource(rc)
+	if err != nil {
+		t.Fatalf("ParseConfigSource: %v", err)
+	}
+	if parsed.URL != "https://github.com/Owner/Repo" {
+		t.Fatalf("parsed URL = %q", parsed.URL)
+	}
+	ident := rc.Identity()
+	if ident.Key != "github:owner/repo" {
+		t.Fatalf("identity key = %q", ident.Key)
+	}
+}
+
+func TestConfigLoadSupportsNestedSourceWithoutLegacyChurn(t *testing.T) {
+	home := setupHome(t)
+	content := `registries:
+  - repo: acme/legacy-skills
+    enabled: true
+    type: team
+  - id: scoped
+    enabled: true
+    type: community
+    source:
+      type: github
+      repo: vercel-labs/agent-skills
+      ref: main
+      path: skills
+`
+	writeYAMLConfig(t, home, content)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.TeamRepos(); len(got) != 1 || got[0] != "acme/legacy-skills" {
+		t.Fatalf("TeamRepos = %#v", got)
+	}
+	legacy := cfg.FindRegistry("acme/legacy-skills")
+	if legacy == nil || legacy.Source != nil {
+		t.Fatalf("legacy registry changed: %#v", legacy)
+	}
+	if got := cfg.FindRegistryByKeyOrRepo("scoped"); got == nil || got.ID != "scoped" {
+		t.Fatalf("FindRegistryByKeyOrRepo(id) = %#v", got)
+	}
+	if got := cfg.FindRegistryByKeyOrRepo("github:vercel-labs/agent-skills:skills"); got == nil || got.ID != "scoped" {
+		t.Fatalf("FindRegistryByKeyOrRepo(key) = %#v", got)
+	}
+	if got := cfg.FindRegistryByKeyOrRepo("https://github.com/vercel-labs/agent-skills"); got == nil || got.ID != "scoped" {
+		t.Fatalf("FindRegistryByKeyOrRepo(url) = %#v", got)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".scribe", "config.yaml"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if string(data) != content {
+		t.Fatalf("config file was churned\n got:\n%s\nwant:\n%s", data, content)
+	}
+}
+
+func TestEnabledSourcesGeneratesUniqueIDs(t *testing.T) {
+	cfg := &config.Config{Registries: []config.RegistryConfig{
+		{Repo: "org/skills", Enabled: true},
+		{Enabled: true, Source: &source.SourceSpec{Type: source.SourceGitHub, Repo: "other/skills"}, ID: "org-skills"},
+	}}
+
+	sources := cfg.EnabledSources()
+	if len(sources) != 2 {
+		t.Fatalf("EnabledSources len = %d", len(sources))
+	}
+	if sources[0].ID != "org-skills" || sources[1].ID != "org-skills-2" {
+		t.Fatalf("IDs = %q, %q", sources[0].ID, sources[1].ID)
+	}
+}
+
+func TestLoadRejectsDuplicateIDsAndSourceKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name: "duplicate ids",
+			content: `registries:
+  - id: team
+    enabled: true
+    source:
+      type: github
+      repo: org/one
+  - id: TEAM
+    enabled: true
+    source:
+      type: github
+      repo: org/two
+`,
+		},
+		{
+			name: "duplicate source keys",
+			content: `registries:
+  - id: one
+    enabled: true
+    source:
+      type: github
+      repo: org/skills
+  - id: two
+    enabled: true
+    source:
+      type: github
+      repo: ORG/Skills
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := setupHome(t)
+			writeYAMLConfig(t, home, tt.content)
+			if _, err := config.Load(); err == nil {
+				t.Fatal("expected load error")
+			}
+		})
+	}
+}
+
 func TestAddRegistryUpdatesExisting(t *testing.T) {
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
@@ -606,11 +740,46 @@ func TestEnabledRegistries(t *testing.T) {
 
 // TeamRepos returns the list of registry repo strings for backward compatibility.
 func TestTeamReposCompat(t *testing.T) {
+	gitWritable := true
 	cfg := &config.Config{
 		Registries: []config.RegistryConfig{
 			{Repo: "ArtistfyHQ/team-skills", Enabled: true},
 			{Repo: "disabled/repo", Enabled: false},
 			{Repo: "vercel/skills", Enabled: true},
+			{
+				ID:      "github-tree",
+				Enabled: true,
+				Source: &source.SourceSpec{
+					Type: source.SourceGitHub,
+					Repo: "nested/github-skills",
+					Path: "packs/team",
+				},
+			},
+			{
+				ID:      "gitlab",
+				Enabled: true,
+				Source: &source.SourceSpec{
+					Type: source.SourceGitLab,
+					Repo: "group/project",
+				},
+			},
+			{
+				ID:      "git",
+				Enabled: true,
+				Source: &source.SourceSpec{
+					Type:     source.SourceGit,
+					URL:      "https://example.com/team/skills.git",
+					Writable: &gitWritable,
+				},
+			},
+			{
+				ID:      "local",
+				Enabled: true,
+				Source: &source.SourceSpec{
+					Type: source.SourceLocal,
+					Path: "/opt/scribe/skills",
+				},
+			},
 		},
 	}
 	repos := cfg.TeamRepos()
