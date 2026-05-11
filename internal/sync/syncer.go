@@ -207,10 +207,11 @@ func (s *Syncer) Diff(ctx context.Context, teamRepo string, st *state.State) ([]
 // DiffSource fetches a SourceSpec-backed registry and computes status for each skill.
 // registryKey is the legacy/display identity used in state and JSON during phase 2.
 func (s *Syncer) DiffSource(ctx context.Context, registryKey string, spec source.SourceSpec, st *state.State) ([]SkillStatus, *manifest.Manifest, error) {
-	spec, err := source.CanonicalSpec(spec)
+	spec, ident, err := source.Canonicalize(spec)
 	if err != nil {
 		return nil, nil, err
 	}
+	compareKey := sourceComparisonKey(registryKey, spec, ident)
 	m, err := s.FetchManifestSource(ctx, spec)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse loadout: %w", err)
@@ -290,17 +291,21 @@ func (s *Syncer) DiffSource(ctx context.Context, registryKey string, spec source
 			}
 		}
 
-		status := compareEntry(entry, installedPtr, latestSHA, registryKey, locallyModified)
+		status := compareEntry(entry, installedPtr, latestSHA, compareKey, locallyModified)
+		resolvedRev := latestSHA
 		statuses = append(statuses, SkillStatus{
-			Name:       entry.Name,
-			Status:     status,
-			Installed:  installedPtr,
-			Entry:      &entry,
-			LoadoutRef: loadoutRef(entry),
-			Maintainer: entry.Maintainer(),
-			IsPackage:  entry.IsPackage(),
-			LatestSHA:  latestSHA,
-			BlobSHAs:   blobSHAs,
+			Name:        entry.Name,
+			Status:      status,
+			Installed:   installedPtr,
+			Entry:       &entry,
+			LoadoutRef:  loadoutRef(entry),
+			Maintainer:  entry.Maintainer(),
+			IsPackage:   entry.IsPackage(),
+			LatestSHA:   latestSHA,
+			BlobSHAs:    blobSHAs,
+			SourceKey:   ident.Key,
+			Source:      cloneSourceSpecPtr(spec),
+			ResolvedRev: resolvedRev,
 		})
 	}
 
@@ -315,9 +320,9 @@ func (s *Syncer) DiffSource(ctx context.Context, registryKey string, spec source
 		if catalogNames[name] {
 			continue // already accounted for above
 		}
-		// Check if any source matches this registry.
+		// Check if any source matches this registry/source identity.
 		for _, src := range skill.Sources {
-			if src.Registry == registryKey {
+			if src.IdentityKey() == compareKey || src.Registry == registryKey {
 				extraNames = append(extraNames, name)
 				break
 			}
@@ -490,8 +495,12 @@ func (s *Syncer) projectLockStatuses(lf *lockfile.ProjectLockfile, st *state.Sta
 		if installed != nil {
 			status = StatusCurrent
 			sourceCurrent := false
+			sourceKey := pin.SourceKey
+			if sourceKey == "" {
+				sourceKey = pin.SourceRegistry
+			}
 			for _, src := range installed.Sources {
-				if src.Registry == pin.SourceRegistry && src.LastSHA == pin.CommitSHA {
+				if (src.IdentityKey() == sourceKey || src.Registry == pin.SourceRegistry) && src.LastSHA == pin.CommitSHA {
 					sourceCurrent = true
 					break
 				}
@@ -512,15 +521,18 @@ func (s *Syncer) projectLockStatuses(lf *lockfile.ProjectLockfile, st *state.Sta
 		}
 		lockEntry := pin.Entry
 		statuses = append(statuses, SkillStatus{
-			Name:       pin.Name,
-			Status:     status,
-			Installed:  installed,
-			Entry:      &entry,
-			LoadoutRef: loadoutRef(entry),
-			Maintainer: entry.Maintainer(),
-			IsPackage:  entry.IsPackage(),
-			LatestSHA:  latestSHA,
-			LockEntry:  &lockEntry,
+			Name:        pin.Name,
+			Status:      status,
+			Installed:   installed,
+			Entry:       &entry,
+			LoadoutRef:  loadoutRef(entry),
+			Maintainer:  entry.Maintainer(),
+			IsPackage:   entry.IsPackage(),
+			LatestSHA:   latestSHA,
+			LockEntry:   &lockEntry,
+			SourceKey:   pin.SourceKey,
+			Source:      cloneSourceSpecPtrValue(pin.Source),
+			ResolvedRev: pin.ResolvedRev,
 		})
 	}
 	if len(refused) > 0 {
@@ -740,6 +752,9 @@ func (s *Syncer) apply(ctx context.Context, teamRepo string, statuses []SkillSta
 }
 
 func (s *Syncer) applySource(ctx context.Context, teamRepo string, spec *source.SourceSpec, statuses []SkillStatus, st *state.State) error {
+	for i := range statuses {
+		populateStatusSourceIdentity(&statuses[i], spec)
+	}
 	// Emit resolved status for each skill (populates list view before downloads start).
 	for _, sk := range statuses {
 		s.emit(SkillResolvedMsg{sk})
@@ -770,8 +785,9 @@ func (s *Syncer) applySource(ctx context.Context, teamRepo string, spec *source.
 			fallthrough
 
 		case StatusMissing, StatusOutdated:
-			if st.IsRemovedByUser(teamRepo, sk.Name) {
-				s.emit(SkillSkippedByDenyListMsg{Name: sk.Name, Registry: teamRepo})
+			denyKey := statusSourceKey(teamRepo, sk)
+			if st.IsRemovedByUser(denyKey, sk.Name) {
+				s.emit(SkillSkippedByDenyListMsg{Name: sk.Name, Registry: denyKey})
 				summary.Skipped++
 				continue
 			}
@@ -1041,7 +1057,7 @@ func (s *Syncer) applySource(ctx context.Context, teamRepo string, spec *source.
 			}
 
 			// Build sources: merge with existing sources from other registries.
-			newSource := skillSourceFromEntry(teamRepo, sk.Entry, ref, sk.LatestSHA, sk.BlobSHAs)
+			newSource := skillSourceFromStatus(teamRepo, sk, ref)
 			sources := mergeSources(installed, newSource)
 
 			// Preserve pinned ToolsMode across re-syncs. New skills default to
@@ -1636,7 +1652,7 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, teamRepo stri
 		}
 
 		installed := lookupInstalled(st, stateName)
-		newSource := skillSourceFromEntry(teamRepo, sk.Entry, ref, sk.LatestSHA, sk.BlobSHAs)
+		newSource := skillSourceFromStatus(teamRepo, sk, ref)
 
 		st.RecordInstall(stateName, state.InstalledSkill{
 			Revision:   nextRevision(installed),
@@ -1708,12 +1724,7 @@ func (s *Syncer) applyPackage(ctx context.Context, sk SkillStatus, teamRepo stri
 		if parseErr == nil {
 			ref = src.Ref
 		}
-		newSource := state.SkillSource{
-			Registry:   teamRepo,
-			Ref:        ref,
-			LastSHA:    sk.LatestSHA,
-			LastSynced: time.Now().UTC(),
-		}
+		newSource := skillSourceFromStatus(teamRepo, sk, ref)
 		existing.Sources = mergeSources(&existing, newSource)
 		existing.InstallCmd = sk.Entry.Install
 		existing.UpdateCmd = sk.Entry.Update
@@ -1812,7 +1823,7 @@ func mergeSources(installed *state.InstalledSkill, newSource state.SkillSource) 
 	sources := make([]state.SkillSource, 0, len(installed.Sources)+1)
 	found := false
 	for _, s := range installed.Sources {
-		if s.Registry == newSource.Registry {
+		if s.IdentityKey() == newSource.IdentityKey() || s.Registry == newSource.Registry {
 			sources = append(sources, newSource)
 			found = true
 		} else {
@@ -1823,6 +1834,20 @@ func mergeSources(installed *state.InstalledSkill, newSource state.SkillSource) 
 		sources = append(sources, newSource)
 	}
 	return sources
+}
+
+func skillSourceFromStatus(teamRepo string, sk SkillStatus, ref string) state.SkillSource {
+	src := skillSourceFromEntry(teamRepo, sk.Entry, ref, sk.LatestSHA, sk.BlobSHAs)
+	src.SourceKey = sk.SourceKey
+	src.Source = cloneSourceSpecPtrValue(sk.Source)
+	src.ResolvedRev = sk.ResolvedRev
+	if src.ResolvedRev == "" {
+		src.ResolvedRev = sk.LatestSHA
+	}
+	if src.SourceKey != "" && src.Registry == "" {
+		src.Registry = src.SourceKey
+	}
+	return src
 }
 
 func skillSourceFromEntry(teamRepo string, entry *manifest.Entry, ref, lastSHA string, blobSHAs map[string]string) state.SkillSource {
@@ -1848,6 +1873,54 @@ func skillSourceFromEntry(teamRepo string, entry *manifest.Entry, ref, lastSHA s
 		}
 	}
 	return source
+}
+
+func populateStatusSourceIdentity(sk *SkillStatus, spec *source.SourceSpec) {
+	if sk == nil || spec == nil {
+		return
+	}
+	canonical, ident, err := source.Canonicalize(*spec)
+	if err != nil {
+		return
+	}
+	if sk.SourceKey == "" {
+		sk.SourceKey = ident.Key
+	}
+	if sk.Source == nil {
+		sk.Source = cloneSourceSpecPtr(canonical)
+	}
+	if sk.ResolvedRev == "" {
+		sk.ResolvedRev = sk.LatestSHA
+	}
+}
+
+func sourceComparisonKey(registryKey string, spec source.SourceSpec, ident source.SourceIdentity) string {
+	if spec.Type == source.SourceGitHub {
+		return registryKey
+	}
+	if ident.Key != "" {
+		return ident.Key
+	}
+	return registryKey
+}
+
+func statusSourceKey(teamRepo string, sk SkillStatus) string {
+	if sk.SourceKey != "" {
+		return sk.SourceKey
+	}
+	return teamRepo
+}
+
+func cloneSourceSpecPtr(spec source.SourceSpec) *source.SourceSpec {
+	return &spec
+}
+
+func cloneSourceSpecPtrValue(spec *source.SourceSpec) *source.SourceSpec {
+	if spec == nil {
+		return nil
+	}
+	cp := *spec
+	return &cp
 }
 
 func cloneBlobSHAs(blobSHAs map[string]string) map[string]string {
@@ -1880,7 +1953,7 @@ func (s *Syncer) updateSourceEntry(st *state.State, skillName, teamRepo string, 
 	if parseErr == nil {
 		ref = src.Ref
 	}
-	newSource := skillSourceFromEntry(teamRepo, sk.Entry, ref, sk.LatestSHA, sk.BlobSHAs)
+	newSource := skillSourceFromStatus(teamRepo, sk, ref)
 
 	existing := st.Installed[skillName]
 	existing.Sources = mergeSources(installed, newSource)
@@ -1950,7 +2023,7 @@ func (s *Syncer) applyTreePackage(ctx context.Context, sk SkillStatus, teamRepo 
 	// projects them into tool skill dirs — the package ran its own install
 	// and anything it needs now lives wherever that script decided.
 	src, _ := manifest.ParseSource(entrySource(sk.Entry))
-	newSource := skillSourceFromEntry(teamRepo, sk.Entry, src.Ref, sk.LatestSHA, sk.BlobSHAs)
+	newSource := skillSourceFromStatus(teamRepo, sk, src.Ref)
 
 	st.RecordInstall(sk.Name, state.InstalledSkill{
 		Revision:   nextRevision(installed),

@@ -71,7 +71,8 @@ func compareEntry(entry manifest.Entry, installed *state.InstalledSkill, latestS
 
 func findSourceForRegistry(installed *state.InstalledSkill, registryRepo string) *state.SkillSource {
 	for i := range installed.Sources {
-		if installed.Sources[i].Registry == registryRepo {
+		src := &installed.Sources[i]
+		if src.IdentityKey() == registryRepo || src.Registry == registryRepo {
 			return &installed.Sources[i]
 		}
 	}
