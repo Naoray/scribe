@@ -54,6 +54,18 @@ func TestResolve(t *testing.T) {
 			want:            []string{"init-go", "init-react"},
 		},
 		{
+			name: "multiple kits union expands globs against installed skills",
+			projectFile: &projectfile.ProjectFile{
+				Kits: []string{"frontend", "backend"},
+			},
+			availableKits: map[string]*Kit{
+				"frontend": {Name: "frontend", Skills: []string{"init-*", "shared"}},
+				"backend":  {Name: "backend", Skills: []string{"deploy-*", "shared"}},
+			},
+			installedSkills: []string{"deploy-api", "init-react", "init-tailwind", "unmatched"},
+			want:            []string{"deploy-api", "init-react", "init-tailwind", "shared"},
+		},
+		{
 			name: "add applies after kits",
 			projectFile: &projectfile.ProjectFile{
 				Kits: []string{"frontend"},
@@ -75,6 +87,18 @@ func TestResolve(t *testing.T) {
 				"frontend": {Name: "frontend", Skills: []string{"init-react", "init-tailwind"}},
 			},
 			want: []string{"init-tailwind"},
+		},
+		{
+			name: "remove subtracts skill also provided by kit and add",
+			projectFile: &projectfile.ProjectFile{
+				Kits:   []string{"frontend"},
+				Add:    []string{"init-react", "audit-tests"},
+				Remove: []string{"init-react"},
+			},
+			availableKits: map[string]*Kit{
+				"frontend": {Name: "frontend", Skills: []string{"init-react", "init-tailwind"}},
+			},
+			want: []string{"audit-tests", "init-tailwind"},
 		},
 		{
 			name: "missing kit returns error with name",

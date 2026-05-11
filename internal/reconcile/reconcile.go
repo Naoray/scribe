@@ -125,6 +125,13 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 		}
 
 		if !kitAllowed(name) {
+			removed, removedActions, err := e.removeCurrentProjectProjections(name, &skill, storeDir, byName)
+			if err != nil {
+				return summary, actions, err
+			}
+			summary.Removed += removed
+			actions = append(actions, removedActions...)
+			st.Installed[name] = skill
 			continue
 		}
 
@@ -267,6 +274,63 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 	}
 
 	return summary, actions, nil
+}
+
+func (e *Engine) removeCurrentProjectProjections(name string, skill *state.InstalledSkill, storeDir string, byName map[string]tools.Tool) (int, []Action, error) {
+	if e.ProjectRoot == "" {
+		return 0, nil, nil
+	}
+
+	currentPaths := map[string]string{}
+	for _, projection := range skill.Projections {
+		if projection.Project != e.ProjectRoot {
+			continue
+		}
+		for _, toolName := range projection.Tools {
+			tool, ok := supportedToolByName(toolName, byName)
+			if !ok {
+				continue
+			}
+			path, err := tool.SkillPath(name, e.ProjectRoot)
+			if err == nil {
+				currentPaths[path] = toolName
+			}
+		}
+	}
+	if len(currentPaths) == 0 {
+		return 0, nil, nil
+	}
+
+	canonicalDir := e.canonicalDirForSkill(storeDir, name, *skill)
+	var removed int
+	var actions []Action
+	for path, toolName := range currentPaths {
+		skill.Paths = removePath(skill.Paths, path)
+		skill.ManagedPaths = removePath(skill.ManagedPaths, path)
+		if _, err := os.Lstat(path); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return removed, actions, err
+		}
+		if !isManagedProjection(path, canonicalDir) {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return removed, actions, err
+		}
+		removed++
+		actions = append(actions, Action{Kind: ActionRemoved, Name: name, Tool: toolName, Path: path})
+	}
+
+	projections := skill.Projections[:0]
+	for _, projection := range skill.Projections {
+		if projection.Project != e.ProjectRoot {
+			projections = append(projections, projection)
+		}
+	}
+	skill.Projections = projections
+	return removed, actions, nil
 }
 
 func (e *Engine) canonicalDirForSkill(storeDir, name string, skill state.InstalledSkill) string {

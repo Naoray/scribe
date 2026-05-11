@@ -641,6 +641,93 @@ func TestRun_KitFilterEnabled_BlocksNonKitProjection(t *testing.T) {
 	}
 }
 
+func TestRun_KitFilterEnabled_RemovesCurrentProjectProjectionOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	storeDir := filepath.Join(home, ".scribe", "skills")
+	for _, name := range []string{"recap", "debugger"} {
+		dir := filepath.Join(storeDir, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# "+name), 0o644); err != nil {
+			t.Fatalf("write skill: %v", err)
+		}
+	}
+
+	projectOne := t.TempDir()
+	projectTwo := t.TempDir()
+	debuggerOne := filepath.Join(projectOne, ".claude", "skills", "debugger")
+	debuggerTwo := filepath.Join(projectTwo, ".claude", "skills", "debugger")
+	recapOne := filepath.Join(projectOne, ".claude", "skills", "recap")
+	for path, target := range map[string]string{
+		debuggerOne: filepath.Join(storeDir, "debugger"),
+		debuggerTwo: filepath.Join(storeDir, "debugger"),
+		recapOne:    filepath.Join(storeDir, "recap"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir projection dir: %v", err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatalf("symlink %s: %v", path, err)
+		}
+	}
+
+	st := &state.State{Installed: map[string]state.InstalledSkill{
+		"recap": {
+			Projections:  []state.ProjectionEntry{{Project: projectOne, Tools: []string{"claude"}}},
+			ManagedPaths: []string{recapOne},
+			Paths:        []string{recapOne},
+		},
+		"debugger": {
+			Projections: []state.ProjectionEntry{
+				{Project: projectOne, Tools: []string{"claude"}},
+				{Project: projectTwo, Tools: []string{"claude"}},
+			},
+			ManagedPaths: []string{debuggerOne, debuggerTwo},
+			Paths:        []string{debuggerOne, debuggerTwo},
+		},
+	}}
+
+	engine := &reconcile.Engine{
+		Tools:            []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot:      projectOne,
+		KitFilter:        []string{"recap"},
+		KitFilterEnabled: true,
+	}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Removed != 1 {
+		t.Fatalf("Removed = %d, want 1; actions=%+v", summary.Removed, actions)
+	}
+	if _, err := os.Lstat(debuggerOne); !os.IsNotExist(err) {
+		t.Fatalf("project one debugger projection still exists or stat failed: %v", err)
+	}
+	if _, err := os.Lstat(debuggerTwo); err != nil {
+		t.Fatalf("project two debugger projection affected: %v", err)
+	}
+	if _, err := os.Lstat(recapOne); err != nil {
+		t.Fatalf("project one recap projection missing: %v", err)
+	}
+
+	debugger := st.Installed["debugger"]
+	if hasProjectionForProject(debugger.Projections, projectOne) {
+		t.Fatalf("debugger projections retained project one: %#v", debugger.Projections)
+	}
+	if !hasProjectionForProject(debugger.Projections, projectTwo) {
+		t.Fatalf("debugger projections lost project two: %#v", debugger.Projections)
+	}
+	if containsPath(debugger.ManagedPaths, debuggerOne) || containsPath(debugger.Paths, debuggerOne) {
+		t.Fatalf("debugger retained removed project one path: managed=%v paths=%v", debugger.ManagedPaths, debugger.Paths)
+	}
+	if !containsPath(debugger.ManagedPaths, debuggerTwo) || !containsPath(debugger.Paths, debuggerTwo) {
+		t.Fatalf("debugger lost project two path: managed=%v paths=%v", debugger.ManagedPaths, debugger.Paths)
+	}
+}
+
 func TestReconcileProjectRootPreservesUntrackedGlobalCodexSymlink(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -839,4 +926,22 @@ func TestReconcileRemovesStalePackageProjection(t *testing.T) {
 	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale package projection still exists: %v", err)
 	}
+}
+
+func hasProjectionForProject(projections []state.ProjectionEntry, project string) bool {
+	for _, projection := range projections {
+		if projection.Project == project {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
 }
