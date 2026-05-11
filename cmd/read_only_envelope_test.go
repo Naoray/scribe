@@ -21,6 +21,9 @@ func TestReadOnlyCommandsEmitEnvelopeAndValidateOutputSchema(t *testing.T) {
 		{name: "list", args: []string{"list", "--json"}},
 		{name: "status", args: []string{"status", "--json"}},
 		{name: "doctor", args: []string{"doctor", "--json"}},
+		{name: "mcp list", args: []string{"mcp", "list", "--json"}, setup: func(t *testing.T, home string) {
+			t.Chdir(t.TempDir())
+		}},
 		{name: "guide", args: []string{"guide", "--json"}, setup: func(t *testing.T, home string) {
 			t.Setenv("PATH", home)
 		}},

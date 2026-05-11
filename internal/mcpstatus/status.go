@@ -176,7 +176,7 @@ func resolveDeclarations(workDir string) (projectRoot string, manifestPath strin
 		if err != nil {
 			return "", "", nil, fmt.Errorf("resolve working directory: %w", err)
 		}
-		return abs, "", nil, nil
+		return abs, "", []string{}, nil
 	}
 	pf, err := projectfile.Load(manifestPath)
 	if err != nil {
@@ -221,7 +221,7 @@ func readDefinitions(path string) (map[string]map[string]any, bool, error) {
 
 func inspectClaude(projectRoot string, declared map[string]struct{}) Client {
 	path := filepath.Join(projectRoot, ".claude", "settings.json")
-	client := Client{Name: "claude", Path: path, State: ClientStateMissing}
+	client := Client{Name: "claude", Path: path, State: ClientStateMissing, Projected: []string{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return client
@@ -254,7 +254,7 @@ func inspectClaude(projectRoot string, declared map[string]struct{}) Client {
 
 func inspectCodex(projectRoot string, declared map[string]struct{}, definitions map[string]map[string]any) Client {
 	path := filepath.Join(projectRoot, ".codex", "config.toml")
-	client := Client{Name: "codex", Path: path, State: ClientStateMissing}
+	client := Client{Name: "codex", Path: path, State: ClientStateMissing, Projected: []string{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return client
@@ -281,7 +281,7 @@ func inspectCodex(projectRoot string, declared map[string]struct{}, definitions 
 
 func inspectCursor(projectRoot string, declared map[string]struct{}, definitions map[string]map[string]any) Client {
 	path := filepath.Join(projectRoot, ".cursor", "mcp.json")
-	client := Client{Name: "cursor", Path: path, State: ClientStateMissing}
+	client := Client{Name: "cursor", Path: path, State: ClientStateMissing, Projected: []string{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return client
