@@ -82,7 +82,7 @@ func TestBudgetSkillsForAgentUsesProjectProjectionOverGlobalPin(t *testing.T) {
 	}
 }
 
-func TestProjectLocalBudgetUsesShortCodexDescriptions(t *testing.T) {
+func TestProjectLocalBudgetUsesRawCodexDescriptions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	wd := t.TempDir()
@@ -128,8 +128,8 @@ func TestProjectLocalBudgetUsesShortCodexDescriptions(t *testing.T) {
 		t.Fatalf("raw Status = %s, want %s", raw.Status, budget.StatusRefuse)
 	}
 	projected := budget.CheckProjectionBudget(budgetSkillsForAgent(set, st, "codex"), "codex")
-	if projected.Status == budget.StatusRefuse {
-		t.Fatalf("projected Status = %s, want non-refuse; used %d", projected.Status, projected.Used)
+	if projected.Status != budget.StatusRefuse {
+		t.Fatalf("projected Status = %s, want %s; used %d", projected.Status, budget.StatusRefuse, projected.Used)
 	}
 }
 

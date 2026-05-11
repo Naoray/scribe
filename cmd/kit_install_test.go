@@ -71,13 +71,15 @@ func TestKitInstallWritesKitStateAndInstallsSameRegistryDeps(t *testing.T) {
 		return "abc123", nil
 	}
 	var gotDeps map[string][]kitInstallDep
-	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep) error {
+	var gotForceBudget bool
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep, forceBudget bool) error {
 		gotDeps = depsByRegistry
+		gotForceBudget = forceBudget
 		return nil
 	}
 
 	cmd := newKitInstallCommand()
-	cmd.SetArgs([]string{"acme/skills:baseline", "--json"})
+	cmd.SetArgs([]string{"acme/skills:baseline", "--json", "--force"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&bytes.Buffer{})
@@ -90,6 +92,9 @@ func TestKitInstallWritesKitStateAndInstallsSameRegistryDeps(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotDeps, wantDeps) {
 		t.Fatalf("deps = %#v, want %#v", gotDeps, wantDeps)
+	}
+	if !gotForceBudget {
+		t.Fatal("expected kit install --force to pass through to dependency budget checks")
 	}
 	if _, err := os.Stat(filepath.Join(home, ".scribe", "kits", "baseline.yaml")); err != nil {
 		t.Fatalf("installed kit missing: %v", err)
@@ -284,7 +289,7 @@ func TestKitInstallConnectPromptInstallsCrossRegistryRefs(t *testing.T) {
 		return nil
 	}
 	var gotDeps map[string][]kitInstallDep
-	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep) error {
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep, _ bool) error {
 		gotDeps = depsByRegistry
 		return nil
 	}
@@ -343,7 +348,7 @@ func TestKitInstallAliasMappingPassesSkillAlias(t *testing.T) {
 	}
 	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "abc123", nil }
 	var gotDeps map[string][]kitInstallDep
-	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep) error {
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep, _ bool) error {
 		gotDeps = depsByRegistry
 		return nil
 	}
@@ -397,7 +402,7 @@ func TestKitInstallPinnedGitHubRefPassesPinnedSource(t *testing.T) {
 	}
 	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "abc123", nil }
 	var gotDeps map[string][]kitInstallDep
-	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep) error {
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep, _ bool) error {
 		gotDeps = depsByRegistry
 		return nil
 	}
@@ -449,7 +454,7 @@ func TestKitSyncRefreshesInstalledRegistryKit(t *testing.T) {
 	}
 	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "new", nil }
 	var gotDeps map[string][]kitInstallDep
-	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep) error {
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, depsByRegistry map[string][]kitInstallDep, _ bool) error {
 		gotDeps = depsByRegistry
 		return nil
 	}
@@ -524,7 +529,7 @@ func TestKitSyncRefusesToOverwriteLocallyEditedKit(t *testing.T) {
 		return &kit.Kit{Name: entry.Name, Skills: []string{"tdd", "upstream"}, Source: &kit.Source{Registry: registryRepo}}, nil
 	}
 	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "new", nil }
-	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, _ map[string][]kitInstallDep) error {
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, _ map[string][]kitInstallDep, _ bool) error {
 		t.Fatal("dependencies should not install after local kit conflict")
 		return nil
 	}

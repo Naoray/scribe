@@ -83,7 +83,7 @@ func TestCheckBudgetThresholdBoundaries(t *testing.T) {
 	}
 }
 
-func TestCheckBudgetOverflowBreakdown(t *testing.T) {
+func TestCheckBudgetOverflowBreakdownShowsBiggestContributors(t *testing.T) {
 	skills := []Skill{
 		skillWithDescription("a", 3000),
 		skillWithDescription("b", 2500),
@@ -98,7 +98,8 @@ func TestCheckBudgetOverflowBreakdown(t *testing.T) {
 		t.Fatalf("Used = %d, want 5600", result.Used)
 	}
 	want := []Overflow{
-		{Skill: "b", Bytes: 60},
+		{Skill: "a", Bytes: 3000},
+		{Skill: "b", Bytes: 2500},
 		{Skill: "c", Bytes: 100},
 	}
 	if len(result.Overflow) != len(want) {
@@ -111,35 +112,30 @@ func TestCheckBudgetOverflowBreakdown(t *testing.T) {
 	}
 }
 
-func TestCheckProjectionBudgetShortensCodexDescriptions(t *testing.T) {
+func TestCheckProjectionBudgetUsesRawCodexDescriptions(t *testing.T) {
 	skills := []Skill{
 		skillWithSentenceDescription("a", strings.Repeat("a", 3000)+". "+strings.Repeat("ignored", 100)),
 		skillWithSentenceDescription("b", strings.Repeat("b", 3000)+". "+strings.Repeat("ignored", 100)),
 	}
 
-	raw := CheckBudget(skills, "codex")
-	if raw.Status != StatusRefuse {
-		t.Fatalf("raw Status = %s, want %s", raw.Status, StatusRefuse)
-	}
-
 	projected := CheckProjectionBudget(skills, "codex")
-	if projected.Status == StatusRefuse {
-		t.Fatalf("projected Status = %s, want non-refuse; used %d", projected.Status, projected.Used)
-	}
-	if projected.Used >= raw.Used {
-		t.Fatalf("projected Used = %d, want less than raw %d", projected.Used, raw.Used)
+	if projected.Status != StatusRefuse {
+		t.Fatalf("Status = %s, want %s", projected.Status, StatusRefuse)
 	}
 }
 
-func TestCheckProjectionBudgetKeepsClaudeRawDescriptions(t *testing.T) {
+func TestCheckProjectionBudgetTreatsUnknownClaudeLimitAsUnlimited(t *testing.T) {
 	skills := []Skill{
 		skillWithSentenceDescription("a", strings.Repeat("a", 3000)+". "+strings.Repeat("ignored", 100)),
 		skillWithSentenceDescription("b", strings.Repeat("b", 5200)+". "+strings.Repeat("ignored", 100)),
 	}
 
 	result := CheckProjectionBudget(skills, "claude")
-	if result.Status != StatusRefuse {
-		t.Fatalf("Status = %s, want %s", result.Status, StatusRefuse)
+	if result.Status != StatusSilent {
+		t.Fatalf("Status = %s, want %s", result.Status, StatusSilent)
+	}
+	if result.Limit != 0 {
+		t.Fatalf("Limit = %d, want unknown/unlimited", result.Limit)
 	}
 }
 
