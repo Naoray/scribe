@@ -13,6 +13,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
@@ -32,10 +33,10 @@ func newBrowseCommand() *cobra.Command {
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	cmd.Flags().String("query", "", "Filter remote skills by query")
 	cmd.Flags().String("install", "", "Install a skill by exact name or owner/repo:skill")
-	cmd.Flags().String("registry", "", "Limit browse/install to one connected registry")
+	cmd.Flags().String("registry", "", "Limit browse/install to one connected registry or GitHub owner/repo")
 	cmd.Flags().Bool("resync", false, "Overwrite local edits with the upstream version for modified skills")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
-	return cmd
+	return markJSONSupported(cmd)
 }
 
 func runBrowse(cmd *cobra.Command, _ []string) error {
@@ -52,9 +53,6 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	if len(cfg.TeamRepos()) == 0 {
-		return fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
-	}
 	st, err := factory.State()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
@@ -68,16 +66,29 @@ func runBrowse(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve active tools: %w", err)
 	}
 
-	repos := cfg.TeamRepos()
-	if registryFilter != "" {
-		repo, err := resolveRegistry(registryFilter, repos)
-		if err != nil {
-			return err
-		}
-		repos = []string{repo}
+	repos, err := browseRepos(registryFilter, cfg.TeamRepos())
+	if err != nil {
+		return err
 	}
 
 	return runBrowseWithDeps(cmd.Context(), repos, query, installRef, cfg, st, client, targets, useJSON, yes, resync)
+}
+
+func browseRepos(registryFilter string, connected []string) ([]string, error) {
+	if registryFilter == "" {
+		if len(connected) == 0 {
+			return nil, fmt.Errorf("no registries connected — run: scribe connect <owner/repo>")
+		}
+		return connected, nil
+	}
+	if repo, err := resolveRegistry(registryFilter, connected); err == nil {
+		return []string{repo}, nil
+	}
+	repo, err := manifest.NormalizeGitHubRepo(registryFilter)
+	if err != nil {
+		return nil, err
+	}
+	return []string{repo}, nil
 }
 
 func runBrowseWithDeps(
@@ -94,6 +105,13 @@ func runBrowseWithDeps(
 	resync bool,
 ) error {
 	if installRef == "" && !useJSON {
+		if cfg != nil {
+			for _, repo := range repos {
+				if cfg.FindRegistry(repo) == nil {
+					cfg.AddRegistry(config.RegistryConfig{Repo: repo, Enabled: true, Type: config.RegistryTypeCommunity})
+				}
+			}
+		}
 		bag := &workflow.Bag{
 			JSONFlag:         false,
 			RemoteFlag:       true,

@@ -3,6 +3,8 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"net/url"
+	"path"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -50,10 +52,10 @@ type Entry struct {
 	Source      string            `yaml:"source,omitempty"`
 	Path        string            `yaml:"path,omitempty"`
 	Type        string            `yaml:"type,omitempty"`
-	Install     string            `yaml:"install,omitempty"`            // global fallback install command
-	Update      string            `yaml:"update,omitempty"`             // global fallback update command
-	Installs    map[string]string `yaml:"installs,omitempty"`           // per-tool install commands; override Install
-	Updates     map[string]string `yaml:"updates,omitempty"`            // per-tool update commands; override Update
+	Install     string            `yaml:"install,omitempty"`  // global fallback install command
+	Update      string            `yaml:"update,omitempty"`   // global fallback update command
+	Installs    map[string]string `yaml:"installs,omitempty"` // per-tool install commands; override Install
+	Updates     map[string]string `yaml:"updates,omitempty"`  // per-tool update commands; override Update
 	Author      string            `yaml:"author,omitempty"`
 	Description string            `yaml:"description,omitempty"`
 	Timeout     int               `yaml:"timeout,omitempty"`
@@ -175,4 +177,46 @@ func ParseOwnerRepo(s string) (owner, repo string, err error) {
 		return "", "", fmt.Errorf("invalid repo %q: expected owner/repo", s)
 	}
 	return parts[0], parts[1], nil
+}
+
+// NormalizeGitHubRepo returns owner/repo for either a plain owner/repo string
+// or a github.com repository URL. Tree/blob URLs are accepted and normalized to
+// the containing repository; subdirectory-scoped sources need a richer source
+// schema and are intentionally not represented here.
+func NormalizeGitHubRepo(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", fmt.Errorf("invalid repo %q: expected owner/repo", s)
+	}
+
+	if strings.HasPrefix(s, "git@github.com:") {
+		rest := strings.TrimPrefix(s, "git@github.com:")
+		rest = strings.TrimSuffix(rest, ".git")
+		owner, repo, err := ParseOwnerRepo(rest)
+		if err != nil {
+			return "", err
+		}
+		return owner + "/" + repo, nil
+	}
+
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		u, err := url.Parse(s)
+		if err != nil {
+			return "", fmt.Errorf("invalid GitHub URL %q: %w", s, err)
+		}
+		if !strings.EqualFold(u.Hostname(), "github.com") {
+			return "", fmt.Errorf("unsupported registry URL %q: only github.com URLs are supported", s)
+		}
+		parts := strings.Split(strings.Trim(path.Clean(u.Path), "/"), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+			return "", fmt.Errorf("invalid GitHub URL %q: expected github.com/owner/repo", s)
+		}
+		return parts[0] + "/" + strings.TrimSuffix(parts[1], ".git"), nil
+	}
+
+	owner, repo, err := ParseOwnerRepo(strings.TrimSuffix(s, ".git"))
+	if err != nil {
+		return "", err
+	}
+	return owner + "/" + repo, nil
 }

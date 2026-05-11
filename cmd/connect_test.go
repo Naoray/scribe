@@ -59,6 +59,16 @@ func TestResolveRepoWithArg(t *testing.T) {
 	}
 }
 
+func TestResolveRepoWithGitHubURL(t *testing.T) {
+	repo, err := resolveRepo([]string{"https://github.com/vercel-labs/agent-skills/tree/main/skills/nextjs"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo != "vercel-labs/agent-skills" {
+		t.Errorf("got %q", repo)
+	}
+}
+
 func TestResolveRepoNoArgNonTTY(t *testing.T) {
 	// When stdin is not a TTY (like in tests), resolveRepo with no args should error.
 	_, err := resolveRepo([]string{})

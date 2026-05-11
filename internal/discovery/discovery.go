@@ -520,7 +520,7 @@ func extractFirstParagraphRaw(data []byte) string {
 // truncateDescription shortens a description to a scannable length.
 func truncateDescription(s string) string {
 	// Take first sentence or max 80 chars.
-	if idx := strings.IndexAny(s, ".!"); idx > 0 && idx < 80 {
+	if idx := firstSentenceEnd(s); idx > 0 && idx < 80 {
 		return s[:idx+1]
 	}
 	if len(s) > 80 {
@@ -532,6 +532,18 @@ func truncateDescription(s string) string {
 		return s[:80] + "..."
 	}
 	return s
+}
+
+func firstSentenceEnd(s string) int {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '.', '!', '?':
+			if i == len(s)-1 || s[i+1] == ' ' || s[i+1] == '\n' || s[i+1] == '\t' {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // ReadSkillMetadata extracts SKILL.md metadata from a skill directory.
@@ -564,10 +576,12 @@ func ParseSkillMetadata(data []byte) (SkillMeta, error) {
 	}
 
 	meta := SkillMeta{
-		Name:        raw.Name,
-		Description: truncateDescription(raw.Description),
-		Version:     raw.Version,
-		Author:      raw.Author,
+		Name:           raw.Name,
+		Description:    truncateDescription(raw.Description),
+		RawDescription: strings.TrimSpace(raw.Description),
+		Version:        raw.Version,
+		Author:         raw.Author,
+		Source:         raw.Source,
 	}
 	if v, ok := raw.Metadata["version"]; ok {
 		meta.Version = fmt.Sprint(v)
@@ -576,7 +590,8 @@ func ParseSkillMetadata(data []byte) (SkillMeta, error) {
 		meta.Author = fmt.Sprint(v)
 	}
 	if meta.Description == "" {
-		meta.Description = extractFirstParagraph(data)
+		meta.RawDescription = extractFirstParagraphRaw(data)
+		meta.Description = truncateDescription(meta.RawDescription)
 	}
 	return meta, nil
 }

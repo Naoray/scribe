@@ -70,3 +70,34 @@ func TestScanTreeSkipsTreeEntryType(t *testing.T) {
 		t.Errorf("expected 0 entries for tree type, got %d", len(entries))
 	}
 }
+
+func TestEnrichTreeSkillEntryPreservesSourceAndPath(t *testing.T) {
+	entries := provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: "skills/nextjs/SKILL.md", Type: "blob"},
+	}, "vercel-labs", "agent-skills")
+	enriched, err := provider.EnrichTreeSkillEntry(entries[0], []byte(`---
+name: next-js
+description: Build Next.js apps.
+author: vercel
+---
+# Next.js
+`))
+	if err != nil {
+		t.Fatalf("EnrichTreeSkillEntry: %v", err)
+	}
+	if enriched.Name != "next-js" {
+		t.Fatalf("Name = %q", enriched.Name)
+	}
+	if enriched.Description != "Build Next.js apps." {
+		t.Fatalf("Description = %q", enriched.Description)
+	}
+	if enriched.Author != "vercel" {
+		t.Fatalf("Author = %q", enriched.Author)
+	}
+	if enriched.Source != "github:vercel-labs/agent-skills@HEAD" {
+		t.Fatalf("Source = %q", enriched.Source)
+	}
+	if enriched.Path != "skills/nextjs" {
+		t.Fatalf("Path = %q", enriched.Path)
+	}
+}
