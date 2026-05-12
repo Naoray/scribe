@@ -38,7 +38,7 @@ func ConnectInstallAllTail() []Step {
 }
 
 func connectBaseSteps(loadConfig bool) []Step {
-	steps := make([]Step, 0, 7)
+	steps := make([]Step, 0, 9)
 	if loadConfig {
 		steps = append(steps, Step{Name: "LoadConfig", Fn: StepLoadConfig})
 	}
@@ -47,7 +47,10 @@ func connectBaseSteps(loadConfig bool) []Step {
 		Step{Name: "DedupCheck", Fn: StepDedupCheck},
 		Step{Name: "FetchManifest", Fn: StepFetchManifest},
 		Step{Name: "ValidateManifest", Fn: StepValidateManifest},
+		// LoadState is idempotent; connect --install-all also calls it in the sync tail.
+		Step{Name: "LoadState", Fn: StepLoadState},
 		Step{Name: "InferRegistryType", Fn: StepInferRegistryType},
+		Step{Name: "InstallKits", Fn: StepInstallKits},
 		Step{Name: "SaveConfig", Fn: StepSaveConfig},
 		Step{Name: "IndexPublicRegistry", Fn: StepIndexPublicRegistry},
 	)
@@ -110,6 +113,16 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 	if err != nil {
 		return fmt.Errorf("could not discover skills in %s: %w", workflowSourceDisplay(b), err)
 	}
+	if len(result.KitErrors) > 0 {
+		if UseJSONOutputForProcess(b.JSONFlag) {
+			return fmt.Errorf("could not fetch all kits in %s: %w", b.RepoArg, result.KitErrors)
+		}
+		for _, kitErr := range result.KitErrors {
+			b.Formatter.OnKitInstallWarning(kitErr.Name, kitErr.Err)
+		}
+		b.Partial = true
+	}
+	b.Kits = result.Kits
 
 	if result.Manifest != nil {
 		b.manifest = result.Manifest

@@ -250,6 +250,28 @@ func (f *textFormatter) OnConnectAvailable(_ string, count int) {
 	fmt.Fprintf(f.out, "%d skills available — run `scribe add` to install\n", count)
 }
 
+func (f *textFormatter) OnKitsInstalled(_ string, kitNames []string) {
+	if len(kitNames) == 0 {
+		return
+	}
+	noun := "kits"
+	if len(kitNames) == 1 {
+		noun = "kit"
+	}
+	fmt.Fprintf(f.out, "%d %s installed\n", len(kitNames), noun)
+}
+
+func (f *textFormatter) OnKitInstallWarning(kitName string, err error) {
+	fmt.Fprintf(f.errOut, "warning: kit %s skipped: %v\n", kitName, err)
+}
+
+func (f *textFormatter) OnKitConflict(kitName, existingSource string) {
+	if existingSource == "" {
+		existingSource = "hand-authored"
+	}
+	fmt.Fprintf(f.errOut, "warning: kit %s already exists (source=%s); pass --force-kits to overwrite, or `scribe kit rename` to keep both\n", kitName, existingSource)
+}
+
 func (f *textFormatter) OnLegacyFormat(repo string) {
 	fmt.Fprintf(f.errOut, "note: %s uses legacy scribe.toml — consider migrating to scribe.yaml\n", repo)
 }

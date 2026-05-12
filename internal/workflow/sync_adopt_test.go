@@ -62,6 +62,9 @@ func (r *adoptRecorder) OnConnectSaved(_ string)                                
 func (r *adoptRecorder) OnConnectSyncing()                                        {}
 func (r *adoptRecorder) OnConnectSyncWarning(_ string, _ error)                   {}
 func (r *adoptRecorder) OnConnectAvailable(_ string, _ int)                       {}
+func (r *adoptRecorder) OnKitsInstalled(_ string, _ []string)                     {}
+func (r *adoptRecorder) OnKitInstallWarning(_ string, _ error)                    {}
+func (r *adoptRecorder) OnKitConflict(_, _ string)                                {}
 func (r *adoptRecorder) OnPackageInstallPrompt(_, _, _ string)                    {}
 func (r *adoptRecorder) OnPackageApproved(_ string)                               {}
 func (r *adoptRecorder) OnPackageDenied(_ string)                                 {}

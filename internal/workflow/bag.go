@@ -34,6 +34,8 @@ type Bag struct {
 	TrustAllFlag       bool   // --trust-all: approve all package commands without prompting
 	InstallAllFlag     bool   // --all: install all available skills without prompting
 	ForceBudget        bool   // --force: allow projection over agent description-byte budgets
+	ForceKits          bool   // --force-kits: overwrite existing kit files from connect/resync
+	RefreshKits        bool   // --refresh-kits: opt into kit refresh during registry resync
 	AliasName          string // --alias: install incoming skill under another name on projection conflict
 	SkillAliases       map[string]string
 	PinnedSkillSources map[string]string
@@ -96,6 +98,10 @@ type Bag struct {
 	RegistryRepos   []string                // connected registries
 	RegistryConfigs []config.RegistryConfig // connected registry config rows
 	RegistryCounts  map[string]int          // skills per registry
+
+	// Registry-published kits populated by connect/resync.
+	Kits          []provider.KitFile
+	KitsInstalled []string
 
 	// Internal fields populated by steps
 	manifest *manifest.Manifest

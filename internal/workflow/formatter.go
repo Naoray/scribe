@@ -36,6 +36,9 @@ type Formatter interface {
 	OnConnectSyncing()
 	OnConnectSyncWarning(repo string, err error)
 	OnConnectAvailable(repo string, count int)
+	OnKitsInstalled(repo string, kitNames []string)
+	OnKitInstallWarning(kitName string, err error)
+	OnKitConflict(kitName, existingSource string)
 
 	// Package lifecycle
 	OnPackageInstallPrompt(name, command, source string)
