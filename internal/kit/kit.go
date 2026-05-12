@@ -7,9 +7,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 
+	"github.com/Naoray/scribe/internal/manifest"
 	"gopkg.in/yaml.v3"
 )
+
+var kitNameRE = regexp.MustCompile(manifest.KitNamePattern)
 
 // Kit is a named bundle of Scribe skills.
 type Kit struct {
@@ -135,7 +139,15 @@ func Parse(data []byte) (*Kit, error) {
 	if kit.MCPServers == nil {
 		kit.MCPServers = []string{}
 	}
+	if kit.Name != "" && !kitNameRE.MatchString(kit.Name) {
+		return nil, fmt.Errorf("invalid kit name %q: must match %s", kit.Name, manifest.KitNamePattern)
+	}
 	return &kit, nil
+}
+
+// ParseYAML parses a kit YAML document from bytes.
+func ParseYAML(data []byte) (*Kit, error) {
+	return Parse(data)
 }
 
 // LoadAll reads all *.yaml kit files in dir, keyed by kit name.
