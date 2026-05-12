@@ -215,6 +215,8 @@ go run ./cmd/scribe --help
 go test ./...
 ```
 
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
-MIT
+[MIT](LICENSE)
