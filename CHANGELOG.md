@@ -1,8 +1,14 @@
 ## Unreleased
 
 ### Added
+- **Registries can publish kits** — a `kits:` block in a registry's `scribe.yaml` is fetched and materialized into `~/.scribe/kits/` during `scribe registry connect`, stamped with the source registry. Projects can list those kits in `.scribe.yaml` like any local kit. Pass `--force-kits` to overwrite hand-authored or other-registry kit files with the same name. `scribe registry connect --json` includes `data.kits_installed` when one or more kits are installed.
+- **`scribe registry resync <repo> --refresh-kits` refreshes registry kit definitions** — this opt-in path re-fetches the registry manifest and kit files, writes source stamps, and persists `state.Kits`.
 - Add `visibility` to registry config as a foundation for future opt-in registry discovery; no telemetry is added.
 - Add a local public registry index at `~/.scribe/index/registries.json`, updated by connect/sync and readable with `scribe registry index --json`.
+
+### Changed
+- **Deprecation: `scribe registry resync` will refresh kits by default in the next minor release** — this release keeps the legacy no-refresh default and prints a one-line stderr banner unless `--json` or `--refresh-kits` is passed. Scripted callers should add `--refresh-kits` now to adopt the future behavior explicitly.
+- **Legacy `scribe.toml` registries do not publish kits** — the legacy manifest path ignores `kits:` blocks. Migrate registries to `scribe.yaml` to ship kits.
 
 ## v1.3.0 — 2026-05-09
 
