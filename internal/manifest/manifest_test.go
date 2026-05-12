@@ -1,6 +1,7 @@
 package manifest_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -406,6 +407,91 @@ catalog:
 	}
 	if want := `duplicate catalog entry name "foo"`; err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestParseKitsBlock(t *testing.T) {
+	input := []byte(`
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test
+catalog: []
+kits:
+  - name: daily-workflow
+    path: kits/daily-workflow.yaml
+    description: Plan, capture, and close the day
+  - name: release-pipeline
+    path: kits/release-pipeline.yaml
+`)
+	m, err := manifest.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(m.Kits) != 2 {
+		t.Fatalf("kits count: got %d, want 2", len(m.Kits))
+	}
+	if m.Kits[0].Name != "daily-workflow" || m.Kits[0].Path != "kits/daily-workflow.yaml" {
+		t.Errorf("kit[0] mismatch: %+v", m.Kits[0])
+	}
+	if m.Kits[0].Description == "" {
+		t.Error("description should round-trip")
+	}
+}
+
+func TestParseKitsBlockValidation(t *testing.T) {
+	cases := []struct {
+		name          string
+		path          string
+		wantErrSubstr string
+	}{
+		{"daily", "../etc/passwd", "must stay under repository root"},
+		{"daily", "/etc/passwd", "must stay under repository root"},
+		{"", "kits/foo.yaml", "kit name is required"},
+		{"../../../etc/cron.daily/pwn", "kits/foo.yaml", "invalid kit name"},
+		{"./escape", "kits/foo.yaml", "invalid kit name"},
+		{"name with space", "kits/foo.yaml", "invalid kit name"},
+		{"name/with/slash", "kits/foo.yaml", "invalid kit name"},
+		{"name\\..\\windows", "kits/foo.yaml", "invalid kit name"},
+	}
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("%s|%s", c.name, c.path), func(t *testing.T) {
+			input := []byte(fmt.Sprintf(`
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test
+catalog: []
+kits:
+  - name: %q
+    path: %q
+`, c.name, c.path))
+			_, err := manifest.Parse(input)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", c.wantErrSubstr)
+			}
+			if !strings.Contains(err.Error(), c.wantErrSubstr) {
+				t.Errorf("error %q missing %q", err, c.wantErrSubstr)
+			}
+		})
+	}
+}
+
+func TestParseKitsBlockDuplicateName(t *testing.T) {
+	input := []byte(`
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test
+catalog: []
+kits:
+  - name: same
+    path: kits/a.yaml
+  - name: same
+    path: kits/b.yaml
+`)
+	if _, err := manifest.Parse(input); err == nil || !strings.Contains(err.Error(), "duplicate kit entry name") {
+		t.Errorf("expected duplicate kit name error, got %v", err)
 	}
 }
 

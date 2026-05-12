@@ -5,12 +5,19 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync"
 
 	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/kit"
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/migrate"
 	"github.com/Naoray/scribe/internal/source"
 	"github.com/Naoray/scribe/internal/tools"
+)
+
+const (
+	maxKitsPerManifest = 50
+	maxKitBodyBytes    = 64 * 1024
 )
 
 // TreeEntry mirrors github.TreeEntry so the provider package doesn't import github directly.
@@ -69,15 +76,15 @@ func (p *GitHubProvider) DiscoverSource(ctx context.Context, spec source.SourceS
 	ref := sourceRef(spec)
 
 	// Step 1: Try scribe.yaml.
-	m, err := p.discoverScribeYAML(ctx, owner, repoName, spec.Path, ref)
+	raw, err := p.client.FetchFile(ctx, owner, repoName, ScopedPath(spec.Path, manifest.ManifestFilename), ref)
 	if err == nil {
-		return &DiscoverResult{Entries: m.Catalog, IsTeam: true, Manifest: m}, nil
+		return p.parseScribeYAML(ctx, owner, repoName, spec.Path, ref, raw)
 	}
 
 	// Step 2: Try scribe.toml (legacy).
-	m, err = p.discoverScribeTOML(ctx, owner, repoName, spec.Path, ref)
+	m, err := p.discoverScribeTOML(ctx, owner, repoName, spec.Path, ref)
 	if err == nil {
-		p.warn(fmt.Sprintf("%s uses legacy scribe.toml format — consider migrating to scribe.yaml", spec.Repo))
+		p.warn(spec.Repo)
 		return &DiscoverResult{Entries: m.Catalog, IsTeam: true, Manifest: m}, nil
 	}
 
@@ -96,16 +103,22 @@ func (p *GitHubProvider) DiscoverSource(ctx context.Context, spec source.SourceS
 	return nil, fmt.Errorf("%s: no skills found (looked for scribe.yaml, scribe.toml, marketplace.json, and SKILL.md files)", spec.Repo)
 }
 
-func (p *GitHubProvider) discoverScribeYAML(ctx context.Context, owner, repo, scope, ref string) (*manifest.Manifest, error) {
-	raw, err := p.client.FetchFile(ctx, owner, repo, ScopedPath(scope, manifest.ManifestFilename), ref)
-	if err != nil {
-		return nil, err
-	}
+func (p *GitHubProvider) parseScribeYAML(ctx context.Context, owner, repo, scope, ref string, raw []byte) (*DiscoverResult, error) {
 	m, err := manifest.Parse(raw)
 	if err != nil {
 		return nil, err
 	}
-	return m, nil
+	kits, kitErrors, err := p.fetchKits(ctx, owner, repo, scope, ref, m.Kits)
+	if err != nil {
+		return nil, err
+	}
+	return &DiscoverResult{
+		Entries:   m.Catalog,
+		Kits:      kits,
+		KitErrors: kitErrors,
+		IsTeam:    true,
+		Manifest:  m,
+	}, nil
 }
 
 func (p *GitHubProvider) discoverScribeTOML(ctx context.Context, owner, repo, scope, ref string) (*manifest.Manifest, error) {
@@ -169,6 +182,89 @@ func (p *GitHubProvider) discoverTreeScan(ctx context.Context, owner, repo, scop
 		entries[i] = enriched
 	}
 	return entries, nil
+}
+
+func (p *GitHubProvider) fetchKits(ctx context.Context, owner, repo, scope, ref string, refs []manifest.KitEntry) ([]KitFile, KitFetchErrors, error) {
+	if len(refs) == 0 {
+		return nil, nil, nil
+	}
+	if len(refs) > maxKitsPerManifest {
+		return nil, nil, fmt.Errorf("manifest declares %d kits; maximum is %d", len(refs), maxKitsPerManifest)
+	}
+
+	type result struct {
+		index int
+		file  KitFile
+		err   KitFetchError
+		ok    bool
+	}
+
+	sem := make(chan struct{}, 4)
+	results := make(chan result, len(refs))
+	var wg sync.WaitGroup
+	for i, kitRef := range refs {
+		i, kitRef := i, kitRef
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			kitPath := kitRef.PathOrDefault()
+			fetchPath := ScopedPath(scope, kitPath)
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results <- result{index: i, err: KitFetchError{Name: kitRef.Name, Path: fetchPath, Err: ctx.Err()}}
+				return
+			}
+
+			body, err := p.client.FetchFile(ctx, owner, repo, fetchPath, ref)
+			if err != nil {
+				results <- result{index: i, err: KitFetchError{Name: kitRef.Name, Path: fetchPath, Err: err}}
+				return
+			}
+			if len(body) > maxKitBodyBytes {
+				results <- result{index: i, err: KitFetchError{
+					Name: kitRef.Name,
+					Path: fetchPath,
+					Err:  fmt.Errorf("kit body exceeds %d bytes", maxKitBodyBytes),
+				}}
+				return
+			}
+			if _, err := kit.ParseYAML(body); err != nil {
+				results <- result{index: i, err: KitFetchError{Name: kitRef.Name, Path: fetchPath, Err: err}}
+				return
+			}
+			results <- result{
+				index: i,
+				file: KitFile{
+					Name: kitRef.Name,
+					Path: fetchPath,
+					Body: body,
+					Ref:  ref,
+				},
+				ok: true,
+			}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	byIndex := make(map[int]KitFile, len(refs))
+	errs := make(KitFetchErrors, 0)
+	for r := range results {
+		if r.ok {
+			byIndex[r.index] = r.file
+			continue
+		}
+		errs = append(errs, r.err)
+	}
+	kits := make([]KitFile, 0, len(byIndex))
+	for i := range refs {
+		if file, ok := byIndex[i]; ok {
+			kits = append(kits, file)
+		}
+	}
+	return kits, errs, nil
 }
 
 // clientAdapter adapts *gh.Client to GitHubClient interface.

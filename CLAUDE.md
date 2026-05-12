@@ -85,14 +85,14 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe project` | --json | no |
 | `scribe push` | --json | yes |
 | `scribe registry add` | --install, --json, --no-interaction, --registry | no |
-| `scribe registry connect` | --install-all, --json | yes |
+| `scribe registry connect` | --force-kits, --install-all, --json | yes |
 | `scribe registry create` | --json, --owner, --private, --repo, --team | no |
 | `scribe registry disable` | --json | no |
 | `scribe registry enable` | --json | no |
 | `scribe registry forget` | --json | no |
 | `scribe registry list` | --json | no |
 | `scribe registry migrate` | --json | no |
-| `scribe registry resync` | --json | no |
+| `scribe registry resync` | --force-kits, --json, --refresh-kits | yes |
 | `scribe registry` | --json | no |
 | `scribe remove` | --json, --no-interaction | no |
 | `scribe resolve` | --json, --ours, --theirs | no |

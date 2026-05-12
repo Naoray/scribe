@@ -103,25 +103,39 @@ mcp_servers:
 
 Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits union; the project may add or remove individual skills on top with `add:` / `remove:`. MCP servers can also be declared through kits or directly in `.scribe.yaml` with `mcp:` / `mcp_servers:`; `scribe sync` uses those names to select definitions from project `.mcp.json`. Claude gets enabled server names in `.claude/settings.json`, Codex gets selected definitions in `.codex/config.toml`, and Cursor gets selected definitions in `.cursor/mcp.json`. Existing unmanaged Codex/Cursor entries are preserved; Scribe only replaces entries it previously projected. Scribe does not start MCP server processes.
 
-Registries can publish kits by adding `kits:` entries to their registry `scribe.yaml`. Kit bodies live in the registry repo, conventionally under `kits/<name>.yaml`:
+Use `scribe kit list --remote` to list kits from connected registries, `scribe kit list --registry <owner/repo>` to restrict discovery, and `scribe kit show <owner/repo>:<kit> --json` to inspect a remote kit body. Remote show classifies each skill ref as same-registry, cross-registry, or local and reports whether referenced registries are connected.
+
+### Kits from registries
+
+A registry can ship kits beside its skill catalog. The registry's `scribe.yaml` declares a top-level `kits:` block, each entry pointing at a repo-relative kit YAML file:
 
 ```yaml
 apiVersion: scribe/v1
 kind: Registry
 team:
-  name: acme
-catalog:
-  - name: tdd
-    source: github:acme/skills@main
+  name: example
+catalog: [...]
 kits:
-  - name: laravel-baseline
-    description: Laravel app defaults
-    path: kits/laravel-baseline.yaml
+  - name: daily-workflow
+    description: Plan, capture, and close the day
+    path: kits/daily-workflow.yaml
+  - name: release-pipeline
+    path: kits/release-pipeline.yaml
 ```
 
-Omit `path` to use `kits/<name>.yaml`. Manifest validation rejects duplicate kit names, kit names that collide with skill catalog entries, and paths outside the registry repo.
+Omit `path` to use `kits/<name>.yaml`. Manifest validation rejects duplicate kit names, kit names that collide with skill catalog entries, and paths outside the registry repo. Each referenced file is a normal Kit YAML (`kind: Kit`, `name:`, `skills:`, `mcp_servers:`).
 
-Use `scribe kit list --remote` to list kits from connected registries, `scribe kit list --registry <owner/repo>` to restrict discovery, and `scribe kit show <owner/repo>:<kit> --json` to inspect a remote kit body. Remote show classifies each skill ref as same-registry, cross-registry, or local and reports whether referenced registries are connected. `scribe kit install` is not part of this phase.
+`scribe registry connect <repo>` fetches every referenced kit body, validates the body name against the manifest ref, and writes it to `~/.scribe/kits/<name>.yaml` with `source.registry` stamped. From there, `scribe kit list`, `scribe kit show`, `scribe project init --kits`, and `.scribe.yaml` project `kits:` all see it like any local kit.
+
+`scribe registry resync <repo>` keeps its legacy behavior this release: it only clears mute state. Pass `--refresh-kits` to re-fetch registry kit definitions now. The next minor release will refresh kits by default. Use `--force-kits` with connect or resync when you intentionally want registry content to overwrite an existing kit file.
+
+Resolution precedence:
+
+- Project-local kits in `<project>/.scribe/kits/<name>.yaml` win over global kits in `~/.scribe/kits/<name>.yaml`.
+- Hand-authored global kits with no `source.registry` are protected by default. Scribe refuses to overwrite them unless you pass `--force-kits`.
+- If another registry already owns the same global kit name, Scribe skips that kit and tells you to pass `--force-kits` or run `scribe kit rename` to keep both.
+
+Legacy `scribe.toml` registry manifests do not support `kits:`. Any such block is ignored by the legacy path; migrate the registry to `scribe.yaml` to publish kits.
 
 ### Authoring kits and snippets (today)
 

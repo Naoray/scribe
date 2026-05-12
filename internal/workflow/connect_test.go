@@ -1,11 +1,13 @@
 package workflow_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/config"
@@ -19,6 +21,59 @@ import (
 type connectTestProvider struct {
 	isTeam   bool
 	manifest *manifest.Manifest
+}
+
+type workflowGitHubClient struct {
+	files map[string][]byte
+}
+
+func (c workflowGitHubClient) FetchFile(_ context.Context, owner, repo, path, _ string) ([]byte, error) {
+	key := owner + "/" + repo + "/" + path
+	if body, ok := c.files[key]; ok {
+		return body, nil
+	}
+	return nil, errors.New("not found")
+}
+
+func (workflowGitHubClient) FetchDirectory(context.Context, string, string, string, string) ([]tools.SkillFile, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (workflowGitHubClient) LatestCommitSHA(context.Context, string, string, string) (string, error) {
+	return "abc123", nil
+}
+
+func (workflowGitHubClient) GetTree(context.Context, string, string, string) ([]provider.TreeEntry, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (workflowGitHubClient) HasPushAccess(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func TestStepFetchManifestWiresGitHubProviderWarnings(t *testing.T) {
+	var out, errOut bytes.Buffer
+	p := provider.NewGitHubProvider(workflowGitHubClient{files: map[string][]byte{
+		"acme/skills/scribe.toml": []byte(`
+[team]
+name = "legacy"
+
+[skills.deploy]
+source = "github:acme/skills@main"
+`),
+	}})
+	bag := &workflow.Bag{
+		RepoArg:   "acme/skills",
+		Provider:  p,
+		Formatter: workflow.NewFormatterWithWriters(false, false, &out, &errOut),
+	}
+
+	if err := workflow.StepFetchManifest(context.Background(), bag); err != nil {
+		t.Fatalf("StepFetchManifest: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "legacy scribe.toml") {
+		t.Fatalf("provider warning not routed through formatter: %q", errOut.String())
+	}
 }
 
 func (p connectTestProvider) Discover(context.Context, string) (*provider.DiscoverResult, error) {

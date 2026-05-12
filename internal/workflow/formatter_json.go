@@ -20,8 +20,15 @@ type jsonFormatter struct {
 	adoption   adoptionResult
 	resolution *nameConflictResolutionResult
 	reconcile  *reconcileResult
+	kits       []string
+	kitWarns   []kitWarning
 	meta       func() envelope.Meta
 	renderer   output.Renderer
+}
+
+type kitWarning struct {
+	Name  string `json:"name"`
+	Error string `json:"error"`
 }
 
 type reconcileResult struct {
@@ -305,6 +312,24 @@ func (f *jsonFormatter) OnConnectAvailable(_ string, _ int) {
 	// JSON mode: available skill count is not emitted.
 }
 
+func (f *jsonFormatter) OnKitsInstalled(_ string, kitNames []string) {
+	f.kits = append(f.kits, kitNames...)
+}
+
+func (f *jsonFormatter) OnKitInstallWarning(kitName string, err error) {
+	f.kitWarns = append(f.kitWarns, kitWarning{Name: kitName, Error: err.Error()})
+}
+
+func (f *jsonFormatter) OnKitConflict(kitName, existingSource string) {
+	if existingSource == "" {
+		existingSource = "hand-authored"
+	}
+	f.kitWarns = append(f.kitWarns, kitWarning{
+		Name:  kitName,
+		Error: fmt.Sprintf("kit already exists (source=%s); pass --force-kits to overwrite, or `scribe kit rename` to keep both", existingSource),
+	})
+}
+
 func (f *jsonFormatter) OnLegacyFormat(_ string) {}
 
 func (f *jsonFormatter) Flush() error {
@@ -328,6 +353,12 @@ func (f *jsonFormatter) Flush() error {
 	}
 	if len(f.denied) > 0 {
 		out["skipped_by_deny_list"] = f.denied
+	}
+	if len(f.kits) > 0 {
+		out["kits_installed"] = f.kits
+	}
+	if len(f.kitWarns) > 0 {
+		out["kit_warnings"] = f.kitWarns
 	}
 	status := envelope.StatusOK
 	if f.summary.Failed > 0 || f.adoption.Failed > 0 {

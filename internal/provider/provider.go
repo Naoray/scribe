@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/source"
@@ -14,9 +16,46 @@ type File = tools.SkillFile
 
 // DiscoverResult holds the output of a Discover call.
 type DiscoverResult struct {
-	Entries  []manifest.Entry
-	IsTeam   bool // true if discovery found a scribe.yaml/toml with a team section
-	Manifest *manifest.Manifest
+	Entries   []manifest.Entry
+	Kits      []KitFile
+	KitErrors KitFetchErrors
+	IsTeam    bool // true if discovery found a scribe.yaml/toml with a team section
+	Manifest  *manifest.Manifest
+}
+
+// KitFile is a registry-published kit body fetched during discovery.
+type KitFile struct {
+	Name string
+	Path string
+	Body []byte
+	Ref  string
+}
+
+// KitFetchError records one non-fatal kit fetch/pre-parse failure.
+type KitFetchError struct {
+	Name string
+	Path string
+	Err  error
+}
+
+func (e KitFetchError) Error() string {
+	if e.Name == "" {
+		return fmt.Sprintf("%s: %v", e.Path, e.Err)
+	}
+	return fmt.Sprintf("%s (%s): %v", e.Name, e.Path, e.Err)
+}
+
+func (e KitFetchError) Unwrap() error { return e.Err }
+
+// KitFetchErrors is a typed partial-error list returned alongside fetched kits.
+type KitFetchErrors []KitFetchError
+
+func (e KitFetchErrors) Error() string {
+	parts := make([]string, 0, len(e))
+	for _, err := range e {
+		parts = append(parts, err.Error())
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Provider abstracts how skills are discovered and fetched from a repository.

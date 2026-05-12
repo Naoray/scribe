@@ -93,6 +93,26 @@ func TestTextFormatter_BudgetWarning(t *testing.T) {
 	}
 }
 
+func TestTextFormatter_KitsInstalledAndWarnings(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var out, errOut bytes.Buffer
+	fmtr := workflow.NewFormatterWithWriters(false, false, &out, &errOut)
+
+	fmtr.OnKitsInstalled("acme/skills", []string{"daily-workflow", "release-pipeline"})
+	fmtr.OnKitInstallWarning("broken", fmt.Errorf("fetch failed"))
+	fmtr.OnKitConflict("daily-workflow", "Other/skills")
+
+	if !strings.Contains(out.String(), "2 kits installed") {
+		t.Fatalf("expected installed summary, got %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "kit broken skipped: fetch failed") {
+		t.Fatalf("expected kit warning, got %q", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "pass --force-kits to overwrite") {
+		t.Fatalf("expected remediation hint, got %q", errOut.String())
+	}
+}
+
 func TestTextFormatter_AdoptionWithDeferredConflicts(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	var out, errOut bytes.Buffer
@@ -179,5 +199,47 @@ func TestJSONFormatter(t *testing.T) {
 	}
 	if denied[0].(map[string]any)["name"] != "removed" {
 		t.Fatalf("unexpected deny-list skip payload: %v", denied[0])
+	}
+}
+
+func TestJSONFormatterKitsInstalledEnvelope(t *testing.T) {
+	var out bytes.Buffer
+	fmtr := workflow.NewFormatterWithWriters(true, false, &out, &bytes.Buffer{})
+
+	fmtr.OnKitsInstalled("acme/skills", []string{"daily-workflow"})
+	fmtr.OnKitInstallWarning("broken", fmt.Errorf("fetch failed"))
+
+	if err := fmtr.Flush(); err != nil {
+		t.Fatalf("Flush() error: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\nraw: %s", err, out.String())
+	}
+	data := result["data"].(map[string]any)
+	kits := data["kits_installed"].([]any)
+	if len(kits) != 1 || kits[0] != "daily-workflow" {
+		t.Fatalf("kits_installed = %v", kits)
+	}
+	warnings := data["kit_warnings"].([]any)
+	if len(warnings) != 1 || warnings[0].(map[string]any)["name"] != "broken" {
+		t.Fatalf("kit_warnings = %v", warnings)
+	}
+}
+
+func TestJSONFormatterOmitsKitsInstalledWhenEmpty(t *testing.T) {
+	var out bytes.Buffer
+	fmtr := workflow.NewFormatterWithWriters(true, false, &out, &bytes.Buffer{})
+
+	if err := fmtr.Flush(); err != nil {
+		t.Fatalf("Flush() error: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\nraw: %s", err, out.String())
+	}
+	data := result["data"].(map[string]any)
+	if _, ok := data["kits_installed"]; ok {
+		t.Fatalf("kits_installed should be omitted when empty: %v", data)
 	}
 }

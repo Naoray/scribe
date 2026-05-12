@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -27,6 +28,12 @@ type Manifest struct {
 	Kits       []KitEntry `yaml:"kits,omitempty"`
 	Targets    *Targets   `yaml:"targets,omitempty"`
 }
+
+// KitNamePattern is the local-safe name shape for registry-published kit refs
+// and kit body names. Keep in sync with internal/kit.
+const KitNamePattern = `^[a-zA-Z0-9._-]+$`
+
+var kitNameRE = regexp.MustCompile(KitNamePattern)
 
 type Team struct {
 	Name        string `yaml:"name"`
@@ -173,7 +180,10 @@ func (m *Manifest) Validate() error {
 	seenKits := make(map[string]bool, len(m.Kits))
 	for _, k := range m.Kits {
 		if k.Name == "" {
-			return errors.New("kit entry has empty name")
+			return errors.New("kit name is required")
+		}
+		if !kitNameRE.MatchString(k.Name) {
+			return fmt.Errorf("invalid kit name %q: must match %s", k.Name, KitNamePattern)
 		}
 		if seenKits[k.Name] {
 			return fmt.Errorf("duplicate kit entry name %q", k.Name)

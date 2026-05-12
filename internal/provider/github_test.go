@@ -3,6 +3,7 @@ package provider_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Naoray/scribe/internal/manifest"
@@ -82,6 +83,172 @@ catalog:
 	}
 	if result.Entries[0].Author != "alice" {
 		t.Errorf("author: got %q", result.Entries[0].Author)
+	}
+}
+
+func TestDiscoverScribeYAMLFetchesKits(t *testing.T) {
+	yamlContent := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test-team
+catalog:
+  - name: deploy
+    source: "github:acme/skills@main"
+kits:
+  - name: daily-workflow
+    path: kits/daily-workflow.yaml
+  - name: release-pipeline
+    path: kits/release-pipeline.yaml
+`
+	client := &stubClient{
+		files: map[string][]byte{
+			"acme/team-skills/scribe.yaml": []byte(yamlContent),
+			"acme/team-skills/kits/daily-workflow.yaml": []byte(`apiVersion: scribe/v1
+kind: Kit
+name: daily-workflow
+skills: [deploy]
+`),
+			"acme/team-skills/kits/release-pipeline.yaml": []byte(`apiVersion: scribe/v1
+kind: Kit
+name: release-pipeline
+skills: [deploy]
+`),
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	result, err := p.Discover(context.Background(), "acme/team-skills")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if len(result.KitErrors) != 0 {
+		t.Fatalf("KitErrors = %v, want none", result.KitErrors)
+	}
+	if len(result.Kits) != 2 {
+		t.Fatalf("kits: got %d, want 2", len(result.Kits))
+	}
+	if result.Kits[0].Name != "daily-workflow" || result.Kits[0].Path != "kits/daily-workflow.yaml" {
+		t.Errorf("kit[0] = %+v", result.Kits[0])
+	}
+	if result.Kits[1].Name != "release-pipeline" || result.Kits[1].Ref != "HEAD" {
+		t.Errorf("kit[1] = %+v", result.Kits[1])
+	}
+}
+
+func TestDiscoverScribeYAMLKitBodySizeCap(t *testing.T) {
+	yamlContent := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test-team
+catalog: []
+kits:
+  - name: huge
+    path: kits/huge.yaml
+`
+	client := &stubClient{
+		files: map[string][]byte{
+			"acme/team-skills/scribe.yaml":    []byte(yamlContent),
+			"acme/team-skills/kits/huge.yaml": []byte(strings.Repeat("x", 64*1024+1)),
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	result, err := p.Discover(context.Background(), "acme/team-skills")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(result.Kits) != 0 {
+		t.Fatalf("kits: got %d, want 0", len(result.Kits))
+	}
+	if len(result.KitErrors) != 1 {
+		t.Fatalf("KitErrors: got %d, want 1", len(result.KitErrors))
+	}
+	if !strings.Contains(result.KitErrors[0].Error(), "exceeds") {
+		t.Errorf("KitErrors[0] = %v", result.KitErrors[0])
+	}
+}
+
+func TestDiscoverScribeYAMLKitCountCap(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test-team
+catalog: []
+kits:
+`)
+	for i := 0; i < 51; i++ {
+		b.WriteString("  - name: kit-")
+		b.WriteString(string(rune('a' + i%26)))
+		b.WriteString("-")
+		b.WriteString(string(rune('a' + i/26)))
+		b.WriteString("\n    path: kits/kit.yaml\n")
+	}
+	client := &stubClient{
+		files: map[string][]byte{
+			"acme/team-skills/scribe.yaml": []byte(b.String()),
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	_, err := p.Discover(context.Background(), "acme/team-skills")
+	if err == nil {
+		t.Fatal("expected count cap error")
+	}
+	if !strings.Contains(err.Error(), "maximum is 50") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestDiscoverScribeYAMLKitPartialErrors(t *testing.T) {
+	yamlContent := `
+apiVersion: scribe/v1
+kind: Registry
+team:
+  name: test-team
+catalog: []
+kits:
+  - name: good
+    path: kits/good.yaml
+  - name: missing
+    path: kits/missing.yaml
+  - name: invalid
+    path: kits/invalid.yaml
+`
+	client := &stubClient{
+		files: map[string][]byte{
+			"acme/team-skills/scribe.yaml": []byte(yamlContent),
+			"acme/team-skills/kits/good.yaml": []byte(`apiVersion: scribe/v1
+kind: Kit
+name: good
+skills: []
+`),
+			"acme/team-skills/kits/invalid.yaml": []byte(`apiVersion: scribe/v1
+kind: Kit
+name: ../bad
+skills: []
+`),
+		},
+	}
+
+	p := provider.NewGitHubProvider(client)
+	result, err := p.Discover(context.Background(), "acme/team-skills")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(result.Kits) != 1 || result.Kits[0].Name != "good" {
+		t.Fatalf("kits = %+v, want good only", result.Kits)
+	}
+	if len(result.KitErrors) != 2 {
+		t.Fatalf("KitErrors: got %d, want 2: %v", len(result.KitErrors), result.KitErrors)
+	}
+	var typed provider.KitFetchErrors = result.KitErrors
+	if typed.Error() == "" {
+		t.Fatal("typed error list should render non-empty error")
 	}
 }
 
