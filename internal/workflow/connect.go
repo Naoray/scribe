@@ -98,6 +98,9 @@ func StepFetchManifest(ctx context.Context, b *Bag) error {
 	if b.Provider == nil {
 		return fmt.Errorf("internal: Provider not set in workflow bag")
 	}
+	if p, ok := b.Provider.(*provider.GitHubProvider); ok && b.Formatter != nil {
+		p.OnWarning = b.Formatter.OnLegacyFormat
+	}
 
 	var result *provider.DiscoverResult
 	var err error

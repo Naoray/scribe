@@ -84,7 +84,7 @@ func (p *GitHubProvider) DiscoverSource(ctx context.Context, spec source.SourceS
 	// Step 2: Try scribe.toml (legacy).
 	m, err := p.discoverScribeTOML(ctx, owner, repoName, spec.Path, ref)
 	if err == nil {
-		p.warn(fmt.Sprintf("%s uses legacy scribe.toml format — consider migrating to scribe.yaml", spec.Repo))
+		p.warn(spec.Repo)
 		return &DiscoverResult{Entries: m.Catalog, IsTeam: true, Manifest: m}, nil
 	}
 
