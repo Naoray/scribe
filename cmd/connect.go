@@ -31,6 +31,7 @@ Examples:
 		RunE: runConnect,
 	}
 	cmd.Flags().Bool("install-all", false, "Install every discovered skill from the connected registry")
+	cmd.Flags().Bool("force-kits", false, "Overwrite existing kit files from this registry")
 	addSourceFlags(cmd, false)
 	return markJSONSupported(cmd)
 }
@@ -45,6 +46,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	installAll, _ := cmd.Flags().GetBool("install-all")
+	forceKits, _ := cmd.Flags().GetBool("force-kits")
 	jsonFlag := jsonFlagPassed(cmd)
 	spec, ident, display, err := sourceSpecFromFlags(sourceFlags)
 	if err != nil {
@@ -58,6 +60,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		RepoArg:        repo,
 		JSONFlag:       jsonFlag,
 		InstallAllFlag: installAll,
+		ForceKits:      forceKits,
 		Factory:        commandFactory(),
 	}
 	if sourceFlags.hasTyped() {

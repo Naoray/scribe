@@ -104,4 +104,11 @@ func TestNewConnectCommand_InstallAllFlag(t *testing.T) {
 	if flag.DefValue != "false" {
 		t.Errorf("install-all default = %q, want false", flag.DefValue)
 	}
+	forceKits := cmd.Flags().Lookup("force-kits")
+	if forceKits == nil {
+		t.Fatal("expected force-kits flag to be registered")
+	}
+	if forceKits.DefValue != "false" {
+		t.Errorf("force-kits default = %q, want false", forceKits.DefValue)
+	}
 }
