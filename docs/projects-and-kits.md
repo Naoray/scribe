@@ -18,7 +18,7 @@ Effect: a session's skill set is determined by `cwd`. Two repos see two differen
 
 ## `.scribe.yaml`
 
-A `.scribe.yaml` at a project root declares the project's intent. All keys are optional. Run `scribe project init` to scaffold the file, optionally with `--kits web,backend` for non-interactive setup.
+A `.scribe.yaml` at a project root declares the project's intent. All keys are optional. Run `scribe project init` to scaffold the file, optionally with `--kits web,backend` for non-interactive setup. The picker lists local kits *and* kits available from connected registries (shown as `owner/repo:name (remote)`); selecting a remote kit installs it first, then writes the local name into `.scribe.yaml`. The flag form accepts the same `owner/repo:name` syntax — useful for non-interactive setup that needs a registry kit you have not installed yet.
 
 ```yaml
 # .scribe.yaml — committed to the repo so the team shares the same skill set
@@ -103,7 +103,7 @@ mcp_servers:
 
 Projects list which kits they want via `kits:` in `.scribe.yaml`. Multiple kits union; the project may add or remove individual skills on top with `add:` / `remove:`. MCP servers can also be declared through kits or directly in `.scribe.yaml` with `mcp:` / `mcp_servers:`; `scribe sync` uses those names to select definitions from project `.mcp.json`. Claude gets enabled server names in `.claude/settings.json`, Codex gets selected definitions in `.codex/config.toml`, and Cursor gets selected definitions in `.cursor/mcp.json`. Existing unmanaged Codex/Cursor entries are preserved; Scribe only replaces entries it previously projected. Scribe does not start MCP server processes.
 
-Use `scribe kit list --remote` to list kits from connected registries, `scribe kit list --registry <owner/repo>` to restrict discovery, and `scribe kit show <owner/repo>:<kit> --json` to inspect a remote kit body. Remote show classifies each skill ref as same-registry, cross-registry, or local and reports whether referenced registries are connected.
+`scribe kit list` shows local kits *and* kits from every connected registry by default, marking remote-only entries so you can spot them in the merged view. Pass `--local` to skip the network call (offline / fast iteration), `--remote` to hide local kits, and `--registry <owner/repo>` to filter both views to a single registry. Registries that lack a `scribe.yaml` kit manifest are skipped with a stderr warning instead of aborting the listing. Use `scribe kit show <owner/repo>:<kit> --json` to inspect a remote kit body without installing it; remote show classifies each skill ref as same-registry, cross-registry, or local and reports whether referenced registries are connected.
 
 ### Kits from registries
 

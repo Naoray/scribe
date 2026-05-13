@@ -2,15 +2,26 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/Naoray/scribe/internal/app"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	clischema "github.com/Naoray/scribe/internal/cli/schema"
+	"github.com/Naoray/scribe/internal/config"
+	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/kit"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/registry"
+	"github.com/Naoray/scribe/internal/state"
 )
 
 func TestProjectInitCreatesProjectFile(t *testing.T) {
@@ -209,6 +220,258 @@ func TestProjectInitKitsFlagUsesProvidedValues(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "warning: unknown kit unknown") {
 		t.Fatalf("stderr = %q, want unknown kit warning", stderr.String())
+	}
+}
+
+func TestProjectInitInstallsRemoteKitFromKitsFlag(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withProjectInitWorkingDir(t, dir)
+
+	st := stateFixture(t, home)
+	oldFactory := commandFactory
+	oldList := listRemoteKitsFn
+	oldFind := findRemoteKitFn
+	oldFetch := fetchRemoteKitFn
+	oldRev := remoteKitRevFn
+	oldDeps := runKitInstallDepsFn
+	t.Cleanup(func() {
+		commandFactory = oldFactory
+		listRemoteKitsFn = oldList
+		findRemoteKitFn = oldFind
+		fetchRemoteKitFn = oldFetch
+		remoteKitRevFn = oldRev
+		runKitInstallDepsFn = oldDeps
+	})
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) {
+				return &config.Config{Registries: []config.RegistryConfig{{Repo: "acme/skills", Enabled: true}}}, nil
+			},
+			State: func() (*state.State, error) { return st, nil },
+			Client: func() (*gh.Client, error) {
+				return gh.NewClient(context.Background(), ""), nil
+			},
+		}
+	}
+	listRemoteKitsFn = func(_ context.Context, _ registry.FileFetcher, repo string) ([]registry.ManifestKit, error) {
+		return []registry.ManifestKit{{Registry: repo, Name: "daily-workflow", Path: "kits/daily-workflow.yaml"}}, nil
+	}
+	findRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, _, name string) (manifest.KitEntry, error) {
+		return manifest.KitEntry{Name: name, Path: "kits/" + name + ".yaml"}, nil
+	}
+	fetchRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, registryRepo string, entry manifest.KitEntry) (*kit.Kit, error) {
+		return &kit.Kit{Name: entry.Name, Skills: []string{"plan-my-day"}, Source: &kit.Source{Registry: registryRepo}}, nil
+	}
+	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "abc123", nil }
+	depsCalled := false
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, _ map[string][]kitInstallDep, _ bool, _ bool) error {
+		depsCalled = true
+		return nil
+	}
+
+	cmd := newProjectInitCommand()
+	cmd.SetArgs([]string{"--kits", "acme/skills:daily-workflow"})
+	var stderr bytes.Buffer
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute project init --kits acme/skills:daily-workflow: %v", err)
+	}
+
+	if !depsCalled {
+		t.Fatal("expected remote kit install to call dep workflow")
+	}
+	pf, err := projectfile.Load(filepath.Join(dir, projectfile.Filename))
+	if err != nil {
+		t.Fatalf("load project file: %v", err)
+	}
+	if got := strings.Join(pf.Kits, ","); got != "daily-workflow" {
+		t.Fatalf("kits = %q, want daily-workflow", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".scribe", "kits", "daily-workflow.yaml")); err != nil {
+		t.Fatalf("installed kit missing: %v", err)
+	}
+}
+
+func TestProjectInitWarnsOnUnknownRemoteKit(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withProjectInitWorkingDir(t, dir)
+
+	oldFactory := commandFactory
+	t.Cleanup(func() { commandFactory = oldFactory })
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) { return &config.Config{}, nil },
+		}
+	}
+
+	cmd := newProjectInitCommand()
+	cmd.SetArgs([]string{"--kits", "ghost/skills:nope"})
+	var stderr bytes.Buffer
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute project init: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "warning: unknown remote kit ghost/skills:nope") {
+		t.Fatalf("stderr = %q, want unknown remote kit warning", stderr.String())
+	}
+	pf, err := projectfile.Load(filepath.Join(dir, projectfile.Filename))
+	if err != nil {
+		t.Fatalf("load project file: %v", err)
+	}
+	if len(pf.Kits) != 0 {
+		t.Fatalf("kits = %#v, want empty (unknown remote dropped)", pf.Kits)
+	}
+}
+
+func TestProjectInitRejectsLocalKitFromDifferentRegistry(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// Local kit sourced from other/skills — should NOT satisfy a request for
+	// acme/skills:daily-workflow even though the local name matches.
+	if err := os.MkdirAll(filepath.Join(home, ".scribe", "kits"), 0o755); err != nil {
+		t.Fatalf("mkdir kit: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".scribe", "kits", "daily-workflow.yaml"), []byte("name: daily-workflow\nsource:\n  registry: other/skills\nskills: []\n"), 0o644); err != nil {
+		t.Fatalf("write kit: %v", err)
+	}
+	withProjectInitWorkingDir(t, dir)
+
+	oldFactory := commandFactory
+	t.Cleanup(func() { commandFactory = oldFactory })
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) { return &config.Config{}, nil },
+		}
+	}
+
+	cmd := newProjectInitCommand()
+	cmd.SetArgs([]string{"--kits", "acme/skills:daily-workflow"})
+	var stderr bytes.Buffer
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute project init: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "warning: unknown remote kit acme/skills:daily-workflow") {
+		t.Fatalf("stderr = %q, want unknown remote kit warning (registry mismatch must not silently resolve)", stderr.String())
+	}
+	pf, err := projectfile.Load(filepath.Join(dir, projectfile.Filename))
+	if err != nil {
+		t.Fatalf("load project file: %v", err)
+	}
+	if len(pf.Kits) != 0 {
+		t.Fatalf("kits = %#v, want empty (registry-mismatch local kit must not resolve)", pf.Kits)
+	}
+}
+
+func TestProjectInitResolvesLocalKitFromMatchingRegistry(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".scribe", "kits"), 0o755); err != nil {
+		t.Fatalf("mkdir kit: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".scribe", "kits", "daily-workflow.yaml"), []byte("name: daily-workflow\nsource:\n  registry: acme/skills\nskills: []\n"), 0o644); err != nil {
+		t.Fatalf("write kit: %v", err)
+	}
+	withProjectInitWorkingDir(t, dir)
+
+	oldFactory := commandFactory
+	t.Cleanup(func() { commandFactory = oldFactory })
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) { return &config.Config{}, nil },
+		}
+	}
+
+	cmd := newProjectInitCommand()
+	cmd.SetArgs([]string{"--kits", "acme/skills:daily-workflow"})
+	var stderr bytes.Buffer
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute project init: %v", err)
+	}
+	if strings.Contains(stderr.String(), "warning: unknown remote kit") {
+		t.Fatalf("stderr = %q, want no warning (matching-registry local kit should resolve cleanly)", stderr.String())
+	}
+	pf, err := projectfile.Load(filepath.Join(dir, projectfile.Filename))
+	if err != nil {
+		t.Fatalf("load project file: %v", err)
+	}
+	if got := strings.Join(pf.Kits, ","); got != "daily-workflow" {
+		t.Fatalf("kits = %q, want daily-workflow", got)
+	}
+}
+
+func TestProjectInitWritesScribeYamlBeforeRemoteInstall(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withProjectInitWorkingDir(t, dir)
+
+	st := stateFixture(t, home)
+	oldFactory := commandFactory
+	oldList := listRemoteKitsFn
+	oldFind := findRemoteKitFn
+	oldFetch := fetchRemoteKitFn
+	oldRev := remoteKitRevFn
+	oldDeps := runKitInstallDepsFn
+	t.Cleanup(func() {
+		commandFactory = oldFactory
+		listRemoteKitsFn = oldList
+		findRemoteKitFn = oldFind
+		fetchRemoteKitFn = oldFetch
+		remoteKitRevFn = oldRev
+		runKitInstallDepsFn = oldDeps
+	})
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) {
+				return &config.Config{Registries: []config.RegistryConfig{{Repo: "acme/skills", Enabled: true}}}, nil
+			},
+			State:  func() (*state.State, error) { return st, nil },
+			Client: func() (*gh.Client, error) { return gh.NewClient(context.Background(), ""), nil },
+		}
+	}
+	listRemoteKitsFn = func(_ context.Context, _ registry.FileFetcher, repo string) ([]registry.ManifestKit, error) {
+		return []registry.ManifestKit{{Registry: repo, Name: "remote-kit", Path: "kits/remote-kit.yaml"}}, nil
+	}
+	findRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, _, name string) (manifest.KitEntry, error) {
+		return manifest.KitEntry{Name: name, Path: "kits/" + name + ".yaml"}, nil
+	}
+	fetchRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, registryRepo string, entry manifest.KitEntry) (*kit.Kit, error) {
+		return &kit.Kit{Name: entry.Name, Skills: []string{"x"}, Source: &kit.Source{Registry: registryRepo}}, nil
+	}
+	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "abc", nil }
+	// Simulate install failure mid-flow.
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, _ map[string][]kitInstallDep, _ bool, _ bool) error {
+		return fmt.Errorf("simulated install failure")
+	}
+
+	cmd := newProjectInitCommand()
+	cmd.SetArgs([]string{"--kits", "acme/skills:remote-kit"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute project init: expected error from install failure, got nil")
+	}
+	// Critical: .scribe.yaml must already exist with the selected kit, so the
+	// user can recover by rerunning `scribe kit install` or `project init --force`.
+	pf, perr := projectfile.Load(filepath.Join(dir, projectfile.Filename))
+	if perr != nil {
+		t.Fatalf("load project file after install failure: %v — .scribe.yaml must be written before remote install runs", perr)
+	}
+	if got := strings.Join(pf.Kits, ","); got != "remote-kit" {
+		t.Fatalf("kits = %q, want remote-kit (project file must persist the selection through install failures)", got)
 	}
 }
 

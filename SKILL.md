@@ -111,8 +111,10 @@ Use it for installs, updates, removal, adoption of unmanaged local skills, and s
 | sync my skills | `scribe sync --json` |
 | show resolved project loadout | `scribe show --json` |
 | initialize project loadout | `scribe project init --json` |
-| initialize project with kits | `scribe project init --kits <kit1,kit2> --json` |
-| list local kits | `scribe kit list --json` |
+| initialize project with kits (local or remote) | `scribe project init --kits <kit1>,<owner/repo:kit2> --json` |
+| list kits (local + remote, default) | `scribe kit list --json` |
+| list only locally installed kits | `scribe kit list --local --json` |
+| list only remote kits from one registry | `scribe kit list --remote --registry <owner/repo> --json` |
 | show a local kit | `scribe kit show <name> --json` |
 | remove X | `scribe remove X --no-interaction --json` |
 | import existing local skills | `scribe adopt --dry-run --json` |
