@@ -12,8 +12,8 @@ The commands you'll reach for every session — install, list, sync, and keep sk
 |---|---|
 | `scribe` | Open the local skill manager (interactive TUI when stdout is a TTY) |
 | `scribe list` | Show all skills on this machine (managed + unmanaged) |
-| `scribe browse` | Discover and install skills from connected registries |
-| `scribe add [query]` | Find and install skills from registries (legacy; prefer `browse`) |
+| `scribe browse` | Discover and install skills from connected registries. Accepts typed sources via `--source github\|git\|local`, `--repo`, `--url`, `--ref`, `--path`, `--id`. Pass `--resync` to overwrite local edits with the upstream version for modified skills. |
+| `scribe add [query]` | Find and install skills from registries (legacy; prefer `browse`). Accepts typed sources via `--source github\|git\|local`, `--repo`, `--url`, `--ref`, `--path`, `--id`. Pass `--resync` to overwrite local edits with the upstream version for modified skills. |
 | `scribe install --all` | Install every catalog entry from a registry in one shot |
 | `scribe adopt [name]` | Import hand-rolled skills from `~/.claude/skills` etc. into the canonical store |
 | `scribe remove <skill>` | Remove a skill from this machine (records a deny-list entry so it does not come back on the next sync) |
@@ -31,6 +31,7 @@ The commands you'll reach for every session — install, list, sync, and keep sk
 | `scribe status` | Show connected registries, installed count, and last sync |
 | `scribe tools` | List detected AI tools on this machine; enable, disable, or register custom ones |
 | `scribe explain <skill-or-snippet>` | AI-powered explanation for an installed skill or snippet (or `--raw` for the rendered body) |
+| `scribe mcp list` | Inspect declared MCP servers in `.scribe.yaml` and how they project into Claude, Codex, and Cursor (`--json` supported) |
 | `scribe upgrade-agent` | Refresh the embedded scribe bootstrap skill |
 
 ## Registry management
@@ -39,14 +40,14 @@ Connect, create, share, and audit the skill registries this machine pulls from. 
 
 | Command | What it does |
 |---|---|
-| `scribe registry connect <repo>` | Connect to a skill registry (alias: `scribe connect`) |
+| `scribe registry connect <repo>` | Connect to a skill registry (alias: `scribe connect`). Accepts typed sources via `--source github\|git\|local`, `--repo`, `--url`, `--ref`, `--path`, `--id` alongside the positional `owner/repo`. Pass `--force-kits` to overwrite existing kit files with the same name when the registry publishes kits. |
 | `scribe registry create` | Scaffold a new registry repo on GitHub interactively |
 | `scribe registry add [name]` | Share a local skill into a connected registry |
 | `scribe registry list` | Show connected registries with skill counts |
 | `scribe registry index` | Show the local cache of public registries under `~/.scribe/index/registries.json` |
 | `scribe registry enable <repo>` / `disable <repo>` | Toggle a connected registry without forgetting it |
 | `scribe registry forget <repo>` | Disconnect a registry (does not remove already-installed skills) |
-| `scribe registry resync <repo>` | Force-fetch a registry's catalog from upstream |
+| `scribe registry resync <repo>` | Force-fetch a registry's catalog from upstream. Pass `--refresh-kits` to also re-fetch registry-published kit definitions and write source stamps (becomes the default in the next minor release; a stderr deprecation banner fires otherwise). Combine with `--force-kits` to overwrite hand-authored or other-registry kit files. |
 | `scribe registry migrate` | Convert a `scribe.toml` registry to `scribe.yaml` |
 
 ## Skills and tools
@@ -65,6 +66,9 @@ Tune individual skills, project-author new ones, and decide which AI tools each 
 | `scribe kit create <name>` | Create a local kit — a named list of skills and MCP servers scoped to a project (saved to `~/.scribe/kits/<name>.yaml`). Use `--skills`, `--mcp-servers`, and `--registry` to populate it. Reference the kit by name in a project's `.scribe.yaml` under `kits:`. |
 | `scribe kit list` | List local kits from `~/.scribe/kits/*.yaml`. Supports `--fields` and `--json` for agent-readable output. Add `--remote` to include registry-published kits, or `--registry <owner/repo>` to restrict remote discovery to one connected registry. |
 | `scribe kit show <name>` | Show one local kit, including skills and source metadata. Use `scribe kit show <owner/repo>:<kit>` to inspect a registry-published kit without installing it. |
+| `scribe kit install <registry>:<kit>` | Install a registry-published kit into `~/.scribe/kits/`, stamping the source registry. |
+| `scribe kit sync` | Reconcile installed registry-published kits against their upstream registries. |
+| `scribe kit push <name>` | Push a local kit back to its source registry. |
 | `scribe project init` | Create a committed project `.scribe.yaml` for repo-local loadouts. Use `--kits a,b` for non-interactive setup or pick from local kits interactively. |
 
 ## Conflicts and recovery

@@ -133,7 +133,7 @@ Resolution precedence:
 
 - Project-local kits in `<project>/.scribe/kits/<name>.yaml` win over global kits in `~/.scribe/kits/<name>.yaml`.
 - Hand-authored global kits with no `source.registry` are protected by default. Scribe refuses to overwrite them unless you pass `--force-kits`.
-- If another registry already owns the same global kit name, Scribe skips that kit and tells you to pass `--force-kits` or run `scribe kit rename` to keep both.
+- If another registry already owns the same global kit name, Scribe skips that kit. Pass `--force-kits` to overwrite the existing kit, or rename one side by hand in `~/.scribe/kits/<name>.yaml` to keep both.
 
 Legacy `scribe.toml` registry manifests do not support `kits:`. Any such block is ignored by the legacy path; migrate the registry to `scribe.yaml` to publish kits.
 

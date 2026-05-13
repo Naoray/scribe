@@ -79,7 +79,7 @@ Migrated commands emit this on stdout:
     "duration_ms": 12,
     "bootstrap_ms": 3,
     "command": "scribe list",
-    "scribe_version": "1.1.0"
+    "scribe_version": "1.4.0"
   }
 }
 ```
@@ -203,7 +203,7 @@ scribe browse --query ...    # search registries before installing
 
 ## Status
 
-- v1.1.0 — active development.
+- v1.4.0 — active development.
 - Requires macOS or Linux. Windows install via the PowerShell snippet in [SKILL.md](SKILL.md).
 - `gh` CLI recommended for auth (not required for public repos).
 - Issues: [github.com/Naoray/scribe/issues](https://github.com/Naoray/scribe/issues) — each one has enough context to pick up.

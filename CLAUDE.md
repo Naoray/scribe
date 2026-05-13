@@ -55,9 +55,9 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 
 | Command | Flags | Output schema |
 |---|---|---|
-| `scribe add` | --alias, --force, --json, --no-interaction, --registry | yes |
+| `scribe add` | --alias, --force, --id, --json, --no-interaction, --path, --ref, --registry, --repo, --resync, --source, --url | yes |
 | `scribe adopt` | --dry-run, --json, --no-interaction, --verbose | yes |
-| `scribe browse` | --install, --json, --no-interaction, --query, --registry | no |
+| `scribe browse` | --id, --install, --json, --no-interaction, --path, --query, --ref, --registry, --repo, --resync, --source, --url | no |
 | `scribe check` | --json | yes |
 | `scribe config adoption` | --add-path, --json, --mode, --remove-path | no |
 | `scribe config set editor` | --json | no |
@@ -71,10 +71,15 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe init` | --force, --json | yes |
 | `scribe install` | --alias, --all, --force, --json, --registry | no |
 | `scribe kit create` | --description, --force, --json, --mcp-servers, --registry, --skills | no |
-| `scribe kit list` | --fields, --json | no |
+| `scribe kit install` | --alias, --force, --json, --no-deps, --no-interaction | no |
+| `scribe kit list` | --fields, --json, --registry, --remote | no |
+| `scribe kit push` | --json, --registry | no |
 | `scribe kit show` | --json | no |
+| `scribe kit sync` | --force, --json, --no-deps, --no-interaction | no |
 | `scribe kit` | --json | no |
 | `scribe list` | --fields, --json, --registry, --remote | yes |
+| `scribe mcp list` | --json | yes |
+| `scribe mcp` | --json | no |
 | `scribe migrate global-to-projects` | --dry-run, --force, --json, --no-interaction, --project, --undo | yes |
 | `scribe migrate` | --json | no |
 | `scribe project init` | --force, --json, --kits | yes |
@@ -85,11 +90,12 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe project` | --json | no |
 | `scribe push` | --json | yes |
 | `scribe registry add` | --install, --json, --no-interaction, --registry | no |
-| `scribe registry connect` | --force-kits, --install-all, --json | yes |
+| `scribe registry connect` | --force-kits, --id, --install-all, --json, --path, --ref, --repo, --source, --url | yes |
 | `scribe registry create` | --json, --owner, --private, --repo, --team | no |
 | `scribe registry disable` | --json | no |
 | `scribe registry enable` | --json | no |
 | `scribe registry forget` | --json | no |
+| `scribe registry index` | --json | no |
 | `scribe registry list` | --json | no |
 | `scribe registry migrate` | --json | no |
 | `scribe registry resync` | --force-kits, --json, --refresh-kits | yes |
