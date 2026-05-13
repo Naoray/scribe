@@ -72,7 +72,7 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe install` | --alias, --all, --force, --json, --registry | no |
 | `scribe kit create` | --description, --force, --json, --mcp-servers, --registry, --skills | no |
 | `scribe kit install` | --alias, --force, --json, --no-deps, --no-interaction | no |
-| `scribe kit list` | --fields, --json, --registry, --remote | no |
+| `scribe kit list` | --fields, --json, --local, --registry, --remote | no |
 | `scribe kit push` | --json, --registry | no |
 | `scribe kit show` | --json | no |
 | `scribe kit sync` | --force, --json, --no-deps, --no-interaction | no |

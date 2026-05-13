@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -41,6 +42,7 @@ type kitCreateOptions struct {
 
 type kitListOptions struct {
 	remote   bool
+	local    bool
 	registry string
 }
 
@@ -50,6 +52,7 @@ type kitInstallOptions struct {
 	noDeps        bool
 	noInteraction bool
 	json          bool
+	silent        bool
 }
 
 type kitPushOptions struct {
@@ -200,15 +203,22 @@ func newKitListCommand() *cobra.Command {
 	opts := &kitListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List local skill kits",
-		Args:  cobra.NoArgs,
+		Short: "List local and remote skill kits",
+		Long: `List skill kits.
+
+By default, shows both locally installed kits and kits available from connected
+registries. Use --local to skip the network call, --remote to hide local-only
+kits, or --registry to filter both views to a single registry.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKitListWithOptions(cmd, args, opts)
 		},
 	}
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
-	cmd.Flags().BoolVar(&opts.remote, "remote", false, "List kits from connected registries")
-	cmd.Flags().StringVar(&opts.registry, "registry", "", "Limit remote kits to one connected registry")
+	cmd.Flags().BoolVar(&opts.remote, "remote", false, "Show only kits available from connected registries")
+	cmd.Flags().BoolVar(&opts.local, "local", false, "Show only locally installed kits (skip network)")
+	cmd.Flags().StringVar(&opts.registry, "registry", "", "Filter kits to one connected registry (owner/repo)")
+	cmd.MarkFlagsMutuallyExclusive("local", "remote")
 	output.AttachFieldsFlag(cmd, kitListFieldSet)
 	return markJSONSupported(cmd)
 }
@@ -350,8 +360,14 @@ func runKitListWithOptions(cmd *cobra.Command, args []string, opts *kitListOptio
 		return err
 	}
 
-	items := kitListItems(loaded)
-	if opts.remote || opts.registry != "" {
+	var items []kitListItem
+	if !opts.remote {
+		items = kitListItems(loaded)
+		if opts.registry != "" {
+			items = filterLocalKitsByRegistry(items, opts.registry)
+		}
+	}
+	if !opts.local {
 		remote, err := remoteKitListItems(cmd, opts, loaded)
 		if err != nil {
 			return err
@@ -504,7 +520,7 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 	}
 	installedSkills := flattenKitDeps(depsByRegistry)
 	if !opts.noDeps {
-		if err := runKitInstallDepsFn(cmd, factory, depsByRegistry, opts.forceBudget); err != nil {
+		if err := runKitInstallDepsFn(cmd, factory, depsByRegistry, opts.forceBudget, opts.silent); err != nil {
 			return err
 		}
 	}
@@ -538,6 +554,9 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 		SkillsInstalled:   installedSkills,
 		MissingRefs:       missingRefs,
 		MissingRegistries: missingRegistries,
+	}
+	if opts.silent {
+		return nil
 	}
 	if opts.json {
 		r := jsonRendererForCommand(cmd, true)
@@ -619,7 +638,7 @@ func installableKitRefs(k *kit.Kit, registryRepo string, cfg *config.Config) (ma
 	return deps, missing, missingRegistries, nil
 }
 
-func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry map[string][]kitInstallDep, forceBudget bool) error {
+func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry map[string][]kitInstallDep, forceBudget bool, silent bool) error {
 	registries := make([]string, 0, len(depsByRegistry))
 	for registryRepo := range depsByRegistry {
 		registries = append(registries, registryRepo)
@@ -650,6 +669,9 @@ func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry 
 			FilterRegistries:   filterRegistries,
 			SkillAliases:       aliases,
 			PinnedSkillSources: pinnedSources,
+		}
+		if silent {
+			bag.Formatter = workflow.NewFormatterWithWriters(false, false, io.Discard, io.Discard)
 		}
 		if err := workflow.Run(cmd.Context(), workflow.InstallSteps(), bag); err != nil {
 			return handleNameConflictError(cmd, err)
@@ -758,7 +780,7 @@ func runKitSync(cmd *cobra.Command, opts *kitInstallOptions) error {
 		}
 		installedSkills := flattenKitDeps(depsByRegistry)
 		if !opts.noDeps {
-			if err := runKitInstallDepsFn(cmd, factory, depsByRegistry, opts.forceBudget); err != nil {
+			if err := runKitInstallDepsFn(cmd, factory, depsByRegistry, opts.forceBudget, opts.silent); err != nil {
 				return err
 			}
 		}
@@ -992,23 +1014,30 @@ func remoteKitListItems(cmd *cobra.Command, opts *kitListOptions, local map[stri
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
-	client, err := factory.Client()
-	if err != nil {
-		return nil, fmt.Errorf("load github client: %w", err)
-	}
 	repos, err := remoteKitRepos(opts.registry, cfg)
 	if err != nil {
 		return nil, err
+	}
+	if len(repos) == 0 {
+		return nil, nil
+	}
+	client, err := factory.Client()
+	if err != nil {
+		return nil, fmt.Errorf("load github client: %w", err)
 	}
 
 	var items []kitListItem
 	for _, repo := range repos {
 		kits, err := listRemoteKitsFn(cmd.Context(), client, repo)
 		if err != nil {
-			return nil, fmt.Errorf("list kits from %s: %w", repo, err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: skip remote kits from %s: %v\n", repo, err)
+			continue
 		}
 		for _, remote := range kits {
 			_, installed := local[remote.Name]
+			if installed && !opts.remote {
+				continue
+			}
 			items = append(items, kitListItem{
 				Name:             remote.Name,
 				Description:      remote.Description,
@@ -1101,17 +1130,34 @@ func kitListItems(kits map[string]*kit.Kit) []kitListItem {
 		if k == nil {
 			continue
 		}
-		items = append(items, kitListItem{
+		item := kitListItem{
 			Name:        k.Name,
 			Description: k.Description,
 			SkillsCount: len(k.Skills),
 			Skills:      append([]string(nil), k.Skills...),
-		})
+		}
+		if k.Source != nil {
+			item.Registry = k.Source.Registry
+		}
+		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Name < items[j].Name
 	})
 	return items
+}
+
+func filterLocalKitsByRegistry(items []kitListItem, registryRepo string) []kitListItem {
+	if registryRepo == "" {
+		return items
+	}
+	out := items[:0]
+	for _, item := range items {
+		if strings.EqualFold(item.Registry, registryRepo) {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func projectKitListItems(items []kitListItem, fieldsFlag string) (any, error) {

@@ -2,15 +2,25 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/Naoray/scribe/internal/app"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	clischema "github.com/Naoray/scribe/internal/cli/schema"
+	"github.com/Naoray/scribe/internal/config"
+	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/kit"
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/registry"
+	"github.com/Naoray/scribe/internal/state"
 )
 
 func TestProjectInitCreatesProjectFile(t *testing.T) {
@@ -209,6 +219,112 @@ func TestProjectInitKitsFlagUsesProvidedValues(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "warning: unknown kit unknown") {
 		t.Fatalf("stderr = %q, want unknown kit warning", stderr.String())
+	}
+}
+
+func TestProjectInitInstallsRemoteKitFromKitsFlag(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withProjectInitWorkingDir(t, dir)
+
+	st := stateFixture(t, home)
+	oldFactory := commandFactory
+	oldList := listRemoteKitsFn
+	oldFind := findRemoteKitFn
+	oldFetch := fetchRemoteKitFn
+	oldRev := remoteKitRevFn
+	oldDeps := runKitInstallDepsFn
+	t.Cleanup(func() {
+		commandFactory = oldFactory
+		listRemoteKitsFn = oldList
+		findRemoteKitFn = oldFind
+		fetchRemoteKitFn = oldFetch
+		remoteKitRevFn = oldRev
+		runKitInstallDepsFn = oldDeps
+	})
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) {
+				return &config.Config{Registries: []config.RegistryConfig{{Repo: "acme/skills", Enabled: true}}}, nil
+			},
+			State: func() (*state.State, error) { return st, nil },
+			Client: func() (*gh.Client, error) {
+				return gh.NewClient(context.Background(), ""), nil
+			},
+		}
+	}
+	listRemoteKitsFn = func(_ context.Context, _ registry.FileFetcher, repo string) ([]registry.ManifestKit, error) {
+		return []registry.ManifestKit{{Registry: repo, Name: "daily-workflow", Path: "kits/daily-workflow.yaml"}}, nil
+	}
+	findRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, _, name string) (manifest.KitEntry, error) {
+		return manifest.KitEntry{Name: name, Path: "kits/" + name + ".yaml"}, nil
+	}
+	fetchRemoteKitFn = func(_ context.Context, _ registry.FileFetcher, registryRepo string, entry manifest.KitEntry) (*kit.Kit, error) {
+		return &kit.Kit{Name: entry.Name, Skills: []string{"plan-my-day"}, Source: &kit.Source{Registry: registryRepo}}, nil
+	}
+	remoteKitRevFn = func(context.Context, *gh.Client, string) (string, error) { return "abc123", nil }
+	depsCalled := false
+	runKitInstallDepsFn = func(_ *cobra.Command, _ *app.Factory, _ map[string][]kitInstallDep, _ bool, _ bool) error {
+		depsCalled = true
+		return nil
+	}
+
+	cmd := newProjectInitCommand()
+	cmd.SetArgs([]string{"--kits", "acme/skills:daily-workflow"})
+	var stderr bytes.Buffer
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute project init --kits acme/skills:daily-workflow: %v", err)
+	}
+
+	if !depsCalled {
+		t.Fatal("expected remote kit install to call dep workflow")
+	}
+	pf, err := projectfile.Load(filepath.Join(dir, projectfile.Filename))
+	if err != nil {
+		t.Fatalf("load project file: %v", err)
+	}
+	if got := strings.Join(pf.Kits, ","); got != "daily-workflow" {
+		t.Fatalf("kits = %q, want daily-workflow", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".scribe", "kits", "daily-workflow.yaml")); err != nil {
+		t.Fatalf("installed kit missing: %v", err)
+	}
+}
+
+func TestProjectInitWarnsOnUnknownRemoteKit(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withProjectInitWorkingDir(t, dir)
+
+	oldFactory := commandFactory
+	t.Cleanup(func() { commandFactory = oldFactory })
+	commandFactory = func() *app.Factory {
+		return &app.Factory{
+			Config: func() (*config.Config, error) { return &config.Config{}, nil },
+		}
+	}
+
+	cmd := newProjectInitCommand()
+	cmd.SetArgs([]string{"--kits", "ghost/skills:nope"})
+	var stderr bytes.Buffer
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute project init: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "warning: unknown remote kit ghost/skills:nope") {
+		t.Fatalf("stderr = %q, want unknown remote kit warning", stderr.String())
+	}
+	pf, err := projectfile.Load(filepath.Join(dir, projectfile.Filename))
+	if err != nil {
+		t.Fatalf("load project file: %v", err)
+	}
+	if len(pf.Kits) != 0 {
+		t.Fatalf("kits = %#v, want empty (unknown remote dropped)", pf.Kits)
 	}
 }
 

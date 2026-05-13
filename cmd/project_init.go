@@ -60,13 +60,21 @@ func runProjectInit(cmd *cobra.Command, opts *projectInitOptions) error {
 		return err
 	}
 
-	availableKits, err := discoverProjectInitKits()
+	available, err := discoverProjectInitKits(cmd)
 	if err != nil {
 		return err
 	}
-	selectedKits, err := selectProjectInitKits(cmd, opts.kits, availableKits)
+	selected, err := selectProjectInitKits(cmd, opts.kits, available)
 	if err != nil {
 		return err
+	}
+	if err := installRemoteProjectInitKits(cmd, selected); err != nil {
+		return err
+	}
+
+	selectedKits := make([]string, 0, len(selected))
+	for _, k := range selected {
+		selectedKits = append(selectedKits, k.LocalName)
 	}
 
 	projectPath := filepath.Join(cwd, projectfile.Filename)
@@ -105,7 +113,15 @@ func ensureProjectFileWritable(cwd string, force bool) error {
 	return nil
 }
 
-func discoverProjectInitKits() ([]string, error) {
+type projectInitKit struct {
+	Display   string
+	Selector  string
+	LocalName string
+	Registry  string
+	Remote    bool
+}
+
+func discoverProjectInitKits(cmd *cobra.Command) ([]projectInitKit, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home directory: %w", err)
@@ -115,36 +131,87 @@ func discoverProjectInitKits() ([]string, error) {
 		return nil, err
 	}
 
-	kits := make([]string, 0, len(loaded))
+	kits := make([]projectInitKit, 0, len(loaded))
 	for name := range loaded {
-		if strings.TrimSpace(name) != "" {
-			kits = append(kits, name)
+		if strings.TrimSpace(name) == "" {
+			continue
 		}
+		kits = append(kits, projectInitKit{Display: name, Selector: name, LocalName: name})
 	}
-	sort.Strings(kits)
+
+	remote, err := remoteKitListItems(cmd, &kitListOptions{}, loaded)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: skip remote kits: %v\n", err)
+	}
+	for _, r := range remote {
+		ref := r.Registry + ":" + r.Name
+		kits = append(kits, projectInitKit{
+			Display:   ref + " (remote)",
+			Selector:  ref,
+			LocalName: r.Name,
+			Registry:  r.Registry,
+			Remote:    true,
+		})
+	}
+
+	sort.Slice(kits, func(i, j int) bool {
+		if kits[i].Remote != kits[j].Remote {
+			return !kits[i].Remote
+		}
+		return kits[i].Display < kits[j].Display
+	})
 	return kits, nil
 }
 
-func selectProjectInitKits(cmd *cobra.Command, rawKits string, availableKits []string) ([]string, error) {
+func selectProjectInitKits(cmd *cobra.Command, rawKits string, available []projectInitKit) ([]projectInitKit, error) {
+	bySelector := make(map[string]projectInitKit, len(available))
+	for _, k := range available {
+		bySelector[k.Selector] = k
+	}
+
 	if strings.TrimSpace(rawKits) != "" {
 		selected := splitProjectInitKits(rawKits)
-		warnUnknownProjectInitKits(cmd, selected, availableKits)
-		return selected, nil
+		byLocalName := make(map[string]projectInitKit, len(available))
+		for _, k := range available {
+			if !k.Remote {
+				byLocalName[k.LocalName] = k
+			}
+		}
+		out := make([]projectInitKit, 0, len(selected))
+		for _, raw := range selected {
+			if k, ok := bySelector[raw]; ok {
+				out = append(out, k)
+				continue
+			}
+			if strings.Contains(raw, ":") {
+				idx := strings.LastIndex(raw, ":")
+				localName := raw[idx+1:]
+				if k, ok := byLocalName[localName]; ok {
+					out = append(out, k)
+					continue
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: unknown remote kit %s — registry not connected or kit missing\n", raw)
+				continue
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: unknown kit %s\n", raw)
+			out = append(out, projectInitKit{Display: raw, Selector: raw, LocalName: raw})
+		}
+		return out, nil
 	}
 
-	if len(availableKits) == 0 || !isatty.IsTerminal(os.Stdin.Fd()) {
-		return []string{}, nil
+	if len(available) == 0 || !isatty.IsTerminal(os.Stdin.Fd()) {
+		return nil, nil
 	}
 
-	opts := make([]huh.Option[string], len(availableKits))
-	for i, kit := range availableKits {
-		opts[i] = huh.NewOption(kit, kit)
+	opts := make([]huh.Option[string], len(available))
+	for i, k := range available {
+		opts[i] = huh.NewOption(k.Display, k.Selector)
 	}
-	var selected []string
+	var selectors []string
 	if err := huh.NewMultiSelect[string]().
 		Title("Select kits for this project").
 		Options(opts...).
-		Value(&selected).
+		Value(&selectors).
 		Run(); err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
 			return nil, clierrors.Wrap(err, "USER_CANCELED", clierrors.ExitCanceled,
@@ -153,7 +220,29 @@ func selectProjectInitKits(cmd *cobra.Command, rawKits string, availableKits []s
 		}
 		return nil, err
 	}
-	return selected, nil
+	out := make([]projectInitKit, 0, len(selectors))
+	for _, sel := range selectors {
+		if k, ok := bySelector[sel]; ok {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+
+func installRemoteProjectInitKits(cmd *cobra.Command, selected []projectInitKit) error {
+	for _, k := range selected {
+		if !k.Remote {
+			continue
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "Installing remote kit %s\n", k.Selector)
+		if err := runKitInstall(cmd, k.Selector, &kitInstallOptions{noInteraction: true, silent: true}); err != nil {
+			return clierrors.Wrap(err, "PROJECT_INIT_KIT_INSTALL_FAILED", clierrors.ExitGeneral,
+				clierrors.WithMessage(fmt.Sprintf("install remote kit %s: %v", k.Selector, err)),
+				clierrors.WithRemediation("Run `scribe kit install "+k.Selector+"` manually to inspect the failure."),
+			)
+		}
+	}
+	return nil
 }
 
 func splitProjectInitKits(raw string) []string {
@@ -165,16 +254,4 @@ func splitProjectInitKits(raw string) []string {
 		}
 	}
 	return kits
-}
-
-func warnUnknownProjectInitKits(cmd *cobra.Command, selected, available []string) {
-	known := make(map[string]bool, len(available))
-	for _, kit := range available {
-		known[kit] = true
-	}
-	for _, kit := range selected {
-		if !known[kit] {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: unknown kit %s\n", kit)
-		}
-	}
 }
