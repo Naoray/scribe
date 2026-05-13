@@ -1,3 +1,11 @@
+## Unreleased
+
+### Changed
+- **`scribe kit list` shows remote kits by default** — the merged view lists locally installed kits *and* kits from every connected registry, marking remote-only entries. `--local` skips the network for offline / fast iteration; `--remote` hides local-only kits; `--registry <owner/repo>` filters both views to one registry. Connected registries that lack a `scribe.yaml` kit manifest are skipped with a stderr warning instead of aborting the listing. `--local` and `--remote` are mutually exclusive.
+
+### Added
+- **`scribe project init` accepts remote kits** — the picker discovers kits from connected registries (shown as `owner/repo:name (remote)`); selecting one installs the kit and its skills, then writes the local kit name into `.scribe.yaml`. The `--kits` flag accepts the same `owner/repo:name` syntax for non-interactive setup. Already-installed local kits referenced by their remote selector resolve correctly. JSON callers see a single envelope on stdout — nested install output is suppressed.
+
 ## v1.4.0 — 2026-05-13
 
 ### Added
