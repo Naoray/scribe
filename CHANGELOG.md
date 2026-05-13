@@ -1,14 +1,31 @@
-## Unreleased
+## v1.4.0 — 2026-05-13
 
 ### Added
 - **Registries can publish kits** — a `kits:` block in a registry's `scribe.yaml` is fetched and materialized into `~/.scribe/kits/` during `scribe registry connect`, stamped with the source registry. Projects can list those kits in `.scribe.yaml` like any local kit. Pass `--force-kits` to overwrite hand-authored or other-registry kit files with the same name. `scribe registry connect --json` includes `data.kits_installed` when one or more kits are installed.
-- **`scribe registry resync <repo> --refresh-kits` refreshes registry kit definitions** — this opt-in path re-fetches the registry manifest and kit files, writes source stamps, and persists `state.Kits`.
-- Add `visibility` to registry config as a foundation for future opt-in registry discovery; no telemetry is added.
-- Add a local public registry index at `~/.scribe/index/registries.json`, updated by connect/sync and readable with `scribe registry index --json`.
+- **`scribe registry resync <repo> --refresh-kits` refreshes registry kit definitions** — opt-in path re-fetches the registry manifest and kit files, writes source stamps, and persists `state.Kits`.
+- **Typed source providers** — `scribe add`, `scribe browse`, and `scribe registry connect` accept `--source github|git|local`, `--repo`, `--url`, `--ref`, `--path`, and `--id`. Local directories and arbitrary git URLs can now back a registry alongside GitHub. The legacy `--registry owner/repo` form keeps working as a shorthand alias.
+- **Structured source identity in state and lockfiles** — `scribe.lock` and registry state now carry a structured source identity (type, repo/URL, ref, path, ID) instead of an opaque repo string, so cross-provider provenance survives `sync` and `update`.
+- **`scribe mcp list`** — read-only inspector for declared MCP servers and their projection state into Claude, Codex, and Cursor. Supports `--json` against the new `scribe mcp list` schema.
+- **`--resync` flag on `scribe add` and `scribe browse`** — overwrites local edits with the upstream version for modified skills; without it, modified skills are skipped with a hint.
+- **`scribe doctor` detects snippet projection drift** — new `snippet_projection_drift` issue kind covers missing or stale managed blocks in `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursor/rules/*.mdc`. Remediation is `scribe sync`.
+- **`scribe browse` understands Vercel `skills.sh`-style layouts** — narrow GitHub browse support for repositories that ship skills without a `scribe.yaml`.
+- **`visibility` on registry config** — foundation for future opt-in public discovery. Public / private / unknown is resolved on connect; no telemetry is sent.
+- **Local public registry index at `~/.scribe/index/registries.json`** — `scribe registry connect` and successful `scribe sync` runs update the cache for `public` registries. Inspect with `scribe registry index --json`.
 
 ### Changed
 - **Deprecation: `scribe registry resync` will refresh kits by default in the next minor release** — this release keeps the legacy no-refresh default and prints a one-line stderr banner unless `--json` or `--refresh-kits` is passed. Scripted callers should add `--refresh-kits` now to adopt the future behavior explicitly.
 - **Legacy `scribe.toml` registries do not publish kits** — the legacy manifest path ignores `kits:` blocks. Migrate registries to `scribe.yaml` to ship kits.
+
+### Fixed
+- **`scribe sync --json` surfaces modified skills** — sync output now reports modified skills explicitly instead of folding them into `skipped`, so agents can decide whether to re-run with `--resync`.
+- **`scribe registry add` package prompts respect active tools** — the package install path now prompts for the currently active tool set instead of the global default, fixing dropped projections after registry-add of multi-skill packages.
+- **`scribe doctor` projection drift output is summarized** — the text formatter groups drift entries by skill instead of printing one line per projection target, matching the JSON sample shape.
+- **Reconcile drops stale missing projection paths** — leftover projection entries for skills whose target links are gone are now cleaned up during reconcile.
+- **Codex budget checks stay correct under project loadouts** — Codex description-budget accounting respects the project's resolved kit set, so global state no longer inflates the project budget total.
+
+### Documentation
+- **MIT license and Code of Conduct added** to the repo root.
+- **README uses the CLI logo lockup** in the header (replaces the old ASCII art block).
 
 ## v1.3.0 — 2026-05-09
 
