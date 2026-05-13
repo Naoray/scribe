@@ -671,13 +671,23 @@ func runKitInstallDeps(cmd *cobra.Command, factory *app.Factory, depsByRegistry 
 			PinnedSkillSources: pinnedSources,
 		}
 		if silent {
-			bag.Formatter = workflow.NewFormatterWithWriters(false, false, io.Discard, io.Discard)
+			// Discard stdout (progress) so the caller's JSON envelope stays
+			// clean, but keep stderr open — per-skill failures surface there
+			// and would otherwise be invisible.
+			bag.Formatter = workflow.NewFormatterWithWriters(false, false, io.Discard, cmd.ErrOrStderr())
 		}
 		if err := workflow.Run(cmd.Context(), workflow.InstallSteps(), bag); err != nil {
 			return handleNameConflictError(cmd, err)
 		}
 		if err := saveWorkflowState(bag); err != nil {
 			return err
+		}
+		if bag.Partial {
+			return clierrors.Wrap(clierrors.ErrPartialSuccess, "KIT_DEPS_PARTIAL", clierrors.ExitPartial,
+				clierrors.WithMessage(fmt.Sprintf("one or more skills from %s failed to install", registryRepo)),
+				clierrors.WithResource(registryRepo),
+				clierrors.WithRemediation("Inspect stderr for per-skill errors and retry `scribe kit install` after fixing them."),
+			)
 		}
 	}
 	return nil

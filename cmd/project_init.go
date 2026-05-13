@@ -68,17 +68,21 @@ func runProjectInit(cmd *cobra.Command, opts *projectInitOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := installRemoteProjectInitKits(cmd, selected); err != nil {
-		return err
-	}
 
 	selectedKits := make([]string, 0, len(selected))
 	for _, k := range selected {
 		selectedKits = append(selectedKits, k.LocalName)
 	}
 
+	// Write .scribe.yaml *before* installing remote kits. If a remote install
+	// fails mid-loop, the project file still points at the intended kits so
+	// the user can re-run `scribe kit install` (or `project init --force`)
+	// without losing the selection.
 	projectPath := filepath.Join(cwd, projectfile.Filename)
 	if err := projectfile.Save(projectPath, &projectfile.ProjectFile{Kits: selectedKits}); err != nil {
+		return err
+	}
+	if err := installRemoteProjectInitKits(cmd, selected); err != nil {
 		return err
 	}
 
@@ -132,11 +136,15 @@ func discoverProjectInitKits(cmd *cobra.Command) ([]projectInitKit, error) {
 	}
 
 	kits := make([]projectInitKit, 0, len(loaded))
-	for name := range loaded {
+	for name, k := range loaded {
 		if strings.TrimSpace(name) == "" {
 			continue
 		}
-		kits = append(kits, projectInitKit{Display: name, Selector: name, LocalName: name})
+		entry := projectInitKit{Display: name, Selector: name, LocalName: name}
+		if k != nil && k.Source != nil {
+			entry.Registry = k.Source.Registry
+		}
+		kits = append(kits, entry)
 	}
 
 	remote, err := remoteKitListItems(cmd, &kitListOptions{}, loaded)
@@ -185,8 +193,13 @@ func selectProjectInitKits(cmd *cobra.Command, rawKits string, available []proje
 			}
 			if strings.Contains(raw, ":") {
 				idx := strings.LastIndex(raw, ":")
+				registryName := raw[:idx]
 				localName := raw[idx+1:]
-				if k, ok := byLocalName[localName]; ok {
+				// Only fall back to a locally installed kit when its source
+				// registry matches the explicitly requested registry —
+				// otherwise the user typed `acme/skills:foo` and would
+				// silently get a `foo` kit sourced from another registry.
+				if k, ok := byLocalName[localName]; ok && strings.EqualFold(k.Registry, registryName) {
 					out = append(out, k)
 					continue
 				}
