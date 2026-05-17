@@ -106,10 +106,13 @@ func runProjectSync(cmd *cobra.Command, opts *projectSyncOptions) error {
 	if err != nil {
 		return err
 	}
-	skillNames := resolveProjectSkillNames(pf, globalKits)
 	vendorSet := map[string]bool{}
 	for _, name := range opts.vendors {
 		vendorSet[projectSkillName(name)] = true
+	}
+	var skillNames []string
+	if shouldSyncProjectSkills(pf, vendorSet) {
+		skillNames = resolveProjectSkillNames(pf, globalKits)
 	}
 	lockEntries, err := syncProjectSkills(projectRoot, storeDir, skillNames, vendorSet, st, opts, &out)
 	if err != nil {
@@ -417,6 +420,13 @@ func writeProjectLock(projectRoot string, kits []lockfile.ProjectKit, entries []
 		)
 	}
 	return store.WriteProjectLockfile(lf)
+}
+
+func shouldSyncProjectSkills(pf *projectfile.ProjectFile, vendorSet map[string]bool) bool {
+	if pf != nil && len(pf.Add) > 0 {
+		return true
+	}
+	return len(vendorSet) > 0
 }
 
 func resolveProjectSkillNames(pf *projectfile.ProjectFile, kits map[string]*kit.Kit) []string {
