@@ -130,6 +130,64 @@ func TestProjectSyncVendorsProjectSkillAndPinsRegistrySkill(t *testing.T) {
 	}
 }
 
+func TestProjectSyncKitsOnlySkipsSkillHashing(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	mustChdir(t, project)
+
+	mustWriteProjectFile(t, filepath.Join(project, ".scribe.yaml"), "kits:\n  - core\n")
+	mustSaveProjectKit(t, filepath.Join(home, ".scribe", "kits", "core.yaml"), &kit.Kit{Name: "core", Skills: []string{"deploy"}})
+	if err := os.MkdirAll(filepath.Join(home, ".scribe", "skills", "deploy"), 0o755); err != nil {
+		t.Fatalf("mkdir empty skill dir: %v", err)
+	}
+
+	st := stateFixture(t, home)
+	st.Kits["core"] = state.InstalledKit{
+		Name:           "core",
+		SourceRegistry: "acme/skills",
+		Rev:            "kitsha",
+		ContentHash:    "kithash",
+		Skills:         []string{"deploy"},
+	}
+	st.Installed["deploy"] = state.InstalledSkill{
+		InstalledHash: "hash",
+		Sources: []state.SkillSource{{
+			Registry:   "acme/skills",
+			SourceRepo: "acme/source",
+			Path:       "skills/deploy",
+			Ref:        "main",
+			LastSHA:    "abc123",
+			LastSynced: time.Now(),
+		}},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	for _, args := range [][]string{{}, {"--force"}} {
+		cmd := newProjectSyncCommand()
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("project sync %v: %v", args, err)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(project, ".ai", "kits", "core.yaml")); err != nil {
+		t.Fatalf("project kit missing: %v", err)
+	}
+	lf, err := projectstore.Project(project).LoadProjectLockfile()
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	if len(lf.Entries) != 0 {
+		t.Fatalf("entries = %+v, want none for kits-only project sync", lf.Entries)
+	}
+	if len(lf.Kits) != 1 || lf.Kits[0].Name != "core" {
+		t.Fatalf("kit pins = %+v", lf.Kits)
+	}
+}
+
 func TestProjectSyncPinsPackagePerToolCommands(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
