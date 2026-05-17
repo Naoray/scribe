@@ -71,7 +71,7 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 	}
 
 	if e.ProjectRoot != "" {
-		removed, removedActions, err := e.removeOrphanedGlobalCodexProjections(st, storeDir, byName)
+		removed, removedActions, err := e.removeOrphanedGlobalToolProjections(st, storeDir, byName)
 		if err != nil {
 			return summary, actions, err
 		}
@@ -343,38 +343,41 @@ func (e *Engine) canonicalDirForSkill(storeDir, name string, skill state.Install
 	return filepath.Join(storeDir, name)
 }
 
-func (e *Engine) removeOrphanedGlobalCodexProjections(st *state.State, storeDir string, byName map[string]tools.Tool) (int, []Action, error) {
-	codexTool, ok := byName["codex"]
-	if !ok {
-		return 0, nil, nil
-	}
-
+func (e *Engine) removeOrphanedGlobalToolProjections(st *state.State, storeDir string, byName map[string]tools.Tool) (int, []Action, error) {
 	var removed int
 	var actions []Action
+	toolNames := make([]string, 0, len(byName))
+	for toolName := range byName {
+		toolNames = append(toolNames, toolName)
+	}
+	sort.Strings(toolNames)
 	for name, skill := range st.Installed {
-		globalPath, err := codexTool.SkillPath(name, "")
-		if err != nil {
-			continue
-		}
-		if hasTrackedGlobalToolProjection(skill, codexTool.Name()) {
-			continue
-		}
-		for _, path := range projectionPaths(skill) {
-			if path != globalPath {
+		for _, toolName := range toolNames {
+			tool := byName[toolName]
+			globalPath, err := tool.SkillPath(name, "")
+			if err != nil {
 				continue
 			}
-			if !isManagedProjection(path, filepath.Join(storeDir, name)) {
+			if hasTrackedGlobalToolProjection(skill, toolName) {
 				continue
 			}
-			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return removed, actions, err
+			for _, path := range projectionPaths(skill) {
+				if path != globalPath {
+					continue
+				}
+				if !isManagedProjection(path, filepath.Join(storeDir, name)) {
+					continue
+				}
+				if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return removed, actions, err
+				}
+				skill.Paths = removePath(skill.Paths, path)
+				skill.ManagedPaths = removePath(skill.ManagedPaths, path)
+				st.Installed[name] = skill
+				removed++
+				actions = append(actions, Action{Kind: ActionRemoved, Name: name, Tool: toolName, Path: path})
+				break
 			}
-			skill.Paths = removePath(skill.Paths, path)
-			skill.ManagedPaths = removePath(skill.ManagedPaths, path)
-			st.Installed[name] = skill
-			removed++
-			actions = append(actions, Action{Kind: ActionRemoved, Name: name, Tool: codexTool.Name(), Path: path})
-			break
 		}
 	}
 	return removed, actions, nil

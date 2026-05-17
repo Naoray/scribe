@@ -39,10 +39,11 @@ func Normalize(dirName string, content []byte) (Doc, []byte, error) {
 	if hasFrontmatter {
 		parsed, err := parseFrontmatter(fm)
 		if err != nil {
-			return Doc{}, nil, err
+			hasFrontmatter = false
+		} else {
+			doc.Name = strings.TrimSpace(parsed.Name)
+			doc.Description = strings.TrimSpace(parsed.Description)
 		}
-		doc.Name = strings.TrimSpace(parsed.Name)
-		doc.Description = strings.TrimSpace(parsed.Description)
 	}
 
 	if doc.Name == "" {

@@ -841,6 +841,69 @@ func TestReconcileProjectRootRemovesOrphanedGlobalCodexProjection(t *testing.T) 
 	}
 }
 
+func TestReconcileProjectRootRemovesOrphanedGlobalClaudeProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	canonical, err := tools.WriteToStore("recap", []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# recap\n")}})
+	if err != nil {
+		t.Fatalf("WriteToStore recap: %v", err)
+	}
+	globalPath := filepath.Join(home, ".claude", "skills", "recap")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll global: %v", err)
+	}
+	if err := os.Symlink(canonical, globalPath); err != nil {
+		t.Fatalf("Symlink global: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	projectPath := filepath.Join(projectRoot, ".claude", "skills", "recap")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll project: %v", err)
+	}
+	if err := os.Symlink(canonical, projectPath); err != nil {
+		t.Fatalf("Symlink project: %v", err)
+	}
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"recap": {
+			Revision:     1,
+			Tools:        []string{"claude"},
+			ToolsMode:    state.ToolsModePinned,
+			ManagedPaths: []string{globalPath, projectPath},
+			Projections:  []state.ProjectionEntry{{Project: projectRoot, Tools: []string{"claude"}}},
+		},
+	}}
+
+	engine := reconcile.Engine{
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
+		ProjectRoot: projectRoot,
+		Now:         func() time.Time { return time.Unix(5, 0).UTC() },
+	}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Removed != 1 {
+		t.Fatalf("Removed = %d, want 1", summary.Removed)
+	}
+	if len(actions) == 0 || actions[0].Kind != reconcile.ActionRemoved || actions[0].Path != globalPath {
+		t.Fatalf("actions = %+v, want first action removing %s", actions, globalPath)
+	}
+	if _, err := os.Lstat(globalPath); !os.IsNotExist(err) {
+		t.Fatalf("global projection still exists: %v", err)
+	}
+	if _, err := os.Lstat(projectPath); err != nil {
+		t.Fatalf("project projection missing: %v", err)
+	}
+	for _, path := range st.Installed["recap"].ManagedPaths {
+		if path == globalPath {
+			t.Fatalf("ManagedPaths retained removed global path: %v", st.Installed["recap"].ManagedPaths)
+		}
+	}
+}
+
 func TestReconcileProjectRootPreservesTrackedGlobalCodexProjection(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -869,6 +932,49 @@ func TestReconcileProjectRootPreservesTrackedGlobalCodexProjection(t *testing.T)
 
 	engine := reconcile.Engine{
 		Tools:       []tools.Tool{tools.CodexTool{}},
+		ProjectRoot: t.TempDir(),
+		Now:         func() time.Time { return time.Unix(6, 0).UTC() },
+	}
+	summary, _, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Removed != 0 {
+		t.Fatalf("Removed = %d, want 0", summary.Removed)
+	}
+	if _, err := os.Lstat(globalPath); err != nil {
+		t.Fatalf("tracked global projection missing: %v", err)
+	}
+}
+
+func TestReconcileProjectRootPreservesTrackedGlobalClaudeProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	canonical, err := tools.WriteToStore("scribe", []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# scribe\n")}})
+	if err != nil {
+		t.Fatalf("WriteToStore scribe: %v", err)
+	}
+	globalPath := filepath.Join(home, ".claude", "skills", "scribe")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll global: %v", err)
+	}
+	if err := os.Symlink(canonical, globalPath); err != nil {
+		t.Fatalf("Symlink global: %v", err)
+	}
+
+	st := &state.State{SchemaVersion: 4, Installed: map[string]state.InstalledSkill{
+		"scribe": {
+			Revision:     1,
+			Tools:        []string{"claude"},
+			ToolsMode:    state.ToolsModePinned,
+			ManagedPaths: []string{globalPath},
+			Projections:  []state.ProjectionEntry{{Project: "", Tools: []string{"claude"}}},
+		},
+	}}
+
+	engine := reconcile.Engine{
+		Tools:       []tools.Tool{tools.ClaudeTool{}},
 		ProjectRoot: t.TempDir(),
 		Now:         func() time.Time { return time.Unix(6, 0).UTC() },
 	}

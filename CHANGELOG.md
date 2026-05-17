@@ -1,3 +1,14 @@
+## v1.5.1 — 2026-05-17
+
+### Fixed
+- **`scribe sync` recovers malformed Codex skill frontmatter** — closed but invalid `SKILL.md` frontmatter is rebuilt from the skill name and body during Codex projection, so a single bad metadata line no longer blocks project sync.
+- **Project sync removes stale global Claude projections** — managed global skill links left from older syncs are cleaned up when a project uses local kit projections, preventing Claude from spending session context on unrelated skills.
+- **Kits-only project sync converges without extra state** — project loadouts that rely only on kits resolve and reconcile correctly.
+- **List attribution order is stable** — skill listing output keeps source attribution in deterministic order.
+
+### Documentation
+- **Registry telemetry, privacy, and local analytics design notes** were added for future opt-in work.
+
 ## v1.5.0 — 2026-05-13
 
 ### Changed

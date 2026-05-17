@@ -97,6 +97,40 @@ name: ascii
 	}
 }
 
+func TestNormalizeRebuildsMalformedFrontmatter(t *testing.T) {
+	input := []byte(`---
+description: Use this when working on planning: prioritization, sequencing, and tradeoffs.
+---
+
+# North Star
+
+Keep implementation aligned with the highest-level project goal.
+`)
+
+	doc, normalized, err := Normalize("north-star", input)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	if doc.Name != "north-star" {
+		t.Fatalf("Name = %q, want north-star", doc.Name)
+	}
+	if doc.Description != "Keep implementation aligned with the highest-level project goal." {
+		t.Fatalf("Description = %q", doc.Description)
+	}
+
+	content := string(normalized)
+	if !strings.Contains(content, "name: north-star\n") {
+		t.Fatalf("normalized content missing generated name:\n%s", content)
+	}
+	if !strings.Contains(content, "description: Keep implementation aligned with the highest-level project goal.\n") {
+		t.Fatalf("normalized content missing rebuilt description:\n%s", content)
+	}
+	if strings.Contains(content, "planning: prioritization") {
+		t.Fatalf("normalized content preserved malformed frontmatter:\n%s", content)
+	}
+}
+
 func TestNormalizeCanonicalizesExistingFrontmatter(t *testing.T) {
 	input := []byte(`---
 description: Create ASCII diagrams.
