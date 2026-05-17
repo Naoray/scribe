@@ -166,6 +166,8 @@ Options:
 - `--reason <text>` is local UX only unless the service explicitly supports it.
 - `--json` returns service response fields.
 
+If the service-side deletion endpoint is unavailable or a user cannot access the current install ID, v1 privacy docs may direct users to open a GitHub Issue in `Naoray/scribe` for deletion/privacy help. Maintainers have approved GitHub Issues as the v1 contact path. A dedicated privacy email or form can be added later, but it is not a blocker for this ADR or v1 docs.
+
 ## First-Run Prompt UX
 
 The first-run prompt may be shown only when all of these are true:
@@ -499,7 +501,7 @@ Before implementation ships, the repository needs `docs/PRIVACY.md` and the webs
 - Raw 30-day retention and indefinite aggregate retention.
 - Environment variable and CI opt-out behavior.
 - Deletion process and limitations for already-derived non-identifying aggregates.
-- GDPR/CCPA stance and contact path.
+- GDPR/CCPA stance and contact path. GitHub Issues in `Naoray/scribe` are approved for the v1 privacy/deletion contact path; a dedicated privacy email or form can be added later.
 - Hosting boundary: CLI in this repo, service in `Naoray/scribe-aggregator`, API at `api.usescribe.dev`.
 
 The privacy page must be live for at least 30 days before maintainers discuss any default-flip. This ADR does not approve a default flip.
@@ -543,4 +545,3 @@ This ADR intentionally stops short of implementation, but future CLI work should
 - Whether `object_slug` should remain in raw v1 payloads or be removed before launch. This ADR allows it only for allow-listed public sources because the source catalogs are already public.
 - Whether deletion status needs a first-class CLI command in v1 or the returned status URL is enough.
 - Exact minimum threshold for public aggregate cells belongs to `Naoray/scribe-aggregator` implementation review.
-
