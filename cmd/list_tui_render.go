@@ -396,13 +396,13 @@ func (m listModel) formatRow(row listRow, isCursor bool, nameCol int, compact bo
 	author = runewidth.FillRight(author, 12)
 
 	line := prefix + nameStyle.Render(name) + "  " + ltDimStyle.Render(ver) + "  " + ltDimStyle.Render(author)
-	line += sourceAttributionMarker(row)
 
 	if row.HasStatus {
 		icon := statusStyles[row.Status].Render(row.Status.Display().Icon)
 		label := statusStyles[row.Status].Render(row.Status.Display().Label)
 		line += "  " + icon + " " + label
 	}
+	line += sourceAttributionMarker(row)
 
 	if !row.Managed {
 		line += " " + ltDimStyle.Render("[unmanaged]")

@@ -1353,6 +1353,31 @@ func TestFormatRow_LocalRowsShowSourceAttributionMarker(t *testing.T) {
 	}
 }
 
+func TestFormatRow_FullStatusRowsShowSourceAttributionAfterStatus(t *testing.T) {
+	m := listModel{width: 120}
+	row := listRow{
+		Name:      "recap",
+		Managed:   true,
+		HasStatus: true,
+		Status:    sync.StatusCurrent,
+		Version:   "v1.2.3",
+		Author:    "artistfy",
+		Source: discovery.Source{
+			Author: "acme",
+		},
+	}
+
+	formatted := m.formatRow(row, false, 20, false)
+	statusIndex := strings.Index(formatted, "current")
+	attributionIndex := strings.Index(formatted, "ℹ️ (via acme)")
+	if statusIndex == -1 || attributionIndex == -1 {
+		t.Fatalf("formatted row should include status and source marker, got: %q", formatted)
+	}
+	if attributionIndex < statusIndex {
+		t.Fatalf("source marker should appear after status, got: %q", formatted)
+	}
+}
+
 func TestFormatRow_LocalRegistryRowsShowSkeletonWhileBackgroundLoading(t *testing.T) {
 	m := listModel{width: 120, backgroundLoad: true, spinnerFrame: 0}
 	row := listRow{
