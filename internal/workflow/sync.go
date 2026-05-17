@@ -1002,7 +1002,10 @@ func StepSyncSkills(ctx context.Context, b *Bag) error {
 			if changed {
 				b.MarkStateDirty()
 			}
-			if failure.Muted {
+			if failure.Muted || isEmptyRegistryLoadoutError(err) {
+				if !failure.Muted {
+					fmt.Fprintf(os.Stderr, "scribe: warning: skipping registry %s: %v\n", teamRepo, err)
+				}
 				continue
 			}
 			return err
@@ -1086,6 +1089,14 @@ func workflowSkipMissing(b *Bag) bool {
 		return false
 	}
 	return true
+}
+
+func isEmptyRegistryLoadoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no skills found") || strings.Contains(msg, " has no skills")
 }
 
 func PromptNameConflictResolution(conflict sync.NameConflict) (sync.NameConflictResolution, error) {
