@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Naoray/scribe/internal/app"
+	clierrors "github.com/Naoray/scribe/internal/cli/errors"
 	"github.com/Naoray/scribe/internal/config"
 	gh "github.com/Naoray/scribe/internal/github"
 	"github.com/Naoray/scribe/internal/registry"
@@ -192,7 +193,7 @@ skills:
 	}
 }
 
-func TestKitListSkipsRegistryWithoutManifest(t *testing.T) {
+func TestKitListWarnsOnRegistryListFailure(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -203,7 +204,7 @@ func TestKitListSkipsRegistryWithoutManifest(t *testing.T) {
 	oldList := listRemoteKitsFn
 	listRemoteKitsFn = func(ctx context.Context, f registry.FileFetcher, repo string) ([]registry.ManifestKit, error) {
 		if repo == "broken/skills" {
-			return nil, fmt.Errorf("no manifest")
+			return nil, fmt.Errorf("permission denied")
 		}
 		return []registry.ManifestKit{{Registry: repo, Name: "good-kit", Path: "kits/good-kit.yaml"}}, nil
 	}
@@ -219,6 +220,49 @@ func TestKitListSkipsRegistryWithoutManifest(t *testing.T) {
 	}
 	if !strings.Contains(errBuf.String(), "warning: skip remote kits from broken/skills") {
 		t.Fatalf("missing skip warning, stderr = %q", errBuf.String())
+	}
+	var env testEnvelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	var data struct {
+		Kits []kitJSONRow `json:"kits"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if len(data.Kits) != 1 || data.Kits[0].Name != "good-kit" {
+		t.Fatalf("data = %#v, want one good-kit row", data.Kits)
+	}
+}
+
+func TestKitListSilentlySkipsRegistryWithoutManifest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	stubKitFactory(t, []string{"missing/skills", "acme/skills"}, map[string][]registry.ManifestKit{
+		"missing/skills": nil,
+		"acme/skills":    {{Registry: "acme/skills", Name: "good-kit", Path: "kits/good-kit.yaml"}},
+	})
+	oldList := listRemoteKitsFn
+	listRemoteKitsFn = func(ctx context.Context, f registry.FileFetcher, repo string) ([]registry.ManifestKit, error) {
+		if repo == "missing/skills" {
+			return nil, clierrors.Wrap(fmt.Errorf("no manifest"), "REGISTRY_NOT_FOUND", clierrors.ExitNotFound)
+		}
+		return []registry.ManifestKit{{Registry: repo, Name: "good-kit", Path: "kits/good-kit.yaml"}}, nil
+	}
+	t.Cleanup(func() { listRemoteKitsFn = oldList })
+
+	cmd := newKitListCommand()
+	cmd.SetArgs([]string{"--json"})
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute kit list: %v", err)
+	}
+	if strings.Contains(errBuf.String(), "warning: skip remote kits from missing/skills") {
+		t.Fatalf("unexpected skip warning, stderr = %q", errBuf.String())
 	}
 	var env testEnvelope
 	if err := json.Unmarshal(out.Bytes(), &env); err != nil {

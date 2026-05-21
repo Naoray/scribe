@@ -402,8 +402,8 @@ func TestBuildLocalRows_HidesBootstrapOrigin(t *testing.T) {
 	// by the CLI and shouldn't appear in `scribe list`. It can't be removed
 	// — the next invocation re-installs it — so listing it just clutters.
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"my-skill":     {Origin: state.OriginRegistry},
-		"scribe": {Origin: state.OriginBootstrap},
+		"my-skill": {Origin: state.OriginRegistry},
+		"scribe":   {Origin: state.OriginBootstrap},
 	}}
 	skills := []discovery.Skill{
 		{Name: "my-skill", Managed: true},
@@ -438,9 +438,9 @@ func TestBuildLocalRowsExcluding_FiltersBootstrapAfterMatching(t *testing.T) {
 	// matched entries. Verify the bootstrap filter survives the exclusion
 	// path (regression for #487 second-order coverage).
 	st := &state.State{Installed: map[string]state.InstalledSkill{
-		"matched":      {Origin: state.OriginRegistry},
-		"my-skill":     {Origin: state.OriginRegistry},
-		"scribe": {Origin: state.OriginBootstrap},
+		"matched":  {Origin: state.OriginRegistry},
+		"my-skill": {Origin: state.OriginRegistry},
+		"scribe":   {Origin: state.OriginBootstrap},
 	}}
 	skills := []discovery.Skill{
 		{Name: "matched", Managed: true},
