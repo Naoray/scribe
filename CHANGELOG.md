@@ -1,7 +1,7 @@
 ## [Unreleased]
 
 ### Changed
-- Budget guardrails are now warn-only. `scribe add`, `scribe install`, `scribe sync`, and `scribe kit install` no longer abort when projected skills exceed an agent's description-byte budget; they emit a warning and proceed. `--force` is preserved as a deprecated no-op.
+- Budget guardrails are now warn-only. `scribe add`, `scribe install`, `scribe sync`, `scribe kit install`, and `scribe migrate global-to-projects` no longer abort when projected skills exceed an agent's description-byte budget; they emit a warning and proceed. `--force` is preserved as a deprecated no-op.
 
 ## v1.5.1 — 2026-05-17
 
