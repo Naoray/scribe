@@ -49,7 +49,7 @@ Examples:
 		RunE: runGlobalToProjects,
 	}
 	cmd.Flags().Bool("dry-run", false, "Preview migration without writing .scribe.yaml or removing global symlinks")
-	cmd.Flags().Bool("force", false, "Allow migration even if a project exceeds an agent skill budget")
+	cmd.Flags().Bool("force", false, "Deprecated: budget guardrails are warn-only (no-op)")
 	cmd.Flags().Bool("undo", false, "Restore the latest global-to-projects migration snapshot")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	cmd.Flags().StringArray("project", nil, "Project directory to keep the current global skill set (repeatable; skips prompt)")
@@ -63,6 +63,7 @@ func runGlobalToProjects(cmd *cobra.Command, args []string) error {
 func runGlobalToProjectsWithSelector(cmd *cobra.Command, _ []string, selector projectSelector) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	forceBudget, _ := cmd.Flags().GetBool("force")
+	warnDeprecatedForceBudget(cmd)
 	undo, _ := cmd.Flags().GetBool("undo")
 	yes := noInteractionFlagPassed(cmd)
 	jsonFlag := jsonFlagPassed(cmd)

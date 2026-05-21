@@ -33,7 +33,7 @@ type Bag struct {
 	InitialQuery       string // initial search/filter text for TUI surfaces
 	TrustAllFlag       bool   // --trust-all: approve all package commands without prompting
 	InstallAllFlag     bool   // --all: install all available skills without prompting
-	ForceBudget        bool   // --force: allow projection over agent description-byte budgets
+	ForceBudget        bool   // deprecated --force no-op for budget guardrails
 	ForceKits          bool   // --force-kits: overwrite existing kit files from connect/resync
 	RefreshKits        bool   // --refresh-kits: opt into kit refresh during registry resync
 	AliasName          string // --alias: install incoming skill under another name on projection conflict

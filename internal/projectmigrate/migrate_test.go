@@ -308,19 +308,19 @@ func TestMigrate_ForcePreservesKitYAML(t *testing.T) {
 	}
 }
 
-func TestBuildPlan_FailsBudget_NoForce(t *testing.T) {
+func TestBuildPlan_RecordsBudgetRefuseWithoutForce(t *testing.T) {
 	home, project, link := setupBudgetMigrationFixture(t, "claude", "oversized", 200)
 	t.Setenv("HOME", home)
 	old := budget.AgentBudgets
 	budget.AgentBudgets = map[string]int{"claude": 20}
 	t.Cleanup(func() { budget.AgentBudgets = old })
 	discovery := undoDiscovery(home, project, link, "claude", "oversized")
-	_, err := BuildPlan(discovery, []string{project}, false)
-	if err == nil {
-		t.Fatal("BuildPlan() error = nil, want budget refusal")
+	plan, err := BuildPlan(discovery, []string{project}, false)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "project "+project+" exceeds claude budget") || !strings.Contains(err.Error(), "pass --force to proceed") {
-		t.Fatalf("error = %q, want budget refusal", err.Error())
+	if got := plan.ProjectFiles[0].BudgetPerAgent["claude"].Status; got != budget.StatusRefuse {
+		t.Fatalf("budget status = %s, want refuse", got)
 	}
 }
 
@@ -355,13 +355,9 @@ func TestBuildPlan_BudgetIncludesExistingProjectSkills(t *testing.T) {
 	budget.AgentBudgets = map[string]int{"claude": 25}
 	t.Cleanup(func() { budget.AgentBudgets = old })
 	discovery := undoDiscovery(home, project, link, "claude", "migrated")
-	_, err := BuildPlan(discovery, []string{project}, false)
-	if err == nil {
-		t.Fatal("BuildPlan() error = nil, want budget refusal")
-	}
-	plan, err := BuildPlan(discovery, []string{project}, false, true)
+	plan, err := BuildPlan(discovery, []string{project}, false)
 	if err != nil {
-		t.Fatalf("BuildPlan() with force error = %v", err)
+		t.Fatalf("BuildPlan() error = %v", err)
 	}
 	if got := plan.ProjectFiles[0].BudgetPerAgent["claude"].Status; got != budget.StatusRefuse {
 		t.Fatalf("budget status = %s, want refuse", got)

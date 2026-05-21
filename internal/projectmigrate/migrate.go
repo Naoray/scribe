@@ -59,7 +59,6 @@ func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool, forc
 	if len(skills) == 0 {
 		return MigrationPlan{DryRun: dryRun, GlobalLinks: discovery.GlobalSymlinks}, nil
 	}
-	forceMigration := len(force) > 0 && force[0]
 
 	selected := normalizeSelectedProjects(selectedProjects)
 	projectFiles := make([]ProjectChange, 0, len(selected))
@@ -73,13 +72,6 @@ func BuildPlan(discovery Discovery, selectedProjects []string, dryRun bool, forc
 			return MigrationPlan{}, err
 		}
 		change.BudgetPerAgent = budgetPerAgent
-		if !dryRun && !forceMigration {
-			for agent, result := range budgetPerAgent {
-				if result.Status == budget.StatusRefuse {
-					return MigrationPlan{}, fmt.Errorf("project %s exceeds %s budget by %d bytes; pass --force to proceed", change.Project, agent, result.Used-result.Limit)
-				}
-			}
-		}
 		projectFiles = append(projectFiles, change)
 	}
 

@@ -247,7 +247,7 @@ func newKitInstallCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.alias, "alias", "", "Install incoming kit under this local name")
-	cmd.Flags().BoolVar(&opts.forceBudget, "force", false, "Project skills even when an agent budget is exceeded")
+	cmd.Flags().BoolVar(&opts.forceBudget, "force", false, "Deprecated: budget guardrails are warn-only (no-op)")
 	cmd.Flags().BoolVar(&opts.noDeps, "no-deps", false, "Install kit body without installing referenced skills")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
@@ -266,7 +266,7 @@ func newKitSyncCommand() *cobra.Command {
 			return runKitSync(cmd, opts)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.forceBudget, "force", false, "Project skills even when an agent budget is exceeded")
+	cmd.Flags().BoolVar(&opts.forceBudget, "force", false, "Deprecated: budget guardrails are warn-only (no-op)")
 	cmd.Flags().BoolVar(&opts.noDeps, "no-deps", false, "Refresh kit bodies without installing referenced skills")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "Output machine-readable JSON")
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
@@ -438,6 +438,7 @@ func runKitInstall(cmd *cobra.Command, ref string, opts *kitInstallOptions) erro
 	if opts == nil {
 		opts = &kitInstallOptions{}
 	}
+	warnDeprecatedForceBudget(cmd)
 	registryRepo, kitName, err := parseSkillRef(ref)
 	if err != nil {
 		return err
@@ -697,6 +698,7 @@ func runKitSync(cmd *cobra.Command, opts *kitInstallOptions) error {
 	if opts == nil {
 		opts = &kitInstallOptions{}
 	}
+	warnDeprecatedForceBudget(cmd)
 	factory := commandFactory()
 	cfg, err := factory.Config()
 	if err != nil {
