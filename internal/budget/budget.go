@@ -89,17 +89,17 @@ func checkBudget(skills []Skill, agent string, estimate func(Skill) int) Result 
 		}
 		result.Used += size
 	}
+	sort.SliceStable(contributions, func(i, j int) bool {
+		if contributions[i].Bytes == contributions[j].Bytes {
+			return contributions[i].Skill < contributions[j].Skill
+		}
+		return contributions[i].Bytes > contributions[j].Bytes
+	})
+	result.Overflow = contributions
 
 	switch {
 	case result.Used >= limit:
 		result.Status = StatusRefuse
-		sort.SliceStable(contributions, func(i, j int) bool {
-			if contributions[i].Bytes == contributions[j].Bytes {
-				return contributions[i].Skill < contributions[j].Skill
-			}
-			return contributions[i].Bytes > contributions[j].Bytes
-		})
-		result.Overflow = contributions
 	case float64(result.Used) >= float64(limit)*warnRatio:
 		result.Status = StatusWarn
 	default:
@@ -113,6 +113,10 @@ func FormatResult(result Result) string {
 		return ""
 	}
 	return fmt.Sprintf("%s budget: %d%% (%d / %d bytes)", title(result.Agent), result.Percent(), result.Used, result.Limit)
+}
+
+func FormatOverflowCompact(result Result) string {
+	return fmt.Sprintf("%s skill budget exceeded — %d / %d bytes (%d%%, %d contributors). Run `scribe show --verbose` for breakdown.", title(result.Agent), result.Used, result.Limit, result.Percent(), len(result.Overflow))
 }
 
 func FormatOverflow(result Result) string {

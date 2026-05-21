@@ -195,7 +195,7 @@ func enforceCurrentBudget(factory *app.Factory) error {
 		result := budget.CheckProjectionBudget(budgetSkillsForAgent(set, st, agent), agent)
 		switch result.Status {
 		case budget.StatusRefuse:
-			warnings = append(warnings, budget.FormatOverflow(result))
+			warnings = append(warnings, budget.FormatOverflowCompact(result))
 		case budget.StatusWarn:
 			warnings = append(warnings, budget.FormatResult(result))
 		}

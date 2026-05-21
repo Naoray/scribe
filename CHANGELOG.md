@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Changed
+- **Budget warnings are now compact.** Preflight emits a single line per over-budget agent — example: `Codex skill budget exceeded — X / Y bytes (Z%, N contributors). Run scribe show --verbose for breakdown.` Run `scribe show --verbose` for the per-skill contributor breakdown.
+
 ## v1.5.2 — 2026-05-21
 
 ### Changed
