@@ -11,11 +11,13 @@ import (
 )
 
 func newShowCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "show",
 		Short: "Show the resolved project skill set and agent budgets",
 		RunE:  runShow,
 	}
+	cmd.Flags().BoolP("verbose", "v", false, "Show budget contributor breakdowns")
+	return cmd
 }
 
 func runShow(cmd *cobra.Command, args []string) error {
@@ -30,6 +32,10 @@ func runShow(cmd *cobra.Command, args []string) error {
 	}
 
 	set, err := resolveBudgetSet(st)
+	if err != nil {
+		return err
+	}
+	verbose, err := cmd.Flags().GetBool("verbose")
 	if err != nil {
 		return err
 	}
@@ -68,6 +74,12 @@ func runShow(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stdout, "  %s — exceeded\n", line)
 		default:
 			fmt.Fprintf(os.Stdout, "  %s\n", line)
+		}
+		if verbose && (result.Status == budget.StatusWarn || result.Status == budget.StatusRefuse) && len(result.Overflow) > 0 {
+			fmt.Fprintln(os.Stdout, "    contributors:")
+			for _, item := range result.Overflow {
+				fmt.Fprintf(os.Stdout, "      %s: %d bytes\n", item.Skill, item.Bytes)
+			}
 		}
 	}
 	return nil

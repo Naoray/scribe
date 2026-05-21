@@ -201,13 +201,64 @@ func TestEnforceCurrentBudgetWarnsOnOverflow(t *testing.T) {
 	for _, want := range []string{
 		"warning:",
 		"Codex skill budget exceeded",
-		"estimated: 5800 / 5440 bytes",
+		"5800 / 5440 bytes (107%, 2 contributors)",
+		"Run `scribe show --verbose` for breakdown.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"estimated:",
 		"biggest contributors:",
 		"huge-alpha: 4000 bytes",
 		"huge-beta: 1800 bytes",
 	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("stderr should not include %q:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestShowVerbosePrintsBudgetContributors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	wd := t.TempDir()
+	t.Chdir(wd)
+
+	writeBudgetSkill(t, home, "huge-alpha", longBudgetSkillContent("huge-alpha", 4000))
+	writeBudgetSkill(t, home, "huge-beta", longBudgetSkillContent("huge-beta", 1800))
+	writeBudgetKit(t, home, "over-budget", []string{"huge-alpha", "huge-beta"})
+	if err := os.WriteFile(filepath.Join(wd, ".scribe.yaml"), []byte("kits:\n - over-budget\n"), 0o644); err != nil {
+		t.Fatalf("write project file: %v", err)
+	}
+
+	factory := budgetTestFactory(&state.State{Installed: map[string]state.InstalledSkill{
+		"huge-alpha": {Tools: []string{"codex"}},
+		"huge-beta":  {Tools: []string{"codex"}},
+	}})
+	oldFactory := commandFactory
+	commandFactory = func() *app.Factory { return factory }
+	t.Cleanup(func() { commandFactory = oldFactory })
+
+	cmd := newShowCommand()
+	cmd.SetArgs([]string{"--verbose"})
+	var execErr error
+	got := captureStdout(t, func() {
+		execErr = cmd.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("show --verbose returned error: %v\nstdout=%s", execErr, got)
+	}
+	for _, want := range []string{
+		"Budgets:",
+		"  Codex budget: 107% (5800 / 5440 bytes) — exceeded",
+		"    contributors:",
+		"      huge-alpha: 4000 bytes",
+		"      huge-beta: 1800 bytes",
+	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("stderr missing %q:\n%s", want, got)
+			t.Fatalf("stdout missing %q:\n%s", want, got)
 		}
 	}
 }
@@ -251,8 +302,11 @@ func TestSyncCommandWarnsAndContinuesWhenBudgetExceeded(t *testing.T) {
 	if execErr != nil {
 		t.Fatalf("sync Execute() returned error: %v\nstdout=%s\nstderr=%s%s", execErr, out.String(), errOut.String(), got)
 	}
-	if !strings.Contains(got, "Codex skill budget exceeded") || !strings.Contains(got, "huge-alpha: 4000 bytes") {
+	if !strings.Contains(got, "Codex skill budget exceeded") || !strings.Contains(got, "Run `scribe show --verbose` for breakdown.") {
 		t.Fatalf("stderr missing budget warning:\n%s", got)
+	}
+	if strings.Contains(got, "huge-alpha: 4000 bytes") {
+		t.Fatalf("stderr should not include contributor breakdown:\n%s", got)
 	}
 }
 

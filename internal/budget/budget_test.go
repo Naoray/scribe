@@ -131,6 +131,43 @@ func TestCheckBudgetOverflowBreakdownShowsBiggestContributors(t *testing.T) {
 	}
 }
 
+func TestCheckBudgetWarnPopulatesBreakdown(t *testing.T) {
+	skills := []Skill{
+		skillWithDescription("b", 2000),
+		skillWithDescription("a", 1900),
+	}
+
+	result := CheckBudget(skills, "codex")
+	if result.Status != StatusWarn {
+		t.Fatalf("Status = %s, want %s", result.Status, StatusWarn)
+	}
+	want := []Overflow{
+		{Skill: "b", Bytes: 2000},
+		{Skill: "a", Bytes: 1900},
+	}
+	if len(result.Overflow) != len(want) {
+		t.Fatalf("Overflow = %#v, want %#v", result.Overflow, want)
+	}
+	for i := range want {
+		if result.Overflow[i] != want[i] {
+			t.Fatalf("Overflow[%d] = %#v, want %#v", i, result.Overflow[i], want[i])
+		}
+	}
+}
+
+func TestFormatOverflowCompact(t *testing.T) {
+	result := CheckBudget([]Skill{
+		skillWithDescription("a", 4000),
+		skillWithDescription("b", 1800),
+	}, "codex")
+
+	got := FormatOverflowCompact(result)
+	want := "Codex skill budget exceeded — 5800 / 5440 bytes (107%, 2 contributors). Run `scribe show --verbose` for breakdown."
+	if got != want {
+		t.Fatalf("FormatOverflowCompact() = %q, want %q", got, want)
+	}
+}
+
 func TestCheckProjectionBudgetUsesRawCodexDescriptions(t *testing.T) {
 	skills := []Skill{
 		skillWithSentenceDescription("a", strings.Repeat("a", 3000)+". "+strings.Repeat("ignored", 100)),
