@@ -117,7 +117,7 @@ func RunPackageCommand(ctx context.Context, exec CommandExecutor, pkgDir, cmd st
 }
 
 // shellQuote wraps s in single quotes so it can be safely interpolated into
-// a sh -c command string. Any single quote inside is escaped via '\''.
+// a sh -c command string.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

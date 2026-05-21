@@ -80,7 +80,7 @@ func TestDetectKind(t *testing.T) {
 			want: sync.KindSkill,
 		},
 		{
-			name: "skill: empty tree",
+			name:  "skill: empty tree",
 			files: []tools.SkillFile{},
 			want:  sync.KindSkill,
 		},

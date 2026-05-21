@@ -55,7 +55,7 @@ type Result struct {
 type Adopter struct {
 	State *state.State
 	Tools []tools.Tool // tools to consider (typically tools.DefaultTools())
-	Emit  func(any)   // optional; nil is safe
+	Emit  func(any)    // optional; nil is safe
 }
 
 // FindCandidates walks configured adoption paths (via cfg.AdoptionPaths())

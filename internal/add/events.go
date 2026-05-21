@@ -21,5 +21,3 @@ type SkillAddErrorMsg struct {
 	Name string
 	Err  error
 }
-
-

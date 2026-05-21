@@ -99,6 +99,11 @@ func Wrap(err error, code string, exit int, opts ...Option) error {
 	return ce
 }
 
+func IsCode(err error, code string) bool {
+	var ce *Error
+	return stderrors.As(err, &ce) && ce.Code == code
+}
+
 func ExitCode(err error) int {
 	if err == nil {
 		return ExitOK

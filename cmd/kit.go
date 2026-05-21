@@ -1040,6 +1040,9 @@ func remoteKitListItems(cmd *cobra.Command, opts *kitListOptions, local map[stri
 	for _, repo := range repos {
 		kits, err := listRemoteKitsFn(cmd.Context(), client, repo)
 		if err != nil {
+			if clierrors.IsCode(err, "REGISTRY_NOT_FOUND") {
+				continue
+			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: skip remote kits from %s: %v\n", repo, err)
 			continue
 		}

@@ -24,11 +24,11 @@ const (
 // its repo root. Presence of any (executable or not) marks a payload as a
 // self-installing package when the root SKILL.md is absent.
 var installScriptNames = map[string]bool{
-	"setup":       true,
-	"install.sh":  true,
-	"install":     true,
-	"bootstrap":   true,
-	"Makefile":    true,
+	"setup":        true,
+	"install.sh":   true,
+	"install":      true,
+	"bootstrap":    true,
+	"Makefile":     true,
 	"package.json": true,
 }
 
