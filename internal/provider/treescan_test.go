@@ -3,6 +3,7 @@ package provider_test
 import (
 	"testing"
 
+	"github.com/Naoray/scribe/internal/manifest"
 	"github.com/Naoray/scribe/internal/provider"
 )
 
@@ -45,6 +46,89 @@ func TestScanTreeForSkills(t *testing.T) {
 	if !names["tool"] {
 		t.Error("expected nested/deep/tool skill")
 	}
+}
+
+func TestScanTreeForSkillsAgentsLayout(t *testing.T) {
+	entries := provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: ".agents/skills/foo/SKILL.md", Type: "blob"},
+	}, "acme", "repo")
+
+	assertTreeSkill(t, entries, "foo", ".agents/skills/foo")
+}
+
+func TestScanTreeForSkillsDedupsMirroredAgentToolDirs(t *testing.T) {
+	entries := provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: ".claude/skills/foo/SKILL.md", Type: "blob"},
+		{Path: ".codex/skills/foo/SKILL.md", Type: "blob"},
+		{Path: ".agents/skills/foo/SKILL.md", Type: "blob"},
+	}, "acme", "repo")
+
+	assertTreeSkill(t, entries, "foo", ".agents/skills/foo")
+}
+
+func TestScanTreeForSkillsKeepsSingleMirrorWithoutCanonical(t *testing.T) {
+	entries := provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: ".claude/skills/foo/SKILL.md", Type: "blob"},
+	}, "acme", "repo")
+
+	assertTreeSkill(t, entries, "foo", ".claude/skills/foo")
+}
+
+func TestScanTreeForSkillsPrefersTopLevelSkillDirectory(t *testing.T) {
+	entries := provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: ".agents/skills/foo/SKILL.md", Type: "blob"},
+		{Path: "foo/SKILL.md", Type: "blob"},
+		{Path: "skills/foo/SKILL.md", Type: "blob"},
+	}, "acme", "repo")
+
+	assertTreeSkill(t, entries, "foo", ".agents/skills/foo")
+
+	entries = provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: ".claude/skills/foo/SKILL.md", Type: "blob"},
+		{Path: "foo/SKILL.md", Type: "blob"},
+		{Path: "skills/foo/SKILL.md", Type: "blob"},
+	}, "acme", "repo")
+
+	assertTreeSkill(t, entries, "foo", "foo")
+}
+
+func TestScanTreeForSkillsPrefersRootSkillFileOverMirror(t *testing.T) {
+	entries := provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: ".claude/skills/repo/SKILL.md", Type: "blob"},
+		{Path: "SKILL.md", Type: "blob"},
+	}, "acme", "repo")
+
+	assertTreeSkill(t, entries, "repo", "SKILL.md")
+}
+
+func TestScanTreeForSkillsDedupsDistinctSkills(t *testing.T) {
+	entries := provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: ".codex/skills/foo/SKILL.md", Type: "blob"},
+		{Path: ".claude/skills/bar/SKILL.md", Type: "blob"},
+		{Path: ".agents/skills/foo/SKILL.md", Type: "blob"},
+		{Path: "skills/bar/SKILL.md", Type: "blob"},
+	}, "acme", "repo")
+
+	if len(entries) != 2 {
+		t.Fatalf("entries: got %d, want 2", len(entries))
+	}
+
+	byName := entriesByName(entries)
+	if byName["foo"].Path != ".agents/skills/foo" {
+		t.Fatalf("foo path = %q", byName["foo"].Path)
+	}
+	if byName["bar"].Path != "skills/bar" {
+		t.Fatalf("bar path = %q", byName["bar"].Path)
+	}
+}
+
+func TestScanTreeForSkillsMirrorTieBreaksByPath(t *testing.T) {
+	entries := provider.ScanTreeForSkills([]provider.TreeEntry{
+		{Path: ".codex/skills/foo/SKILL.md", Type: "blob"},
+		{Path: ".claude/skills/foo/SKILL.md", Type: "blob"},
+	}, "acme", "repo")
+
+	assertTreeSkill(t, entries, "foo", ".claude/skills/foo")
 }
 
 func TestScanTreeForSkillsEmpty(t *testing.T) {
@@ -100,4 +184,25 @@ author: vercel
 	if enriched.Path != "skills/nextjs" {
 		t.Fatalf("Path = %q", enriched.Path)
 	}
+}
+
+func assertTreeSkill(t *testing.T, entries []manifest.Entry, name, skillPath string) {
+	t.Helper()
+	if len(entries) != 1 {
+		t.Fatalf("entries: got %d, want 1", len(entries))
+	}
+	if entries[0].Name != name {
+		t.Fatalf("Name = %q, want %q", entries[0].Name, name)
+	}
+	if entries[0].Path != skillPath {
+		t.Fatalf("Path = %q, want %q", entries[0].Path, skillPath)
+	}
+}
+
+func entriesByName(entries []manifest.Entry) map[string]manifest.Entry {
+	byName := make(map[string]manifest.Entry, len(entries))
+	for _, entry := range entries {
+		byName[entry.Name] = entry
+	}
+	return byName
 }

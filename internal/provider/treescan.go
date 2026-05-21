@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
 
 	"github.com/Naoray/scribe/internal/discovery"
 	"github.com/Naoray/scribe/internal/manifest"
@@ -13,15 +14,15 @@ const skillFileName = "SKILL.md"
 
 var treeScanSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
-// ScanTreeForSkills finds all SKILL.md files in a tree listing and returns
-// catalog entries for each. The skill name is derived from the parent directory.
-// A root-level SKILL.md uses the repo name.
+// ScanTreeForSkills finds SKILL.md files in a tree listing and returns one
+// catalog entry per skill name. The skill name is derived from the parent
+// directory. A root-level SKILL.md uses the repo name.
 func ScanTreeForSkills(tree []TreeEntry, owner, repo string) []manifest.Entry {
 	return scanTreeForSkillsWithSource(tree, owner, repo, fmt.Sprintf("github:%s/%s@HEAD", owner, repo))
 }
 
 func scanTreeForSkillsWithSource(tree []TreeEntry, owner, repo, source string) []manifest.Entry {
-	var entries []manifest.Entry
+	candidatesByName := make(map[string][]string)
 	for _, entry := range tree {
 		if entry.Type != "blob" {
 			continue
@@ -43,15 +44,52 @@ func scanTreeForSkillsWithSource(tree []TreeEntry, owner, repo, source string) [
 			skillPath = dir
 		}
 
+		candidatesByName[name] = append(candidatesByName[name], skillPath)
+	}
+
+	names := make([]string, 0, len(candidatesByName))
+	for name := range candidatesByName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	entries := make([]manifest.Entry, 0, len(names))
+	for _, name := range names {
 		entries = append(entries, manifest.Entry{
 			Name:   name,
 			Source: source,
-			Path:   skillPath,
+			Path:   selectCanonicalSkillPath(candidatesByName[name]),
 			Author: owner,
 		})
 	}
 
 	return entries
+}
+
+func selectCanonicalSkillPath(candidates []string) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+
+	paths := append([]string(nil), candidates...)
+	sort.Strings(paths)
+
+	for _, candidate := range paths {
+		if path.Dir(candidate) == ".agents/skills" {
+			return candidate
+		}
+	}
+	for _, candidate := range paths {
+		if path.Dir(candidate) == "." {
+			return candidate
+		}
+	}
+	for _, candidate := range paths {
+		if path.Dir(candidate) == "skills" {
+			return candidate
+		}
+	}
+	return paths[0]
 }
 
 // EnrichTreeSkillEntry applies SKILL.md frontmatter metadata to a tree-scan

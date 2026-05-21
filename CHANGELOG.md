@@ -3,6 +3,9 @@
 ### Changed
 - **Budget warnings are now compact.** Preflight emits a single line per over-budget agent — example: `Codex skill budget exceeded — X / Y bytes (Z%, N contributors). Run scribe show --verbose for breakdown.` Run `scribe show --verbose` for the per-skill contributor breakdown.
 
+### Fixed
+- **`scribe list` no longer duplicates skills mirrored across agent-tool dirs** — tree-scan discovery now picks one canonical `SKILL.md` per skill (preferring `.agents/skills/<name>/SKILL.md`) when a repo mirrors the same skill into `.claude/skills/`, `.codex/skills/`, etc.
+
 ## v1.5.2 — 2026-05-21
 
 ### Changed
