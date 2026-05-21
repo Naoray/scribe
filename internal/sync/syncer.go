@@ -74,8 +74,8 @@ type Syncer struct {
 	// TrustAll skips approval prompts for packages (--trust-all flag).
 	TrustAll bool
 
-	// ForceBudget allows projection even when an agent description-byte budget
-	// would otherwise be exceeded.
+	// ForceBudget is kept for deprecated --force plumbing; budget guardrails
+	// are warn-only and no longer block projection.
 	ForceBudget bool
 
 	// ApprovalFunc is called when a package needs interactive approval.
@@ -1010,14 +1010,6 @@ func (s *Syncer) applySource(ctx context.Context, teamRepo string, spec *source.
 			// selection; inherit mode uses every globally-enabled tool).
 			effectiveTools := selectEffectiveTools(s.Tools, installed, s.ProjectRoot)
 
-			if !s.ForceBudget {
-				if err := s.checkBudgetBeforeProjection(st, sk.Name, tFiles, effectiveTools); err != nil {
-					s.emit(SkillErrorMsg{Name: sk.Name, Err: err})
-					summary.Failed++
-					continue
-				}
-			}
-
 			installName := sk.Name
 			aliasFor := ""
 			if alias := strings.TrimSpace(s.SkillAliases[sk.Name]); alias != "" {
@@ -1203,21 +1195,12 @@ func (s *Syncer) promoteProjectProjection(name string, st *state.State, summary 
 		return
 	}
 	canonicalDir := filepath.Join(storeDir, name)
-	content, err := os.ReadFile(filepath.Join(canonicalDir, "SKILL.md"))
-	if err != nil {
-		s.emit(SkillErrorMsg{Name: name, Err: fmt.Errorf("read stored skill: %w", err)})
+	if _, err := os.Stat(filepath.Join(canonicalDir, "SKILL.md")); err != nil {
+		s.emit(SkillErrorMsg{Name: name, Err: fmt.Errorf("stat stored skill: %w", err)})
 		summary.Failed++
 		return
 	}
 	effectiveTools := selectEffectiveTools(s.Tools, installed, s.ProjectRoot)
-	if !s.ForceBudget {
-		files := []tools.SkillFile{{Path: "SKILL.md", Content: content}}
-		if err := s.checkBudgetBeforeProjection(st, name, files, effectiveTools); err != nil {
-			s.emit(SkillErrorMsg{Name: name, Err: err})
-			summary.Failed++
-			return
-		}
-	}
 	var paths []string
 	var toolNames []string
 	for _, t := range effectiveTools {

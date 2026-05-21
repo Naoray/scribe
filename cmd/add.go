@@ -73,7 +73,7 @@ Examples:
 	addNoInteractionFlag(cmd, "Disable interactive prompts", false)
 	cmd.Flags().Bool("json", false, "Output machine-readable JSON")
 	addSourceFlags(cmd, true)
-	cmd.Flags().Bool("force", false, "Project skills even when an agent budget is exceeded")
+	cmd.Flags().Bool("force", false, "Deprecated: budget guardrails are warn-only (no-op)")
 	cmd.Flags().Bool("resync", false, "Overwrite local edits with the upstream version for modified skills")
 	cmd.Flags().String("alias", "", "Install incoming skill under this name when a local directory conflicts")
 	return markJSONSupported(cmd)
@@ -87,6 +87,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	forceBudget, _ := cmd.Flags().GetBool("force")
+	warnDeprecatedForceBudget(cmd)
 	resync, _ := cmd.Flags().GetBool("resync")
 	aliasName, _ := cmd.Flags().GetString("alias")
 
@@ -104,7 +105,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
-	if err := enforceCurrentBudget(factory, forceBudget); err != nil {
+	if err := enforceCurrentBudget(factory); err != nil {
 		return err
 	}
 

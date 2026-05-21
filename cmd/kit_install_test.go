@@ -80,11 +80,14 @@ func TestKitInstallWritesKitStateAndInstallsSameRegistryDeps(t *testing.T) {
 
 	cmd := newKitInstallCommand()
 	cmd.SetArgs([]string{"acme/skills:baseline", "--json", "--force"})
-	var out bytes.Buffer
+	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetErr(&errOut)
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("kit install: %v", err)
+	}
+	if got := errOut.String(); !strings.Contains(got, deprecatedForceBudgetWarning) {
+		t.Fatalf("stderr = %q, want deprecated force warning", got)
 	}
 	wantDeps := map[string][]kitInstallDep{
 		"acme/skills":  {{Name: "tdd"}},

@@ -1331,7 +1331,7 @@ func TestRunWithDiff_BudgetUsesCurrentProjectProjection(t *testing.T) {
 	}
 }
 
-func TestRunWithDiff_EmitsBudgetWarningForPostChangeProjection(t *testing.T) {
+func TestRunWithDiff_DoesNotEmitPerSkillBudgetWarning(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -1371,17 +1371,16 @@ func TestRunWithDiff_EmitsBudgetWarningForPostChangeProjection(t *testing.T) {
 	}
 
 	for _, event := range events {
-		if msg, ok := event.(sync.BudgetWarningMsg); ok {
-			if msg.Agent != "codex" {
-				t.Fatalf("Agent = %q, want codex", msg.Agent)
-			}
-			if !strings.Contains(msg.Message, "Codex budget") {
-				t.Fatalf("Message = %q, want Codex budget warning", msg.Message)
-			}
-			return
+		switch msg := event.(type) {
+		case sync.BudgetWarningMsg:
+			t.Fatalf("unexpected BudgetWarningMsg: %#v", msg)
+		case sync.SkillErrorMsg:
+			t.Fatalf("unexpected SkillErrorMsg: %v", msg.Err)
 		}
 	}
-	t.Fatal("expected BudgetWarningMsg")
+	if _, ok := st.Installed["incoming"]; !ok {
+		t.Fatal("incoming skill was not installed")
+	}
 }
 
 func TestRunWithDiff_SkipsBudgetOnMigrationSource(t *testing.T) {

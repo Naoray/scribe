@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +12,9 @@ import (
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/budget"
 	"github.com/Naoray/scribe/internal/config"
+	gh "github.com/Naoray/scribe/internal/github"
+	"github.com/Naoray/scribe/internal/manifest"
+	"github.com/Naoray/scribe/internal/provider"
 	"github.com/Naoray/scribe/internal/state"
 )
 
@@ -168,7 +174,7 @@ func TestProjectBudgetIncludesTargetedSnippets(t *testing.T) {
 	}
 }
 
-func TestEnforceCurrentBudgetReportsOverflowContributors(t *testing.T) {
+func TestEnforceCurrentBudgetWarnsOnOverflow(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	wd := t.TempDir()
@@ -182,29 +188,31 @@ func TestEnforceCurrentBudgetReportsOverflowContributors(t *testing.T) {
 	}
 
 	factory := budgetTestFactory(&state.State{Installed: map[string]state.InstalledSkill{
-		"huge-alpha": {Tools: []string{"codex"}},
-		"huge-beta":  {Tools: []string{"codex"}},
+		"huge-alpha": {Tools: []string{"codex"}, Sources: []state.SkillSource{{Registry: "acme/team", Ref: "main"}}},
+		"huge-beta":  {Tools: []string{"codex"}, Sources: []state.SkillSource{{Registry: "acme/team", Ref: "main"}}},
 	}})
-	err := enforceCurrentBudget(factory, false)
-	if err == nil {
-		t.Fatal("enforceCurrentBudget returned nil, want budget refusal")
+	var err error
+	got := captureStderr(t, func() {
+		err = enforceCurrentBudget(factory)
+	})
+	if err != nil {
+		t.Fatalf("enforceCurrentBudget returned error: %v", err)
 	}
-	got := err.Error()
 	for _, want := range []string{
+		"warning:",
 		"Codex skill budget exceeded",
 		"estimated: 5800 / 5440 bytes",
 		"biggest contributors:",
 		"huge-alpha: 4000 bytes",
 		"huge-beta: 1800 bytes",
-		"rerun with --force",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("error missing %q:\n%s", want, got)
+			t.Fatalf("stderr missing %q:\n%s", want, got)
 		}
 	}
 }
 
-func TestEnforceCurrentBudgetForceBypassesRefusal(t *testing.T) {
+func TestSyncCommandWarnsAndContinuesWhenBudgetExceeded(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	wd := t.TempDir()
@@ -221,9 +229,44 @@ func TestEnforceCurrentBudgetForceBypassesRefusal(t *testing.T) {
 		"huge-alpha": {Tools: []string{"codex"}},
 		"huge-beta":  {Tools: []string{"codex"}},
 	}})
-	if err := enforceCurrentBudget(factory, true); err != nil {
-		t.Fatalf("enforceCurrentBudget(force=true): %v", err)
+	factory.Config = func() (*config.Config, error) {
+		return &config.Config{Registries: []config.RegistryConfig{{Repo: "acme/team", Enabled: true, Type: config.RegistryTypeTeam}}}, nil
 	}
+	factory.Provider = func() (provider.Provider, error) {
+		return budgetSyncProvider{}, nil
+	}
+	oldFactory := commandFactory
+	commandFactory = func() *app.Factory { return factory }
+	t.Cleanup(func() { commandFactory = oldFactory })
+
+	cmd := newSyncCommand()
+	cmd.SetArgs(nil)
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	var execErr error
+	got := captureStderr(t, func() {
+		execErr = cmd.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("sync Execute() returned error: %v\nstdout=%s\nstderr=%s%s", execErr, out.String(), errOut.String(), got)
+	}
+	if !strings.Contains(got, "Codex skill budget exceeded") || !strings.Contains(got, "huge-alpha: 4000 bytes") {
+		t.Fatalf("stderr missing budget warning:\n%s", got)
+	}
+}
+
+type budgetSyncProvider struct{}
+
+func (budgetSyncProvider) Discover(context.Context, string) (*provider.DiscoverResult, error) {
+	return &provider.DiscoverResult{IsTeam: true, Entries: []manifest.Entry{
+		{Name: "huge-alpha", Source: "github:acme/team@main"},
+		{Name: "huge-beta", Source: "github:acme/team@main"},
+	}}, nil
+}
+
+func (budgetSyncProvider) Fetch(_ context.Context, entry manifest.Entry) ([]provider.File, error) {
+	return []provider.File{{Path: "SKILL.md", Content: []byte("# " + entry.Name + "\n")}}, nil
 }
 
 func budgetTestFactory(st *state.State) *app.Factory {
@@ -234,7 +277,40 @@ func budgetTestFactory(st *state.State) *app.Factory {
 		State: func() (*state.State, error) {
 			return st, nil
 		},
+		Client: func() (*gh.Client, error) {
+			return gh.NewClient(context.Background(), ""), nil
+		},
+		Provider: func() (provider.Provider, error) {
+			client := gh.NewClient(context.Background(), "")
+			return provider.NewCompositeProvider(provider.NewGitHubProvider(provider.WrapGitHubClient(client))), nil
+		},
 	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	original := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+	os.Stderr = writer
+	t.Cleanup(func() { os.Stderr = original })
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, reader); err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stderr reader: %v", err)
+	}
+	return buf.String()
 }
 
 func writeBudgetSkill(t *testing.T, home, name, content string) {

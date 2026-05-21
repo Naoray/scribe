@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/Naoray/scribe/internal/app"
 	"github.com/Naoray/scribe/internal/budget"
@@ -15,6 +16,7 @@ import (
 	"github.com/Naoray/scribe/internal/snippet"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
+	"github.com/spf13/cobra"
 )
 
 type resolvedBudgetSet struct {
@@ -165,7 +167,15 @@ func containsBudgetTool(tools []string, agent string) bool {
 	return false
 }
 
-func enforceCurrentBudget(factory *app.Factory, force bool) error {
+const deprecatedForceBudgetWarning = "warning: --force is deprecated; budget guardrails are now warn-only"
+
+func warnDeprecatedForceBudget(cmd *cobra.Command) {
+	if cmd.Flags().Changed("force") {
+		fmt.Fprintln(cmd.ErrOrStderr(), deprecatedForceBudgetWarning)
+	}
+}
+
+func enforceCurrentBudget(factory *app.Factory) error {
 	cfg, err := factory.Config()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -180,16 +190,18 @@ func enforceCurrentBudget(factory *app.Factory, force bool) error {
 		// validation, fetch, or auth errors.
 		return nil
 	}
+	var warnings []string
 	for _, agent := range budgetAgents(cfg) {
 		result := budget.CheckProjectionBudget(budgetSkillsForAgent(set, st, agent), agent)
 		switch result.Status {
 		case budget.StatusRefuse:
-			if !force {
-				return fmt.Errorf("%s\nTry removing one kit, or rerun with --force to project anyway.", budget.FormatOverflow(result))
-			}
+			warnings = append(warnings, budget.FormatOverflow(result))
 		case budget.StatusWarn:
-			fmt.Fprintf(os.Stderr, "warning: %s\n", budget.FormatResult(result))
+			warnings = append(warnings, budget.FormatResult(result))
 		}
+	}
+	if len(warnings) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", strings.Join(warnings, "\n\n"))
 	}
 	return nil
 }
