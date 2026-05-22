@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## v1.5.4 — 2026-05-22
+
 ### Fixed
 - **`scribe browse` no longer shows duplicate skill rows.** Same-name skill entries surfaced under one registry collapse to the first occurrence in both the TUI list and the JSON/non-TTY output, so pairs like `pbakaus/impeccable (2)` no longer appear when a manifest emits the same name twice.
 
