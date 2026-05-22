@@ -16,6 +16,32 @@ const projectFileName = ".scribe.yaml"
 
 const LegacyGlobalProjectionCompatBanner = "scribe: legacy global-projection compatibility mode is active; run `scribe migrate global-to-projects` to move to project-local `.scribe.yaml` projection before v1.0."
 
+// LegacyGlobalProjectionInfoBanner is the softer variant emitted when the
+// current working directory is a non-project shell location (e.g. $HOME, /tmp).
+// In those contexts the user is intentionally outside a project, so the
+// migration nag is replaced with a one-line informational notice.
+const LegacyGlobalProjectionInfoBanner = "scribe: not inside a .scribe.yaml project — operating on global skills only"
+
+// IsNonProjectShellDir reports whether wd is a directory where running scribe
+// without a project file is the expected, intentional state (the user's shell
+// dropped here to interact with the machine globally, not a forgotten
+// .scribe.yaml). Returns true for $HOME and a small set of standard shell
+// roots; returns false for anything that looks like a project workspace.
+func IsNonProjectShellDir(wd string) bool {
+	if wd == "" {
+		return false
+	}
+	switch wd {
+	case "/", "/tmp", "/var/tmp":
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	return wd == home
+}
+
 // LegacyGlobalProjectionCompat describes whether Scribe should preserve the
 // pre-project global projection behavior for this invocation.
 type LegacyGlobalProjectionCompat struct {

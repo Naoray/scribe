@@ -457,3 +457,25 @@ func TestBuildLocalRowsExcluding_FiltersBootstrapAfterMatching(t *testing.T) {
 		t.Fatalf("row[0].Name = %q, want my-skill", rows[0].Name)
 	}
 }
+
+func TestDedupListRowsByGroupName(t *testing.T) {
+	// Repro for the duplicate "impeccable" entries observed under
+	// pbakaus/impeccable: same (Group, Name) appearing twice with different
+	// SHAs. Collapse to the first occurrence so the TUI shows a clean list.
+	rows := []ListRow{
+		{Group: "pbakaus/impeccable", Name: "impeccable", LatestSHA: "8af38df"},
+		{Group: "pbakaus/impeccable", Name: "impeccable", LatestSHA: "1d611ef"},
+		{Group: "pbakaus/impeccable", Name: "other"},
+		{Group: "anthropics/skills", Name: "impeccable"},
+	}
+	got := dedupListRowsByGroupName(rows)
+	if len(got) != 3 {
+		t.Fatalf("dedup returned %d rows, want 3: %+v", len(got), got)
+	}
+	if got[0].LatestSHA != "8af38df" {
+		t.Errorf("first impeccable SHA = %q, want first occurrence 8af38df", got[0].LatestSHA)
+	}
+	if got[1].Name != "other" || got[2].Group != "anthropics/skills" {
+		t.Errorf("dedup re-ordered or dropped non-dupes: %+v", got)
+	}
+}

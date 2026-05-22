@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### Fixed
+- **`scribe browse` no longer shows duplicate skill rows.** Same-name skill entries surfaced under one registry collapse to the first occurrence in both the TUI list and the JSON/non-TTY output, so pairs like `pbakaus/impeccable (2)` no longer appear when a manifest emits the same name twice.
+
+### Changed
+- **Legacy global-projection banner is contextual.** When running scribe from `$HOME`, `/`, `/tmp`, or `/var/tmp` (intentional non-project shells), the migration nag is replaced with `scribe: not inside a .scribe.yaml project — operating on global skills only`. Project-shaped directories without a `.scribe.yaml` keep the migration banner.
+
 ## v1.5.3 — 2026-05-21
 
 ### Changed
