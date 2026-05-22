@@ -132,7 +132,30 @@ func BuildRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {
 	}
 
 	rows = append(rows, BuildLocalRowsExcluding(localSkills, matchedLocal, bag.State)...)
+	rows = dedupListRowsByGroupName(rows)
 	return rows, warnings, nil
+}
+
+// dedupListRowsByGroupName collapses rows that share the same (Group, Name)
+// key, keeping the first occurrence. Registry manifests are validated for
+// intra-manifest duplicates, but the same skill can still surface twice when a
+// registry's catalog and an inferred root-level entry resolve to the same
+// display name — without this guard the list TUI shows visible duplicates.
+func dedupListRowsByGroupName(rows []ListRow) []ListRow {
+	if len(rows) < 2 {
+		return rows
+	}
+	seen := make(map[string]bool, len(rows))
+	out := rows[:0]
+	for _, r := range rows {
+		key := r.Group + "\x00" + r.Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, r)
+	}
+	return out
 }
 
 func BuildKitBrowseRows(ctx context.Context, bag *Bag) ([]ListRow, []string, error) {

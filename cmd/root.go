@@ -197,7 +197,11 @@ func newRootCmd() *cobra.Command {
 					return err
 				}
 				if emit {
-					fmt.Fprintln(c.ErrOrStderr(), state.LegacyGlobalProjectionCompatBanner)
+					if state.IsNonProjectShellDir(wd) {
+						fmt.Fprintln(c.ErrOrStderr(), state.LegacyGlobalProjectionInfoBanner)
+					} else {
+						fmt.Fprintln(c.ErrOrStderr(), state.LegacyGlobalProjectionCompatBanner)
+					}
 				}
 			}
 

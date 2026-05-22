@@ -341,6 +341,21 @@ func TestRoot_LegacyCompatBannerCorruptTimestampDoesNotBlockCommand(t *testing.T
 	}
 }
 
+func TestRoot_LegacyCompatBannerSwapsToInfoInHome(t *testing.T) {
+	// When cwd is $HOME the user is intentionally outside a project; show
+	// the info variant instead of the migration nag.
+	home := setupLegacyCompatBannerHome(t)
+	t.Chdir(home)
+
+	_, stderr := executeRootForLegacyCompatBannerTest(t, home, []string{"list", "--json"})
+	if !strings.Contains(stderr, state.LegacyGlobalProjectionInfoBanner) {
+		t.Fatalf("stderr missing info banner in HOME:\n%s", stderr)
+	}
+	if strings.Contains(stderr, state.LegacyGlobalProjectionCompatBanner) {
+		t.Fatalf("migration banner leaked in HOME (should be info only):\n%s", stderr)
+	}
+}
+
 func setupLegacyCompatBannerHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()

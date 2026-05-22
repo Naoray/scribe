@@ -396,11 +396,17 @@ func browseInstall(
 }
 
 func filterBrowseEntries(entries []browseEntry) []browseEntry {
+	seen := make(map[string]bool, len(entries))
 	out := make([]browseEntry, 0, len(entries))
 	for _, entry := range entries {
 		if entry.Status.Status == sync.StatusCurrent {
 			continue
 		}
+		key := entry.Registry + "\x00" + entry.SourceKey + "\x00" + entry.Status.Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		out = append(out, entry)
 	}
 	return out

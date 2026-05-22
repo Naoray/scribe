@@ -72,6 +72,31 @@ func TestDetectLegacyGlobalProjectionCompat(t *testing.T) {
 	}
 }
 
+func TestIsNonProjectShellDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cases := []struct {
+		name string
+		wd   string
+		want bool
+	}{
+		{"home", home, true},
+		{"root", "/", true},
+		{"tmp", "/tmp", true},
+		{"var_tmp", "/var/tmp", true},
+		{"empty", "", false},
+		{"project_workdir", filepath.Join(home, "Workspace", "proj"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := state.IsNonProjectShellDir(tc.wd); got != tc.want {
+				t.Fatalf("IsNonProjectShellDir(%q) = %v, want %v", tc.wd, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestShouldEmitLegacyGlobalProjectionCompatBannerAt(t *testing.T) {
 	timestampPath := filepath.Join(t.TempDir(), ".scribe", "legacy-global-projection-banner.date")
 	first := time.Date(2026, 4, 30, 9, 0, 0, 0, time.Local)
