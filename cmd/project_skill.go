@@ -9,6 +9,7 @@ import (
 
 	"github.com/Naoray/scribe/internal/cli/envelope"
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	"github.com/Naoray/scribe/internal/projectfile"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
 )
@@ -24,7 +25,12 @@ func newProjectSkillCommand() *cobra.Command {
 		Use:   "skill",
 		Short: "Manage project-authored skills",
 	}
-	cmd.AddCommand(newProjectSkillCreateCommand(), newProjectSkillClaimCommand())
+	cmd.AddCommand(
+		newProjectSkillCreateCommand(),
+		newProjectSkillClaimCommand(),
+		newProjectEditCommand(projectEditOptions{kind: "skill", action: "add", field: "add", mutator: func(pf *projectfile.ProjectFile) *[]string { return &pf.Add }}),
+		newProjectEditCommand(projectEditOptions{kind: "skill", action: "remove", field: "add", mutator: func(pf *projectfile.ProjectFile) *[]string { return &pf.Add }}),
+	)
 	return cmd
 }
 

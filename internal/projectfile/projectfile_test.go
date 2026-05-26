@@ -126,6 +126,46 @@ func TestFindNotFound(t *testing.T) {
 	}
 }
 
+func TestAddUnique(t *testing.T) {
+	t.Parallel()
+
+	got, changed := AddUnique([]string{"core", "review"}, "review")
+	if changed {
+		t.Fatal("AddUnique changed existing item")
+	}
+	if !reflect.DeepEqual(got, []string{"core", "review"}) {
+		t.Fatalf("AddUnique existing = %#v", got)
+	}
+
+	got, changed = AddUnique(got, "deploy")
+	if !changed {
+		t.Fatal("AddUnique did not report added item")
+	}
+	if !reflect.DeepEqual(got, []string{"core", "review", "deploy"}) {
+		t.Fatalf("AddUnique new = %#v", got)
+	}
+}
+
+func TestRemoveName(t *testing.T) {
+	t.Parallel()
+
+	got, changed := RemoveName([]string{"core", "review", "review", "deploy"}, "review")
+	if !changed {
+		t.Fatal("RemoveName did not report removed item")
+	}
+	if !reflect.DeepEqual(got, []string{"core", "deploy"}) {
+		t.Fatalf("RemoveName = %#v", got)
+	}
+
+	got, changed = RemoveName(got, "missing")
+	if changed {
+		t.Fatal("RemoveName changed missing item")
+	}
+	if !reflect.DeepEqual(got, []string{"core", "deploy"}) {
+		t.Fatalf("RemoveName missing = %#v", got)
+	}
+}
+
 func TestSaveRoundTrip(t *testing.T) {
 	t.Parallel()
 

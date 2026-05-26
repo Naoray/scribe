@@ -7,6 +7,6 @@ func newProjectCommand() *cobra.Command {
 		Use:   "project",
 		Short: "Manage Scribe project artifacts",
 	}
-	cmd.AddCommand(newProjectInitCommand(), newProjectSyncCommand(), newProjectSkillCommand())
+	cmd.AddCommand(newProjectInitCommand(), newProjectSyncCommand(), newProjectKitCommand(), newProjectSnippetCommand(), newProjectSkillCommand())
 	return cmd
 }
