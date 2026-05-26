@@ -111,10 +111,12 @@ func runProjectSync(cmd *cobra.Command, opts *projectSyncOptions) error {
 		vendorSet[projectSkillName(name)] = true
 	}
 	var skillNames []string
+	kitSkillSet := map[string]bool{}
 	if shouldSyncProjectSkills(pf, vendorSet) {
 		skillNames = resolveProjectSkillNames(pf, globalKits)
+		kitSkillSet = resolveProjectKitSkillSet(pf, globalKits)
 	}
-	lockEntries, err := syncProjectSkills(projectRoot, storeDir, skillNames, vendorSet, st, opts, &out)
+	lockEntries, err := syncProjectSkills(projectRoot, storeDir, skillNames, vendorSet, kitSkillSet, st, opts, &out)
 	if err != nil {
 		return err
 	}
@@ -196,7 +198,7 @@ func projectKitPinFromState(name string, k *kit.Kit, st *state.State) (lockfile.
 	}, true
 }
 
-func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendorSet map[string]bool, st *state.State, opts *projectSyncOptions, out *projectSyncOutput) ([]lockfile.ProjectEntry, error) {
+func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendorSet, kitSkillSet map[string]bool, st *state.State, opts *projectSyncOptions, out *projectSyncOutput) ([]lockfile.ProjectEntry, error) {
 	entries := make([]lockfile.ProjectEntry, 0)
 	for _, ref := range skillNames {
 		name := projectSkillName(ref)
@@ -209,10 +211,11 @@ func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendor
 				clierrors.WithRemediation("Install the skill locally before publishing project artifacts."),
 			)
 		}
+		vendorSkill := installed.Origin == state.OriginProject || vendorSet[name] || kitSkillSet[name]
 		switch {
 		case installed.Origin == state.OriginBootstrap:
 			out.BootstrapSkipped = append(out.BootstrapSkipped, name)
-		case installed.Origin == state.OriginProject || vendorSet[name]:
+		case vendorSkill:
 			if vendorSet[name] && installed.Origin == state.OriginLocal {
 				installed.Origin = state.OriginProject
 				st.Installed[name] = installed
@@ -230,6 +233,14 @@ func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendor
 				out.Drift = append(out.Drift, filepath.Join(projectRoot, ".ai", "skills", name))
 			}
 			out.SkillsVendored = append(out.SkillsVendored, name)
+			if installed.Origin == state.OriginRegistry {
+				entry, err := projectEntryFromState(name, installed)
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, entry)
+				out.RegistryPinned = append(out.RegistryPinned, name)
+			}
 		case installed.Origin == state.OriginLocal:
 			return nil, clierrors.Wrap(fmt.Errorf("skill %q is local", name), "PROJECT_SKILL_LOCAL", clierrors.ExitConflict,
 				clierrors.WithRemediation("Run `scribe project skill claim "+name+"` or pass `scribe project sync --vendor "+name+"`."),
@@ -426,11 +437,25 @@ func shouldSyncProjectSkills(pf *projectfile.ProjectFile, vendorSet map[string]b
 	if pf != nil && len(pf.Add) > 0 {
 		return true
 	}
+	if pf != nil && len(pf.Kits) > 0 {
+		return true
+	}
 	return len(vendorSet) > 0
 }
 
 func resolveProjectSkillNames(pf *projectfile.ProjectFile, kits map[string]*kit.Kit) []string {
+	names, _ := resolveProjectSkillPlan(pf, kits)
+	return names
+}
+
+func resolveProjectKitSkillSet(pf *projectfile.ProjectFile, kits map[string]*kit.Kit) map[string]bool {
+	_, kitSkillSet := resolveProjectSkillPlan(pf, kits)
+	return kitSkillSet
+}
+
+func resolveProjectSkillPlan(pf *projectfile.ProjectFile, kits map[string]*kit.Kit) ([]string, map[string]bool) {
 	seen := map[string]bool{}
+	kitSkillSet := map[string]bool{}
 	var names []string
 	add := func(name string) {
 		name = strings.TrimSpace(name)
@@ -448,14 +473,19 @@ func resolveProjectSkillNames(pf *projectfile.ProjectFile, kits map[string]*kit.
 			for _, skill := range k.Skills {
 				if alias := k.SkillAliases[skill]; alias != "" {
 					add(alias)
+					kitSkillSet[alias] = true
 					continue
 				}
-				add(projectSkillName(skill))
+				name := projectSkillName(skill)
+				add(name)
+				if name != "" {
+					kitSkillSet[name] = true
+				}
 			}
 		}
 	}
 	sort.Strings(names)
-	return names
+	return names, kitSkillSet
 }
 
 func projectSkillName(ref string) string {

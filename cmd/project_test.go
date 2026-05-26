@@ -130,7 +130,7 @@ func TestProjectSyncVendorsProjectSkillAndPinsRegistrySkill(t *testing.T) {
 	}
 }
 
-func TestProjectSyncKitsOnlySkipsSkillHashing(t *testing.T) {
+func TestProjectSyncKitsOnlyVendorsAndPinsKitSkills(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	t.Setenv("HOME", home)
@@ -138,9 +138,7 @@ func TestProjectSyncKitsOnlySkipsSkillHashing(t *testing.T) {
 
 	mustWriteProjectFile(t, filepath.Join(project, ".scribe.yaml"), "kits:\n  - core\n")
 	mustSaveProjectKit(t, filepath.Join(home, ".scribe", "kits", "core.yaml"), &kit.Kit{Name: "core", Skills: []string{"deploy"}})
-	if err := os.MkdirAll(filepath.Join(home, ".scribe", "skills", "deploy"), 0o755); err != nil {
-		t.Fatalf("mkdir empty skill dir: %v", err)
-	}
+	mustWriteProjectFile(t, filepath.Join(home, ".scribe", "skills", "deploy", "SKILL.md"), "# deploy\n")
 
 	st := stateFixture(t, home)
 	st.Kits["core"] = state.InstalledKit{
@@ -176,12 +174,26 @@ func TestProjectSyncKitsOnlySkipsSkillHashing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(project, ".ai", "kits", "core.yaml")); err != nil {
 		t.Fatalf("project kit missing: %v", err)
 	}
+	if _, _, err := projectstore.VerifyMarker(filepath.Join(project, ".ai", "skills", "deploy")); err != nil {
+		t.Fatalf("verify vendored kit skill marker: %v", err)
+	}
+	vendored, err := os.ReadFile(filepath.Join(project, ".ai", "skills", "deploy", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read vendored kit skill: %v", err)
+	}
+	if !strings.HasPrefix(string(vendored), "---\nname: deploy\ndescription: \"\"\n---\n\n") {
+		t.Fatalf("vendored kit skill was not normalized for project sync:\n%s", vendored)
+	}
 	lf, err := projectstore.Project(project).LoadProjectLockfile()
 	if err != nil {
 		t.Fatalf("load lockfile: %v", err)
 	}
-	if len(lf.Entries) != 0 {
-		t.Fatalf("entries = %+v, want none for kits-only project sync", lf.Entries)
+	entry, ok := lf.Entry("deploy")
+	if !ok {
+		t.Fatal("deploy pin missing")
+	}
+	if entry.SourceRegistry != "acme/skills" || entry.SourceRepo != "acme/source" || entry.Path != "skills/deploy" {
+		t.Fatalf("entry = %+v", entry)
 	}
 	if len(lf.Kits) != 1 || lf.Kits[0].Name != "core" {
 		t.Fatalf("kit pins = %+v", lf.Kits)
