@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Naoray/scribe/internal/reconcile"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/workflow"
@@ -90,6 +91,47 @@ func TestTextFormatter_BudgetWarning(t *testing.T) {
 
 	if !strings.Contains(errOut.String(), "! Codex budget: 78% (4280 / 5440 bytes)") {
 		t.Errorf("expected '!' prefixed budget warning, got: %s", errOut.String())
+	}
+}
+
+func TestTextFormatter_ReconcileHealedSummary(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var out, errOut bytes.Buffer
+	fmtr := workflow.NewFormatterWithWriters(false, false, &out, &errOut)
+
+	fmtr.OnReconcileConflict("review", state.ProjectionConflict{Tool: "codex", Path: "/tmp/review"})
+	fmtr.OnReconcileComplete(sync.ReconcileCompleteMsg{Summary: reconcile.Summary{
+		Relinked: 2,
+	}})
+
+	if !strings.Contains(out.String(), "repaired 2 tool installs") {
+		t.Fatalf("expected repaired summary, got stdout %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "conflict:") || strings.Contains(errOut.String(), "skipped") {
+		t.Fatalf("unexpected conflict wall in stderr: %q", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "warning: 2 skill(s) differ (auto-resolved to newest); run `scribe doctor` for details") {
+		t.Fatalf("expected auto-resolved warning, got stderr %q", errOut.String())
+	}
+}
+
+func TestTextFormatter_ReconcileUnresolvedSummary(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var out, errOut bytes.Buffer
+	fmtr := workflow.NewFormatterWithWriters(false, false, &out, &errOut)
+
+	fmtr.OnReconcileComplete(sync.ReconcileCompleteMsg{Summary: reconcile.Summary{
+		Conflicts: []state.ProjectionConflict{{Tool: "codex", Path: "/tmp/review"}},
+	}})
+
+	if out.Len() != 0 {
+		t.Fatalf("unexpected stdout: %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "skipped") {
+		t.Fatalf("unexpected skipped language in stderr: %q", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "warning: 1 skill(s) could not be repaired; run `scribe doctor` for details") {
+		t.Fatalf("expected unresolved warning, got stderr %q", errOut.String())
 	}
 }
 

@@ -161,12 +161,6 @@ func (f *textFormatter) OnSyncComplete(summary sync.SyncCompleteMsg) {
 }
 
 func (f *textFormatter) OnReconcileConflict(name string, conflict state.ProjectionConflict) {
-	tool := conflict.Tool
-	if tool == "" {
-		tool = "tool"
-	}
-	fmt.Fprintf(f.errOut, "conflict: %s in %s differs from managed copy\n", name, tool)
-	fmt.Fprintf(f.errOut, "run `scribe skill repair %s --tool %s --from managed|tool` to resolve\n", name, tool)
 }
 
 func (f *textFormatter) OnReconcileComplete(msg sync.ReconcileCompleteMsg) {
@@ -176,8 +170,11 @@ func (f *textFormatter) OnReconcileComplete(msg sync.ReconcileCompleteMsg) {
 	if msg.Summary.Installed+msg.Summary.Relinked+msg.Summary.Removed > 0 {
 		fmt.Fprintf(f.out, "repaired %d tool installs\n", msg.Summary.Installed+msg.Summary.Relinked+msg.Summary.Removed)
 	}
+	if msg.Summary.Relinked > 0 {
+		fmt.Fprintf(f.errOut, "warning: %d skill(s) differ (auto-resolved to newest); run `scribe doctor` for details\n", msg.Summary.Relinked)
+	}
 	if len(msg.Summary.Conflicts) > 0 {
-		fmt.Fprintf(f.errOut, "%d conflict(s) skipped\n", len(msg.Summary.Conflicts))
+		fmt.Fprintf(f.errOut, "warning: %d skill(s) could not be repaired; run `scribe doctor` for details\n", len(msg.Summary.Conflicts))
 	}
 }
 
