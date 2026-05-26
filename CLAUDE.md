@@ -83,8 +83,16 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe migrate global-to-projects` | --dry-run, --force, --json, --no-interaction, --project, --undo | yes |
 | `scribe migrate` | --json | no |
 | `scribe project init` | --force, --json, --kits | yes |
+| `scribe project kit add` | --json, --no-sync | yes |
+| `scribe project kit remove` | --json, --no-sync | yes |
+| `scribe project kit` | --json | no |
+| `scribe project snippet add` | --json, --no-sync | yes |
+| `scribe project snippet remove` | --json, --no-sync | yes |
+| `scribe project snippet` | --json | no |
+| `scribe project skill add` | --json, --no-sync | yes |
 | `scribe project skill claim` | --json | yes |
 | `scribe project skill create` | --json | yes |
+| `scribe project skill remove` | --block, --json, --no-sync | yes |
 | `scribe project skill` | --json | no |
 | `scribe project sync` | --check, --force, --json, --vendor | yes |
 | `scribe project` | --json | no |
