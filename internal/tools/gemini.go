@@ -2,14 +2,16 @@ package tools
 
 import (
 	"errors"
-	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
-	"strings"
+	"path/filepath"
 )
 
 const toolGemini = "gemini"
 
-// GeminiTool delegates skill lifecycle management to the native Gemini CLI.
+// GeminiTool exposes Scribe-managed skills to Gemini via .agents/skills,
+// which Gemini's native skill discovery reads in addition to .gemini/skills.
 type GeminiTool struct{}
 
 func (t GeminiTool) Name() string { return toolGemini }
@@ -20,53 +22,42 @@ func (t GeminiTool) Detect() bool {
 }
 
 func (t GeminiTool) Install(skillName, canonicalDir, projectRoot string) ([]string, error) {
-	cmd := exec.Command(toolGemini, "skills", "link", canonicalDir, "--scope", "user", "--consent")
-	out, err := cmd.CombinedOutput()
+	projectRoot = projectionProjectRoot(skillName, projectRoot)
+	skillsDir, err := codexSkillsDir(projectRoot)
 	if err != nil {
-		return nil, fmt.Errorf("gemini skills link %q: %w%s", skillName, err, formatCommandOutput(out))
+		return nil, err
 	}
-	return []string{fmt.Sprintf("gemini:user:%s", skillName)}, nil
+	link := filepath.Join(skillsDir, skillName)
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		return nil, err
+	}
+	if err := replaceSymlink(link, canonicalDir); err != nil {
+		return nil, err
+	}
+	return []string{link}, nil
 }
 
-// SkillPath is not applicable for GeminiTool — Gemini manages skill paths
-// internally via its CLI and does not expose a predictable filesystem location.
 func (t GeminiTool) SkillPath(skillName, projectRoot string) (string, error) {
-	return "", fmt.Errorf("gemini: skill path not available (managed by gemini CLI)")
+	projectRoot = projectionProjectRoot(skillName, projectRoot)
+	skillsDir, err := codexSkillsDir(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(skillsDir, skillName), nil
 }
 
-// CanonicalTarget returns ok=false because Gemini owns its skill directory
-// through the CLI; reconcile has no filesystem projection to inspect.
-func (t GeminiTool) CanonicalTarget(_ string) (string, bool) {
-	return "", false
+func (t GeminiTool) CanonicalTarget(canonicalDir string) (string, bool) {
+	return canonicalDir, true
 }
 
 func (t GeminiTool) Uninstall(skillName string) error {
-	// Fail loudly when the gemini CLI is missing from PATH. Silently returning
-	// nil would leave Gemini's side of the install in place while Scribe drops
-	// its state entry — the user never learns cleanup was skipped.
-	if _, err := exec.LookPath(toolGemini); err != nil {
-		return fmt.Errorf("gemini CLI not found in PATH — skill %q may still be linked; run `gemini skills uninstall %s --scope user` manually", skillName, skillName)
-	}
-	cmd := exec.Command(toolGemini, "skills", "uninstall", skillName, "--scope", "user")
-	out, err := cmd.CombinedOutput()
+	skillsDir, err := codexSkillsDir("")
 	if err != nil {
-		trimmed := strings.TrimSpace(string(out))
-		if strings.Contains(strings.ToLower(trimmed), "not found") {
-			return nil
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 0 {
-			return nil
-		}
-		return fmt.Errorf("gemini skills uninstall %q: %w%s", skillName, err, formatCommandOutput(out))
+		return err
+	}
+	link := filepath.Join(skillsDir, skillName)
+	if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	return nil
-}
-
-func formatCommandOutput(out []byte) string {
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		return ""
-	}
-	return ": " + trimmed
 }
