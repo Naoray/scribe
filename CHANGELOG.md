@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## v1.6.0 — 2026-05-26
+
+### Added
+- **Manage `.scribe.yaml` from the CLI.** New `scribe project kit add/remove`, `scribe project snippet add/remove`, and `scribe project skill add/remove` commands edit the project loadout without hand-editing YAML. `skill add` appends to `add:`, `skill remove` deletes from `add:`, and `skill remove --block` writes to `remove:` to suppress a kit-provided skill. Mutations re-sync by default (`--no-sync` to skip); all emit the versioned JSON envelope and exit `3` when no `.scribe.yaml` is present.
+
+### Fixed
+- **`scribe sync` heals project/kit skill projections instead of skipping them.** Dangling or mismatched skill symlinks are relinked to the newest valid source (project vendor dir or global store) rather than reported as unresolvable conflicts and skipped — so skills stay available across sessions without a manual `scribe skill repair`. Kits-only projects now vendor their kit skills into `.ai/skills/`, and the per-skill conflict wall is condensed to a single summary line.
+- **Gemini no longer warns about duplicate skills.** Skills project once into the shared `~/.agents/skills` directory Gemini already reads, instead of also creating `~/.gemini/skills` copies via `gemini skills link`. Legacy `~/.gemini/skills/<name>` links from older versions are cleaned up on sync — guarded so only symlinks resolving into the scribe store are removed, never a user's own Gemini skills.
+- **`scribe sync --force` no longer aborts on an empty registry loadout.** A configured registry with no discoverable skills (`no skills found`) is skipped with a warning and sync continues, instead of failing the whole run with a top-level error.
+
 ## v1.5.4 — 2026-05-22
 
 ### Fixed
