@@ -101,7 +101,7 @@ func projectEditShort(opts projectEditOptions) string {
 
 func runProjectEdit(cmd *cobra.Command, args []string, opts projectEditOptions) error {
 	for _, name := range args {
-		if err := validateKitName(name); err != nil {
+		if err := validateProjectEditName(opts.kind, name); err != nil {
 			return err
 		}
 	}
@@ -131,7 +131,7 @@ func runProjectEdit(cmd *cobra.Command, args []string, opts projectEditOptions) 
 		Kind:        opts.kind,
 		Action:      opts.action,
 		Field:       opts.field,
-		Synced:      !opts.noSync,
+		Synced:      !opts.noSync && opts.kind != "snippet",
 	}
 	for _, name := range args {
 		var changed bool
@@ -143,12 +143,12 @@ func runProjectEdit(cmd *cobra.Command, args []string, opts projectEditOptions) 
 		*list, changed = projectfile.RemoveName(*list, name)
 		out.Results = append(out.Results, projectEditNameResult{Name: name, Status: removeStatus(changed), Changed: changed})
 	}
-	out.List = append([]string(nil), *list...)
+	out.List = cloneProjectEditList(*list)
 
 	if err := projectfile.Save(projectPath, pf); err != nil {
 		return err
 	}
-	if !opts.noSync {
+	if !opts.noSync && opts.kind != "snippet" {
 		if err := runProjectEditSync(cmd, opts.json); err != nil {
 			return err
 		}
@@ -158,7 +158,69 @@ func runProjectEdit(cmd *cobra.Command, args []string, opts projectEditOptions) 
 		return renderMutatorEnvelope(cmd, out, envelope.StatusOK)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated %s: %s %s (%s)\n", projectfile.Filename, opts.kind, opts.action, strings.Join(args, ", "))
+	if !opts.noSync && opts.kind == "snippet" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Snippet projection was not run; run `scribe sync` to project snippets.")
+	}
 	return nil
+}
+
+func validateProjectEditName(kind, name string) error {
+	if kind == "kit" {
+		return validateKitName(name)
+	}
+	return validateProjectRefName(kind, name)
+}
+
+func validateProjectRefName(kind, name string) error {
+	trimmed := strings.TrimSpace(name)
+	invalid := trimmed == "" ||
+		trimmed != name ||
+		strings.HasPrefix(trimmed, "/") ||
+		strings.Contains(trimmed, `\`) ||
+		strings.Contains(trimmed, "..")
+	if invalid {
+		return invalidProjectRefName(kind, name)
+	}
+
+	if idx := strings.LastIndex(trimmed, ":"); idx >= 0 {
+		qualifier := trimmed[:idx]
+		refName := trimmed[idx+1:]
+		if qualifier == "" || refName == "" || strings.Contains(refName, "/") {
+			return invalidProjectRefName(kind, name)
+		}
+		if strings.Contains(qualifier, "/") {
+			parts := strings.Split(qualifier, "/")
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+				return invalidProjectRefName(kind, name)
+			}
+		}
+		return nil
+	}
+
+	if strings.Contains(trimmed, "/") {
+		return invalidProjectRefName(kind, name)
+	}
+	return nil
+}
+
+func invalidProjectRefName(kind, name string) error {
+	code := "PROJECT_REF_INVALID"
+	if kind == "skill" {
+		code = "SKILL_REF_INVALID"
+	} else if kind == "snippet" {
+		code = "SNIPPET_REF_INVALID"
+	}
+	return clierrors.Wrap(fmt.Errorf("invalid %s ref %q", kind, name), code, clierrors.ExitValid,
+		clierrors.WithResource(name),
+		clierrors.WithRemediation("Use a local name, registry:name, or owner/repo:name without path traversal."),
+	)
+}
+
+func cloneProjectEditList(list []string) []string {
+	if len(list) == 0 {
+		return []string{}
+	}
+	return append([]string(nil), list...)
 }
 
 func runProjectEditSync(cmd *cobra.Command, jsonMode bool) error {
