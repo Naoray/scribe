@@ -33,6 +33,33 @@ func (pf *ProjectFile) MCPServerNames() []string {
 	return out
 }
 
+// AddUnique appends name to list when it is not already present.
+func AddUnique(list []string, name string) ([]string, bool) {
+	for _, existing := range list {
+		if existing == name {
+			return list, false
+		}
+	}
+	return append(list, name), true
+}
+
+// RemoveName removes all exact matches for name from list.
+func RemoveName(list []string, name string) ([]string, bool) {
+	next := list[:0]
+	removed := false
+	for _, existing := range list {
+		if existing == name {
+			removed = true
+			continue
+		}
+		next = append(next, existing)
+	}
+	if !removed {
+		return list, false
+	}
+	return next, true
+}
+
 // Load reads a .scribe.yaml file from path.
 // Missing or empty files are treated as no Scribe activity for the project.
 func Load(path string) (*ProjectFile, error) {
