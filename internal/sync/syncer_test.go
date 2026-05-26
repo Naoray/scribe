@@ -709,6 +709,40 @@ func TestRunWithDiff_RecordsProjectProjection(t *testing.T) {
 	}
 }
 
+func TestRunWithDiff_DeduplicatesSharedCodexGeminiProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	syncer := &sync.Syncer{
+		Client: &syncTestFetcher{
+			files: []tools.SkillFile{{Path: "SKILL.md", Content: []byte("---\nname: recap\ndescription: test skill\n---\n\n# recap\n")}},
+		},
+		Tools: []tools.Tool{tools.CodexTool{}, tools.GeminiTool{}},
+	}
+	st := &state.State{Installed: make(map[string]state.InstalledSkill)}
+	statuses := []sync.SkillStatus{{
+		Name:   "recap",
+		Status: sync.StatusMissing,
+		Entry:  &manifest.Entry{Name: "recap", Source: "github:acme/skills@main"},
+	}}
+
+	if err := syncer.RunWithDiff(context.Background(), "acme/skills", statuses, st); err != nil {
+		t.Fatalf("RunWithDiff: %v", err)
+	}
+
+	installed := st.Installed["recap"]
+	wantPath := filepath.Join(home, ".agents", "skills", "recap")
+	if !reflect.DeepEqual(installed.ManagedPaths, []string{wantPath}) {
+		t.Fatalf("ManagedPaths = %v, want [%s]", installed.ManagedPaths, wantPath)
+	}
+	if resolved, err := os.Readlink(wantPath); err != nil || resolved != filepath.Join(home, ".scribe", "skills", "recap") {
+		t.Fatalf("shared symlink = %q, %v", resolved, err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".gemini", "skills", "recap")); !os.IsNotExist(err) {
+		t.Fatalf("gemini-specific projection exists: %v", err)
+	}
+}
+
 func TestRunWithDiff_ProjectProjectionOverridesGlobalPinnedTools(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	projectRoot := t.TempDir()

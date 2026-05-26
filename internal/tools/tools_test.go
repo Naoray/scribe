@@ -325,34 +325,29 @@ func TestGeminiDetect(t *testing.T) {
 
 func TestGeminiInstallAndUninstall(t *testing.T) {
 	canonicalDir := setup(t)
-	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "gemini.log")
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	writeExecutable(t, filepath.Join(binDir, "gemini"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \""+logPath+"\"\n")
 
 	tool := tools.GeminiTool{}
 	paths, err := tool.Install("deploy", canonicalDir, "")
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if len(paths) != 1 || paths[0] != "gemini:user:deploy" {
-		t.Fatalf("unexpected install paths: %v", paths)
+	want := filepath.Join(os.Getenv("HOME"), ".agents", "skills", "deploy")
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("paths = %v, want [%s]", paths, want)
+	}
+	resolved, err := os.Readlink(want)
+	if err != nil {
+		t.Fatalf("Readlink: %v", err)
+	}
+	if resolved != canonicalDir {
+		t.Errorf("symlink points to %q, want %q", resolved, canonicalDir)
 	}
 
 	if err := tool.Uninstall("deploy"); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
-
-	logData, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	log := string(logData)
-	if !strings.Contains(log, "skills link "+canonicalDir+" --scope user --consent") {
-		t.Errorf("missing install call in log:\n%s", log)
-	}
-	if !strings.Contains(log, "skills uninstall deploy --scope user") {
-		t.Errorf("missing uninstall call in log:\n%s", log)
+	if _, err := os.Lstat(want); !os.IsNotExist(err) {
+		t.Error("expected gemini symlink to be removed after uninstall")
 	}
 }
 
@@ -399,6 +394,33 @@ func TestCodexInstallAndUninstall(t *testing.T) {
 	}
 	if _, err := os.Lstat(paths[0]); !os.IsNotExist(err) {
 		t.Error("expected codex symlink to be removed after uninstall")
+	}
+}
+
+func TestCodexAndGeminiShareAgentsSkillProjection(t *testing.T) {
+	canonicalDir := setup(t)
+
+	codexPaths, err := tools.CodexTool{}.Install("deploy", canonicalDir, "")
+	if err != nil {
+		t.Fatalf("Codex Install: %v", err)
+	}
+	geminiPaths, err := tools.GeminiTool{}.Install("deploy", canonicalDir, "")
+	if err != nil {
+		t.Fatalf("Gemini Install: %v", err)
+	}
+
+	want := filepath.Join(os.Getenv("HOME"), ".agents", "skills", "deploy")
+	if len(codexPaths) != 1 || codexPaths[0] != want {
+		t.Fatalf("codex paths = %v, want [%s]", codexPaths, want)
+	}
+	if len(geminiPaths) != 1 || geminiPaths[0] != want {
+		t.Fatalf("gemini paths = %v, want [%s]", geminiPaths, want)
+	}
+	if resolved, err := os.Readlink(want); err != nil || resolved != canonicalDir {
+		t.Fatalf("shared symlink = %q, %v; want %q", resolved, err, canonicalDir)
+	}
+	if _, err := os.Lstat(filepath.Join(os.Getenv("HOME"), ".gemini", "skills", "deploy")); !os.IsNotExist(err) {
+		t.Fatalf("gemini-specific projection exists: %v", err)
 	}
 }
 
@@ -682,14 +704,11 @@ func TestResolveByNameUnknown(t *testing.T) {
 	}
 }
 
-func TestGeminiUninstallFailsWhenBinaryMissing(t *testing.T) {
+func TestGeminiUninstallDoesNotRequireBinary(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	err := tools.GeminiTool{}.Uninstall("deploy")
-	if err == nil {
-		t.Fatal("expected error when gemini binary is missing, got nil")
-	}
-	if !strings.Contains(err.Error(), "gemini CLI not found") {
-		t.Errorf("error message should mention missing CLI, got: %v", err)
+	if err != nil {
+		t.Fatalf("Uninstall: %v", err)
 	}
 }
