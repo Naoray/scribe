@@ -315,6 +315,72 @@ func TestSkillTools_Enable(t *testing.T) {
 	t.Errorf("codex not in tools: %v", got.Tools)
 }
 
+func TestSkillTools_DisableGeminiKeepsSharedCodexProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := &config.Config{Tools: []config.ToolConfig{
+		{Name: "codex", Type: tools.ToolTypeBuiltin, Enabled: true},
+		{Name: "gemini", Type: tools.ToolTypeBuiltin, Enabled: true},
+	}}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	canonical, err := tools.WriteToStore("commit", []tools.SkillFile{{Path: "SKILL.md", Content: []byte("---\nname: commit\ndescription: test skill\n---\n\n# commit")}})
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+	codexPaths, err := tools.CodexTool{}.Install("commit", canonical, "")
+	if err != nil {
+		t.Fatalf("codex install: %v", err)
+	}
+	geminiPaths, err := tools.GeminiTool{}.Install("commit", canonical, "")
+	if err != nil {
+		t.Fatalf("gemini install: %v", err)
+	}
+	sharedPath := filepath.Join(home, ".agents", "skills", "commit")
+	if !reflect.DeepEqual(codexPaths, []string{sharedPath}) || !reflect.DeepEqual(geminiPaths, []string{sharedPath}) {
+		t.Fatalf("expected codex and gemini to share %s, got %v and %v", sharedPath, codexPaths, geminiPaths)
+	}
+	st := &state.State{
+		SchemaVersion: 4,
+		Installed: map[string]state.InstalledSkill{
+			"commit": {
+				Revision:      1,
+				InstalledHash: "abc",
+				Tools:         []string{"codex", "gemini"},
+				ToolsMode:     state.ToolsModePinned,
+				Paths:         []string{sharedPath},
+				ManagedPaths:  []string{sharedPath},
+				InstalledAt:   time.Now().UTC(),
+			},
+		},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	cmd := newSkillToolsCommand()
+	cmd.SetArgs([]string{"commit", "--disable", "gemini"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if resolved, err := os.Readlink(sharedPath); err != nil || resolved != canonical {
+		t.Fatalf("shared projection = %q, %v; want %q", resolved, err, canonical)
+	}
+	st, err = state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := st.Installed["commit"]
+	if !reflect.DeepEqual(got.Tools, []string{"codex"}) {
+		t.Fatalf("Tools = %v, want [codex]", got.Tools)
+	}
+	if !reflect.DeepEqual(got.ManagedPaths, []string{sharedPath}) {
+		t.Fatalf("ManagedPaths = %v, want [%s]", got.ManagedPaths, sharedPath)
+	}
+}
+
 func TestSkillTools_Disable(t *testing.T) {
 	seedSkillEnv(t)
 

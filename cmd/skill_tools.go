@@ -111,10 +111,13 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 				continue
 			}
 		}
+		skillPath, _ := tool.SkillPath(name, projectRoot)
+		if skillPath != "" && skillPathSharedByDesiredTool(skillPath, name, projectRoot, desired, availableByName) {
+			continue
+		}
 		if err := uninstallSkillProjection(tool, name, projectRoot); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: uninstall from %s: %v\n", toolName, err)
 		}
-		skillPath, _ := tool.SkillPath(name, projectRoot)
 		if skillPath != "" {
 			for p := range newPathSet {
 				if strings.HasPrefix(p, skillPath) || p == skillPath {
@@ -169,6 +172,20 @@ func applySkillToolSelection(cfg *config.Config, st *state.State, name string, m
 		result.ToolsMode = "inherit"
 	}
 	return result, nil
+}
+
+func skillPathSharedByDesiredTool(skillPath, name, projectRoot string, desired []string, availableByName map[string]tools.Tool) bool {
+	for _, toolName := range desired {
+		tool, ok := availableByName[toolName]
+		if !ok {
+			continue
+		}
+		desiredPath, err := tool.SkillPath(name, projectRoot)
+		if err == nil && desiredPath == skillPath {
+			return true
+		}
+	}
+	return false
 }
 
 func currentSkillToolsForScope(installed state.InstalledSkill, availableNames []string, projectRoot string) []string {
