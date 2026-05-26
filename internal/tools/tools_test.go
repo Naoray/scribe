@@ -351,6 +351,148 @@ func TestGeminiInstallAndUninstall(t *testing.T) {
 	}
 }
 
+func TestGeminiInstallRemovesLegacyScribeManagedLink(t *testing.T) {
+	canonicalDir := setup(t)
+	home := os.Getenv("HOME")
+	legacyLink := filepath.Join(home, ".gemini", "skills", "deploy")
+	if err := os.MkdirAll(filepath.Dir(legacyLink), 0o755); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+	if err := os.Symlink(canonicalDir, legacyLink); err != nil {
+		t.Fatalf("symlink legacy gemini skill: %v", err)
+	}
+
+	paths, err := tools.GeminiTool{}.Install("deploy", canonicalDir, "")
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	want := filepath.Join(home, ".agents", "skills", "deploy")
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("paths = %v, want [%s]", paths, want)
+	}
+	if resolved, err := os.Readlink(want); err != nil || resolved != canonicalDir {
+		t.Fatalf("shared projection = %q, %v; want %q", resolved, err, canonicalDir)
+	}
+	if _, err := os.Lstat(legacyLink); !os.IsNotExist(err) {
+		t.Fatalf("legacy gemini symlink still exists: %v", err)
+	}
+}
+
+func TestGeminiInstallRemovesProjectLegacyScribeManagedLink(t *testing.T) {
+	canonicalDir := setup(t)
+	projectRoot := t.TempDir()
+	homeLegacyLink := filepath.Join(os.Getenv("HOME"), ".gemini", "skills", "deploy")
+	projectLegacyLink := filepath.Join(projectRoot, ".gemini", "skills", "deploy")
+	for _, link := range []string{homeLegacyLink, projectLegacyLink} {
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			t.Fatalf("mkdir legacy dir: %v", err)
+		}
+		if err := os.Symlink(canonicalDir, link); err != nil {
+			t.Fatalf("symlink legacy gemini skill: %v", err)
+		}
+	}
+
+	paths, err := tools.GeminiTool{}.Install("deploy", canonicalDir, projectRoot)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	want := filepath.Join(projectRoot, ".agents", "skills", "deploy")
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("paths = %v, want [%s]", paths, want)
+	}
+	for _, link := range []string{homeLegacyLink, projectLegacyLink} {
+		if _, err := os.Lstat(link); !os.IsNotExist(err) {
+			t.Fatalf("legacy gemini symlink still exists at %s: %v", link, err)
+		}
+	}
+}
+
+func TestGeminiInstallPreservesLegacyUserSkill(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, legacyLink string)
+		check func(t *testing.T, legacyLink string)
+	}{
+		{
+			name: "regular file",
+			setup: func(t *testing.T, legacyLink string) {
+				t.Helper()
+				if err := os.WriteFile(legacyLink, []byte("user-authored skill"), 0o644); err != nil {
+					t.Fatalf("write legacy file: %v", err)
+				}
+			},
+			check: func(t *testing.T, legacyLink string) {
+				t.Helper()
+				got, err := os.ReadFile(legacyLink)
+				if err != nil {
+					t.Fatalf("read legacy file: %v", err)
+				}
+				if string(got) != "user-authored skill" {
+					t.Fatalf("legacy file = %q, want user-authored skill", got)
+				}
+			},
+		},
+		{
+			name: "symlink outside scribe store",
+			setup: func(t *testing.T, legacyLink string) {
+				t.Helper()
+				userSkill := filepath.Join(t.TempDir(), "deploy")
+				if err := os.MkdirAll(userSkill, 0o755); err != nil {
+					t.Fatalf("mkdir user skill: %v", err)
+				}
+				if err := os.Symlink(userSkill, legacyLink); err != nil {
+					t.Fatalf("symlink legacy user skill: %v", err)
+				}
+			},
+			check: func(t *testing.T, legacyLink string) {
+				t.Helper()
+				if info, err := os.Lstat(legacyLink); err != nil {
+					t.Fatalf("lstat legacy symlink: %v", err)
+				} else if info.Mode()&os.ModeSymlink == 0 {
+					t.Fatalf("legacy path is not a symlink: %v", info.Mode())
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			canonicalDir := setup(t)
+			legacyLink := filepath.Join(os.Getenv("HOME"), ".gemini", "skills", "deploy")
+			if err := os.MkdirAll(filepath.Dir(legacyLink), 0o755); err != nil {
+				t.Fatalf("mkdir legacy dir: %v", err)
+			}
+			tt.setup(t, legacyLink)
+
+			if _, err := (tools.GeminiTool{}).Install("deploy", canonicalDir, ""); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+
+			tt.check(t, legacyLink)
+		})
+	}
+}
+
+func TestGeminiUninstallRemovesLegacyScribeManagedLink(t *testing.T) {
+	canonicalDir := setup(t)
+	legacyLink := filepath.Join(os.Getenv("HOME"), ".gemini", "skills", "deploy")
+	if err := os.MkdirAll(filepath.Dir(legacyLink), 0o755); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+	if err := os.Symlink(canonicalDir, legacyLink); err != nil {
+		t.Fatalf("symlink legacy gemini skill: %v", err)
+	}
+
+	if err := (tools.GeminiTool{}).Uninstall("deploy"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if _, err := os.Lstat(legacyLink); !os.IsNotExist(err) {
+		t.Fatalf("legacy gemini symlink still exists: %v", err)
+	}
+}
+
 func TestCodexDetect(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
