@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Naoray/scribe/internal/lockfile"
 	"github.com/Naoray/scribe/internal/projectstore"
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/tools"
@@ -135,7 +136,10 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			continue
 		}
 
-		canonicalDir := e.canonicalDirForSkill(storeDir, name, skill)
+		canonicalDir, canonicalReady, err := e.canonicalDirForSkill(storeDir, name, skill)
+		if err != nil {
+			return summary, actions, err
+		}
 		expectedTools := skill.EffectiveToolsForProject(activeNames, e.ProjectRoot)
 		expectedPaths := make(map[string]string, len(expectedTools))
 		newManaged := make(map[string]bool)
@@ -162,6 +166,18 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			}
 			expectedPaths[path] = toolName
 
+			if !canonicalReady {
+				conflict := state.ProjectionConflict{
+					Tool:   toolName,
+					Path:   path,
+					SeenAt: now(),
+				}
+				conflicts = upsertConflict(conflicts, conflict)
+				summary.Conflicts = append(summary.Conflicts, conflict)
+				actions = append(actions, Action{Kind: ActionConflict, Name: name, Tool: toolName, Path: path})
+				continue
+			}
+
 			if _, err := os.Lstat(path); err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
 					links, installErr := tool.Install(name, canonicalDir, e.ProjectRoot)
@@ -181,6 +197,22 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			if pathPointsToCanonical(path, target) {
 				newManaged[path] = true
 				actions = append(actions, Action{Kind: ActionUnchanged, Name: name, Tool: toolName, Path: path})
+				continue
+			}
+
+			if canReplaceProjection(path, canonicalDir) {
+				if err := os.RemoveAll(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return summary, actions, err
+				}
+				links, installErr := tool.Install(name, canonicalDir, e.ProjectRoot)
+				if installErr != nil {
+					return summary, actions, fmt.Errorf("heal %s/%s: %w", toolName, name, installErr)
+				}
+				for _, link := range links {
+					newManaged[link] = true
+				}
+				summary.Relinked++
+				actions = append(actions, Action{Kind: ActionRelinked, Name: name, Tool: toolName, Path: path})
 				continue
 			}
 
@@ -238,8 +270,16 @@ func (e *Engine) Run(st *state.State) (Summary, []Action, error) {
 			// who put it there. Requiring a matching Tool in byName would
 			// miss the case where the tool has been globally disabled but
 			// its old projection still needs cleanup.
-			if isManagedProjection(path, canonicalDir) {
+			if canonicalReady && isManagedProjection(path, canonicalDir) {
 				if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return summary, actions, err
+				}
+				summary.Removed++
+				actions = append(actions, Action{Kind: ActionRemoved, Name: name, Tool: toolName, Path: path})
+				continue
+			}
+			if canReplaceProjection(path, canonicalDir) {
+				if err := os.RemoveAll(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return summary, actions, err
 				}
 				summary.Removed++
@@ -301,9 +341,12 @@ func (e *Engine) removeCurrentProjectProjections(name string, skill *state.Insta
 		return 0, nil, nil
 	}
 
-	canonicalDir := e.canonicalDirForSkill(storeDir, name, *skill)
 	var removed int
 	var actions []Action
+	canonicalDir, _, err := e.canonicalDirForSkill(storeDir, name, *skill)
+	if err != nil {
+		return removed, actions, err
+	}
 	for path, toolName := range currentPaths {
 		skill.Paths = removePath(skill.Paths, path)
 		skill.ManagedPaths = removePath(skill.ManagedPaths, path)
@@ -333,14 +376,110 @@ func (e *Engine) removeCurrentProjectProjections(name string, skill *state.Insta
 	return removed, actions, nil
 }
 
-func (e *Engine) canonicalDirForSkill(storeDir, name string, skill state.InstalledSkill) string {
+func (e *Engine) canonicalDirForSkill(storeDir, name string, skill state.InstalledSkill) (string, bool, error) {
+	globalDir := filepath.Join(storeDir, name)
 	if e.ProjectRoot != "" && skill.Origin == state.OriginProject {
 		projectDir := projectstore.Project(e.ProjectRoot).SkillDir(name)
-		if info, err := os.Stat(projectDir); err == nil && info.IsDir() {
-			return projectDir
+		source, ok, err := newestProjectSkillSource(projectDir, globalDir)
+		if err != nil {
+			return projectDir, false, err
+		}
+		if !ok {
+			return projectDir, false, nil
+		}
+		if filepath.Clean(source.dir) != filepath.Clean(projectDir) {
+			if err := os.RemoveAll(projectDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return projectDir, false, err
+			}
+			if err := copyDir(source.dir, projectDir); err != nil {
+				return projectDir, false, err
+			}
+			hash, err := lockfile.HashSet(projectDir)
+			if err != nil {
+				return projectDir, false, err
+			}
+			if err := projectstore.WriteMarker(projectDir, hash, "scribe", e.now()); err != nil {
+				return projectDir, false, err
+			}
+		}
+		return projectDir, true, nil
+	}
+	return globalDir, true, nil
+}
+
+func (e *Engine) now() time.Time {
+	if e.Now != nil {
+		return e.Now()
+	}
+	return time.Now().UTC()
+}
+
+type projectSkillSource struct {
+	dir   string
+	mtime time.Time
+}
+
+func newestProjectSkillSource(projectDir, globalDir string) (projectSkillSource, bool, error) {
+	sources := make([]projectSkillSource, 0, 2)
+	for _, dir := range []string{projectDir, globalDir} {
+		source, ok, err := readableProjectSkillSource(dir)
+		if err != nil {
+			return projectSkillSource{}, false, err
+		}
+		if ok {
+			sources = append(sources, source)
 		}
 	}
-	return filepath.Join(storeDir, name)
+	if len(sources) == 0 {
+		return projectSkillSource{}, false, nil
+	}
+	sort.SliceStable(sources, func(i, j int) bool {
+		return sources[i].mtime.After(sources[j].mtime)
+	})
+	return sources[0], true, nil
+}
+
+func readableProjectSkillSource(dir string) (projectSkillSource, bool, error) {
+	info, err := os.Stat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return projectSkillSource{}, false, nil
+	}
+	if err != nil {
+		return projectSkillSource{}, false, err
+	}
+	if !info.IsDir() {
+		return projectSkillSource{}, false, nil
+	}
+	if _, err := lockfile.HashSet(dir); err != nil {
+		return projectSkillSource{}, false, nil
+	}
+	mtime := info.ModTime()
+	if marker, err := projectstore.ReadMarker(dir); err == nil {
+		if generatedAt, parseErr := time.Parse(time.RFC3339, marker.GeneratedAt); parseErr == nil {
+			mtime = generatedAt
+		}
+	} else if latest, latestErr := latestTreeModTime(dir); latestErr == nil && latest.After(mtime) {
+		mtime = latest
+	}
+	return projectSkillSource{dir: dir, mtime: mtime}, true, nil
+}
+
+func latestTreeModTime(root string) (time.Time, error) {
+	var latest time.Time
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+		return nil
+	})
+	return latest, err
 }
 
 func (e *Engine) removeOrphanedGlobalToolProjections(st *state.State, storeDir string, byName map[string]tools.Tool) (int, []Action, error) {
@@ -494,6 +633,17 @@ func isManagedProjection(path, canonicalDir string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func canReplaceProjection(path, canonicalDir string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return true
+	}
+	return isManagedProjection(path, canonicalDir)
 }
 
 // projectionHash returns a stable content hash for a projection target. Files

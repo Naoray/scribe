@@ -147,6 +147,124 @@ func TestReconcileUsesProjectSkillDirAsCanonical(t *testing.T) {
 	}
 }
 
+func TestReconcileHealsDanglingProjectProjection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+
+	projectSkillDir := filepath.Join(projectRoot, ".ai", "skills", "review")
+	if err := os.MkdirAll(projectSkillDir, 0o755); err != nil {
+		t.Fatalf("mkdir project skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectSkillDir, "SKILL.md"), []byte("# review\n"), 0o644); err != nil {
+		t.Fatalf("write project skill: %v", err)
+	}
+	projectSkillDir, _ = filepath.EvalSymlinks(projectSkillDir)
+
+	projectPath := filepath.Join(projectRoot, ".agents", "skills", "review")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(projectRoot, ".ai", "skills", "missing"), projectPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	st := &state.State{SchemaVersion: state.CurrentSchemaVersion, Installed: map[string]state.InstalledSkill{
+		"review": {
+			Origin:       state.OriginProject,
+			ManagedPaths: []string{projectPath},
+			Projections: []state.ProjectionEntry{{
+				Project: projectRoot,
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+	engine := reconcile.Engine{Tools: []tools.Tool{tools.CodexTool{}}, ProjectRoot: projectRoot, Now: func() time.Time { return time.Unix(10, 0).UTC() }}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Relinked != 1 || len(summary.Conflicts) != 0 {
+		t.Fatalf("summary = %+v, want one healed relink", summary)
+	}
+	if len(actions) != 1 || actions[0].Kind != reconcile.ActionRelinked {
+		t.Fatalf("actions = %+v, want relinked", actions)
+	}
+	if resolved, err := filepath.EvalSymlinks(projectPath); err != nil || resolved != projectSkillDir {
+		t.Fatalf("codex project skill link = %q, %v; want %q", resolved, err, projectSkillDir)
+	}
+}
+
+func TestReconcileRecreatesMissingProjectSkillFromGlobalStore(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+
+	globalDir, err := tools.WriteToStore("review", []tools.SkillFile{{Path: "SKILL.md", Content: []byte("# review\n")}})
+	if err != nil {
+		t.Fatalf("WriteToStore: %v", err)
+	}
+	globalDir, _ = filepath.EvalSymlinks(globalDir)
+	projectSkillDir := filepath.Join(projectRoot, ".ai", "skills", "review")
+
+	st := &state.State{SchemaVersion: state.CurrentSchemaVersion, Installed: map[string]state.InstalledSkill{
+		"review": {
+			Origin: state.OriginProject,
+			Projections: []state.ProjectionEntry{{
+				Project: projectRoot,
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+	engine := reconcile.Engine{Tools: []tools.Tool{tools.CodexTool{}}, ProjectRoot: projectRoot, Now: func() time.Time { return time.Unix(11, 0).UTC() }}
+	summary, _, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.Installed != 1 || summary.Relinked != 0 || len(summary.Conflicts) != 0 {
+		t.Fatalf("summary = %+v, want one installed projection", summary)
+	}
+	if _, err := os.Stat(filepath.Join(projectSkillDir, "SKILL.md")); err != nil {
+		t.Fatalf("project skill was not recreated from global store %s: %v", globalDir, err)
+	}
+	projectSkillDir, _ = filepath.EvalSymlinks(projectSkillDir)
+	projectPath := filepath.Join(projectRoot, ".agents", "skills", "review")
+	if resolved, err := filepath.EvalSymlinks(projectPath); err != nil || resolved != projectSkillDir {
+		t.Fatalf("codex project skill link = %q, %v; want %q", resolved, err, projectSkillDir)
+	}
+}
+
+func TestReconcileProjectSkillMissingEverywhereReportsConflict(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectRoot := t.TempDir()
+
+	projectPath := filepath.Join(projectRoot, ".agents", "skills", "review")
+	st := &state.State{SchemaVersion: state.CurrentSchemaVersion, Installed: map[string]state.InstalledSkill{
+		"review": {
+			Origin: state.OriginProject,
+			Projections: []state.ProjectionEntry{{
+				Project: projectRoot,
+				Tools:   []string{"codex"},
+			}},
+		},
+	}}
+	engine := reconcile.Engine{Tools: []tools.Tool{tools.CodexTool{}}, ProjectRoot: projectRoot, Now: func() time.Time { return time.Unix(12, 0).UTC() }}
+	summary, actions, err := engine.Run(st)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(summary.Conflicts) != 1 || summary.Installed != 0 || summary.Relinked != 0 {
+		t.Fatalf("summary = %+v, want one unresolved conflict", summary)
+	}
+	if len(actions) != 1 || actions[0].Kind != reconcile.ActionConflict || actions[0].Path != projectPath {
+		t.Fatalf("actions = %+v, want conflict at %s", actions, projectPath)
+	}
+	if _, err := os.Lstat(projectPath); !os.IsNotExist(err) {
+		t.Fatalf("projection should not be installed without a valid source: %v", err)
+	}
+}
+
 func TestReconcileProjectProjectionOverridesGlobalPinnedTools(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
