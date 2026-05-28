@@ -36,6 +36,9 @@ func hashSetFiles(root string) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
+		if len(files) == 0 {
+			return walkHashSetFiles(root)
+		}
 		return files, nil
 	}
 	return walkHashSetFiles(root)

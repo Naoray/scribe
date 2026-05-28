@@ -114,6 +114,30 @@ func TestHashSetGitModeIncludesUntrackedThenTrackedFiles(t *testing.T) {
 	}
 }
 
+func TestHashSetGitModeFallsBackWhenPathIgnored(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	mustWrite(t, filepath.Join(repo, ".gitignore"), ".ai/\n")
+
+	skillDir := filepath.Join(repo, ".ai", "skills", "deploy")
+	mustWrite(t, filepath.Join(skillDir, "SKILL.md"), "# deploy\n")
+
+	got, err := HashSet(skillDir)
+	if err != nil {
+		t.Fatalf("HashSet() error = %v", err)
+	}
+	want, err := HashFiles([]File{{Path: "SKILL.md", Content: []byte("# deploy\n")}})
+	if err != nil {
+		t.Fatalf("HashFiles() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("HashSet() = %s, want %s", got, want)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
