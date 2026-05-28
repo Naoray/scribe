@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+## v1.6.1 — 2026-05-28
+
+### Fixed
+- **`scribe sync` no longer aborts when project skill content lives under a git-ignored `.ai/` tree.** Hashing now falls back to a direct directory walk when git reports no tracked or unignored files for a vendored skill, so marker reconciliation can complete instead of failing with `cannot hash empty file tree`.
+
 ## v1.6.0 — 2026-05-26
 
 ### Added
