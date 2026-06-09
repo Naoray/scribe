@@ -131,7 +131,7 @@ func runProjectEdit(cmd *cobra.Command, args []string, opts projectEditOptions) 
 		Kind:        opts.kind,
 		Action:      opts.action,
 		Field:       opts.field,
-		Synced:      !opts.noSync && opts.kind != "snippet",
+		Synced:      !opts.noSync,
 	}
 	for _, name := range args {
 		var changed bool
@@ -148,7 +148,7 @@ func runProjectEdit(cmd *cobra.Command, args []string, opts projectEditOptions) 
 	if err := projectfile.Save(projectPath, pf); err != nil {
 		return err
 	}
-	if !opts.noSync && opts.kind != "snippet" {
+	if !opts.noSync {
 		if err := runProjectEditSync(cmd, opts.json); err != nil {
 			return err
 		}
@@ -158,9 +158,6 @@ func runProjectEdit(cmd *cobra.Command, args []string, opts projectEditOptions) 
 		return renderMutatorEnvelope(cmd, out, envelope.StatusOK)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated %s: %s %s (%s)\n", projectfile.Filename, opts.kind, opts.action, strings.Join(args, ", "))
-	if !opts.noSync && opts.kind == "snippet" {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Snippet projection was not run; run `scribe sync` to project snippets.")
-	}
 	return nil
 }
 

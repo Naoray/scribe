@@ -167,12 +167,14 @@ func TestProjectEditRejectsTraversalRefs(t *testing.T) {
 	}
 }
 
-func TestProjectSnippetAddJSONReportsNotSynced(t *testing.T) {
+func TestProjectSnippetAddJSONProjectsSnippetAndReportsSynced(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	t.Setenv("HOME", home)
 	mustChdir(t, project)
 	mustWriteProjectFile(t, filepath.Join(project, projectfile.Filename), "snippets: []\n")
+	mustWriteProjectFile(t, filepath.Join(home, ".scribe", "config.yaml"), "tools:\n  - name: codex\n    enabled: true\n")
+	mustWriteProjectFile(t, filepath.Join(home, ".scribe", "snippets", "commit-discipline.md"), "---\nname: commit-discipline\ndescription: Commit rules\ntargets: [codex]\n---\n# Agent Commit Discipline\n")
 
 	var stdout bytes.Buffer
 	cmd := newProjectCommand()
@@ -190,8 +192,22 @@ func TestProjectSnippetAddJSONReportsNotSynced(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &data); err != nil {
 		t.Fatalf("unmarshal data: %v", err)
 	}
-	if data.Synced {
-		t.Fatalf("synced = true, want false because project sync does not project snippets")
+	if !data.Synced {
+		t.Fatal("synced = false, want true")
+	}
+	projected, err := os.ReadFile(filepath.Join(project, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read projected AGENTS.md: %v", err)
+	}
+	if !bytes.Contains(projected, []byte("Agent Commit Discipline")) {
+		t.Fatalf("AGENTS.md missing snippet body:\n%s", projected)
+	}
+	st, err := state.Load()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if _, ok := st.Snippets["commit-discipline"]; !ok {
+		t.Fatalf("state snippet missing: %#v", st.Snippets)
 	}
 }
 

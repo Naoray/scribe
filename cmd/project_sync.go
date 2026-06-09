@@ -25,6 +25,7 @@ import (
 	"github.com/Naoray/scribe/internal/state"
 	"github.com/Naoray/scribe/internal/sync"
 	"github.com/Naoray/scribe/internal/tools"
+	"github.com/Naoray/scribe/internal/workflow"
 )
 
 type projectSyncOptions struct {
@@ -124,6 +125,32 @@ func runProjectSync(cmd *cobra.Command, opts *projectSyncOptions) error {
 	}
 	if err := writeProjectLock(projectRoot, kitPins, lockEntries, opts, &out); err != nil {
 		return err
+	}
+	if !opts.check {
+		cfg, err := factory.Config()
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		targets, err := tools.ResolveActive(cfg)
+		if err != nil {
+			return fmt.Errorf("resolve tools: %w", err)
+		}
+		bag := &workflow.Bag{
+			ProjectRoot: projectRoot,
+			State:       st,
+			Tools:       targets,
+		}
+		if err := workflow.StepResolveTeamShareMode(cmd.Context(), bag); err != nil {
+			return err
+		}
+		if err := workflow.StepProjectSnippets(cmd.Context(), bag); err != nil {
+			return err
+		}
+		if bag.StateDirty {
+			if err := st.Save(); err != nil {
+				return err
+			}
+		}
 	}
 	if opts.check && len(out.Drift) > 0 {
 		if opts.json {
