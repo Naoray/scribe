@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## v1.6.2 — 2026-06-09
+
+### Fixed
+- **`scribe project kit remove` no longer fails on remaining kit-only skills that cannot be pinned.** Project sync now distinguishes explicit project-added skills from kit-provided skills, so removing one kit can complete even when another kit contributes a locally installed registry-origin skill with no registry source. Explicit `scribe project skill add` still reports `PROJECT_SKILL_UNPINNABLE` for the same unpinnable skill.
+- **`scribe project snippet add/remove` now projects snippets immediately.** The project edit path reuses project sync's snippet projection so snippet commands can truthfully report `synced:true`, update agent files such as `AGENTS.md`, and persist snippet state without requiring a separate `scribe sync`.
+
 ## v1.6.1 — 2026-05-28
 
 ### Fixed
