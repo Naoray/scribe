@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
+	"github.com/Naoray/scribe/internal/kit"
 	"github.com/Naoray/scribe/internal/projectfile"
+	"github.com/Naoray/scribe/internal/state"
 )
 
 func TestProjectEditMutatesProjectFile(t *testing.T) {
@@ -267,5 +269,63 @@ func TestProjectEditNoSyncSkipsSync(t *testing.T) {
 	}
 	if !clierrors.IsCode(err, "PROJECT_KIT_NOT_FOUND") {
 		t.Fatalf("error = %v, want PROJECT_KIT_NOT_FOUND", err)
+	}
+}
+
+func TestProjectKitRemoveIgnoresRemainingKitUnpinnableSkills(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	mustChdir(t, project)
+	mustWriteProjectFile(t, filepath.Join(project, projectfile.Filename), "kits: [init, workflow]\n")
+	mustSaveProjectKit(t, filepath.Join(home, ".scribe", "kits", "init.yaml"), &kit.Kit{Name: "init", Skills: []string{"bootstrap"}})
+	mustSaveProjectKit(t, filepath.Join(home, ".scribe", "kits", "workflow.yaml"), &kit.Kit{Name: "workflow", Skills: []string{"gha"}})
+	mustWriteProjectFile(t, filepath.Join(home, ".scribe", "skills", "gha", "SKILL.md"), "# gha\n")
+
+	st := stateFixture(t, home)
+	st.Installed["gha"] = state.InstalledSkill{}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	cmd := newProjectCommand()
+	cmd.SetArgs([]string{"kit", "remove", "init"})
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	got, err := projectfile.Load(filepath.Join(project, projectfile.Filename))
+	if err != nil {
+		t.Fatalf("load project file: %v", err)
+	}
+	if !reflect.DeepEqual(got.Kits, []string{"workflow"}) {
+		t.Fatalf("kits = %#v, want [workflow]", got.Kits)
+	}
+}
+
+func TestProjectSkillAddStillRejectsUnpinnableRegistrySkill(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	mustChdir(t, project)
+	mustWriteProjectFile(t, filepath.Join(project, projectfile.Filename), "{}\n")
+	mustWriteProjectFile(t, filepath.Join(home, ".scribe", "skills", "gha", "SKILL.md"), "# gha\n")
+
+	st := stateFixture(t, home)
+	st.Installed["gha"] = state.InstalledSkill{}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	cmd := newProjectCommand()
+	cmd.SetArgs([]string{"skill", "add", "gha"})
+	cmd.SetOut(&bytes.Buffer{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("execute error = nil, want PROJECT_SKILL_UNPINNABLE")
+	}
+	if !clierrors.IsCode(err, "PROJECT_SKILL_UNPINNABLE") {
+		t.Fatalf("error = %v, want PROJECT_SKILL_UNPINNABLE", err)
 	}
 }

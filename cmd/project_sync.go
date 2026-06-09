@@ -111,12 +111,14 @@ func runProjectSync(cmd *cobra.Command, opts *projectSyncOptions) error {
 		vendorSet[projectSkillName(name)] = true
 	}
 	var skillNames []string
+	projectAddSet := map[string]bool{}
 	kitSkillSet := map[string]bool{}
 	if shouldSyncProjectSkills(pf, vendorSet) {
 		skillNames = resolveProjectSkillNames(pf, globalKits)
+		projectAddSet = resolveProjectAddSkillSet(pf)
 		kitSkillSet = resolveProjectKitSkillSet(pf, globalKits)
 	}
-	lockEntries, err := syncProjectSkills(projectRoot, storeDir, skillNames, vendorSet, kitSkillSet, st, opts, &out)
+	lockEntries, err := syncProjectSkills(projectRoot, storeDir, skillNames, vendorSet, projectAddSet, kitSkillSet, st, opts, &out)
 	if err != nil {
 		return err
 	}
@@ -198,7 +200,7 @@ func projectKitPinFromState(name string, k *kit.Kit, st *state.State) (lockfile.
 	}, true
 }
 
-func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendorSet, kitSkillSet map[string]bool, st *state.State, opts *projectSyncOptions, out *projectSyncOutput) ([]lockfile.ProjectEntry, error) {
+func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendorSet, projectAddSet, kitSkillSet map[string]bool, st *state.State, opts *projectSyncOptions, out *projectSyncOutput) ([]lockfile.ProjectEntry, error) {
 	entries := make([]lockfile.ProjectEntry, 0)
 	for _, ref := range skillNames {
 		name := projectSkillName(ref)
@@ -236,6 +238,9 @@ func syncProjectSkills(projectRoot, storeDir string, skillNames []string, vendor
 			if installed.Origin == state.OriginRegistry {
 				entry, err := projectEntryFromState(name, installed)
 				if err != nil {
+					if kitSkillSet[name] && !projectAddSet[name] && !vendorSet[name] && clierrors.IsCode(err, "PROJECT_SKILL_UNPINNABLE") {
+						continue
+					}
 					return nil, err
 				}
 				entries = append(entries, entry)
@@ -451,6 +456,20 @@ func resolveProjectSkillNames(pf *projectfile.ProjectFile, kits map[string]*kit.
 func resolveProjectKitSkillSet(pf *projectfile.ProjectFile, kits map[string]*kit.Kit) map[string]bool {
 	_, kitSkillSet := resolveProjectSkillPlan(pf, kits)
 	return kitSkillSet
+}
+
+func resolveProjectAddSkillSet(pf *projectfile.ProjectFile) map[string]bool {
+	set := map[string]bool{}
+	if pf == nil {
+		return set
+	}
+	for _, ref := range pf.Add {
+		name := projectSkillName(ref)
+		if name != "" {
+			set[name] = true
+		}
+	}
+	return set
 }
 
 func resolveProjectSkillPlan(pf *projectfile.ProjectFile, kits map[string]*kit.Kit) ([]string, map[string]bool) {
