@@ -56,8 +56,8 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | Command | Flags | Output schema |
 |---|---|---|
 | `scribe add` | --alias, --force, --id, --json, --no-interaction, --path, --ref, --registry, --repo, --resync, --source, --url | yes |
-| `scribe adopt` | --dry-run, --json, --no-interaction, --verbose | yes |
-| `scribe browse` | --id, --install, --json, --no-interaction, --path, --query, --ref, --registry, --repo, --resync, --source, --url | no |
+| `scribe adopt` | --dry-run, --force, --json, --no-interaction, --verbose | yes |
+| `scribe browse` | --id, --install, --json, --kits, --no-interaction, --path, --query, --ref, --registry, --repo, --resync, --source, --url | no |
 | `scribe check` | --json | yes |
 | `scribe config adoption` | --add-path, --json, --mode, --remove-path | no |
 | `scribe config set editor` | --json | no |
@@ -65,17 +65,17 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe config` | --json | no |
 | `scribe create registry` | --json, --owner, --private, --repo, --team | no |
 | `scribe create` | --json | no |
-| `scribe doctor` | --fix, --json, --skill | yes |
+| `scribe doctor` | --fix, --json, --skill, --verbose | yes |
 | `scribe explain` | --json, --raw | yes |
 | `scribe guide` | --json | yes |
 | `scribe init` | --force, --json | yes |
 | `scribe install` | --alias, --all, --force, --json, --registry | no |
 | `scribe kit create` | --description, --force, --json, --mcp-servers, --registry, --skills | no |
-| `scribe kit install` | --alias, --force, --json, --no-deps, --no-interaction | no |
-| `scribe kit list` | --fields, --json, --local, --registry, --remote | no |
+| `scribe kit install` | --alias, --force, --json, --no-deps, --no-interaction | yes |
+| `scribe kit list` | --fields, --json, --local, --registry, --remote | yes |
 | `scribe kit push` | --json, --registry | no |
-| `scribe kit show` | --json | no |
-| `scribe kit sync` | --force, --json, --no-deps, --no-interaction | no |
+| `scribe kit show` | --json | yes |
+| `scribe kit sync` | --force, --json, --no-deps, --no-interaction | yes |
 | `scribe kit` | --json | no |
 | `scribe list` | --fields, --json, --registry, --remote | yes |
 | `scribe mcp list` | --json | yes |
@@ -86,14 +86,14 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe project kit add` | --json, --no-sync | yes |
 | `scribe project kit remove` | --json, --no-sync | yes |
 | `scribe project kit` | --json | no |
-| `scribe project snippet add` | --json, --no-sync | yes |
-| `scribe project snippet remove` | --json, --no-sync | yes |
-| `scribe project snippet` | --json | no |
 | `scribe project skill add` | --json, --no-sync | yes |
 | `scribe project skill claim` | --json | yes |
 | `scribe project skill create` | --json | yes |
 | `scribe project skill remove` | --block, --json, --no-sync | yes |
 | `scribe project skill` | --json | no |
+| `scribe project snippet add` | --json, --no-sync | yes |
+| `scribe project snippet remove` | --json, --no-sync | yes |
+| `scribe project snippet` | --json | no |
 | `scribe project sync` | --check, --force, --json, --vendor | yes |
 | `scribe project` | --json | no |
 | `scribe push` | --json | yes |
@@ -104,15 +104,15 @@ scribe adopt --dry-run --json | jq '.data.conflicts'
 | `scribe registry enable` | --json | no |
 | `scribe registry forget` | --json | no |
 | `scribe registry index` | --json | no |
-| `scribe registry list` | --json | no |
+| `scribe registry list` | --json | yes |
 | `scribe registry migrate` | --json | no |
-| `scribe registry resync` | --force-kits, --json, --refresh-kits | yes |
+| `scribe registry resync` | --force-kits, --json, --refresh-kits | no |
 | `scribe registry` | --json | no |
 | `scribe remove` | --json, --no-interaction | no |
 | `scribe resolve` | --json, --ours, --theirs | no |
 | `scribe restore` | --json | no |
 | `scribe schema` | --all, --json, --markdown | no |
-| `scribe show` | --json | no |
+| `scribe show` | --json, --verbose | no |
 | `scribe skill edit` | --add, --inherit, --json, --pin, --remove, --tools | no |
 | `scribe skill repair` | --from, --json, --tool | no |
 | `scribe skill tools` | --disable, --enable, --json, --reset | no |
