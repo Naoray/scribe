@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	stderrors "errors"
+	"strings"
 	"testing"
 
 	clierrors "github.com/Naoray/scribe/internal/cli/errors"
@@ -62,6 +63,25 @@ func TestSchemaCommandAll(t *testing.T) {
 		}
 		if s.OutputSchema == nil {
 			t.Fatalf("%s output_schema = nil", command)
+		}
+	}
+}
+
+func TestSchemaMarkdownListsProjectCommandsOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"schema", "--markdown"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	for _, command := range []string{"scribe project", "scribe project init", "scribe project skill claim"} {
+		prefix := "| `" + command + "` |"
+		if got := strings.Count(out.String(), prefix); got != 1 {
+			t.Errorf("Markdown rows for %q = %d, want 1", command, got)
 		}
 	}
 }
